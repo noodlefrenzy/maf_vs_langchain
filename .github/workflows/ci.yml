@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install locked core environment
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Check formatting
+        run: uv run ruff format --check .
+      - name: Test
+        run: uv run pytest
+      - name: Validate checked-in profiles
+        run: |
+          uv run agent-lab config validate configs/experiments/smoke.toml
+          uv run agent-lab config validate configs/experiments/paired_pilot.toml
+          uv run agent-lab config validate configs/models/qwen35_9b_vllm.toml
+          uv run agent-lab config validate configs/models/qwen35_35b_a3b_gptq_int4_experimental.toml
+      - name: Validate isolated project locks
+        run: |
+          uv lock --check --project runners/maf
+          uv lock --check --project runners/langgraph
+          uv lock --check --project services/incident_mcp
+
+  isolated-api-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: runners/maf
+            module: maf_runner.compat
+          - project: runners/langgraph
+            module: langgraph_runner.compat
+          - project: services/incident_mcp
+            module: incident_lab_mcp.compat
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install isolated locked environment
+        run: uv sync --project "${{ matrix.project }}" --locked
+      - name: Verify current API surface
+        run: uv run --project "${{ matrix.project }}" python -m "${{ matrix.module }}"

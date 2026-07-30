@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "incident-lab-mcp"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "agent-framework-field-lab",
+  "mcp[cli]>=1.24,<2",
+]
+
+[project.scripts]
+incident-lab-mcp = "incident_lab_mcp.server:main"
+
+[tool.uv.sources]
+agent-framework-field-lab = { path = "../..", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/incident_lab_mcp"]

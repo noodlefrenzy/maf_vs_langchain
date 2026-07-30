@@ -1,0 +1,148 @@
+# Comparison protocol
+
+## Unit of comparison
+
+The primary unit is a paired difference for the same:
+
+```text
+(track, scenario generator version, seed, repetition, model profile, budget)
+```
+
+The two members differ only by framework lane. Workflow and harness tracks are
+analyzed separately.
+
+## Before a run
+
+The control plane must:
+
+1. resolve the source commit and require a clean worktree for a measured run;
+2. load and validate the experiment/model profiles;
+3. record package lock hashes and framework versions;
+4. resolve the exact model revision and server flags;
+5. render and hash effective domain prompts and tool catalogs;
+6. generate one hidden world manifest, clone it twice, and verify equal hashes;
+7. allocate isolated workspaces, checkpoints, traces, and state stores;
+8. choose lane order from a recorded randomization seed;
+9. preflight the model, MCP catalogs, Phoenix, and GPU telemetry;
+10. write each immutable run manifest before starting the framework.
+
+If a held-constant hash differs within a pair, the pair is invalid rather than
+quietly included.
+
+## During a run
+
+- Enforce budgets in a framework-neutral outer watchdog.
+- Persist each normalized event before broadcasting it.
+- Record native trace correlation IDs when available.
+- Count a model call at request dispatch, including failed attempts.
+- Count a tool call at MCP request receipt, including invalid calls.
+- Do not add hidden retries in the control plane or MCP service.
+- Apply the same scripted approval policy in unattended trials.
+- For interactive demos, record the human decision and exclude those runs from
+  automated benchmark aggregates unless explicitly labeled.
+- Sample GPU/RAM metrics on the same cadence for every lane.
+- Never inspect evaluator ground truth until execution has terminated.
+
+## Completion states
+
+Every run ends in exactly one state:
+
+- `completed`;
+- `budget_exhausted`;
+- `approval_rejected`;
+- `approval_timeout`;
+- `model_failure`;
+- `tool_service_failure`;
+- `runner_failure`;
+- `cancelled`;
+- `invalid_provenance`.
+
+Partial artifacts are scored when meaningful. Operational failure rates remain
+visible and are not dropped from denominators.
+
+## Task scoring
+
+The scorer reads:
+
+- the hidden world manifest and final world state;
+- the command MCP audit log;
+- the final structured incident artifact;
+- normalized events needed to verify evidence chronology and post-action
+  checks.
+
+The scorer does not read raw prompts or private reasoning. It emits component
+scores, hard safety flags, task-success status, and machine-readable reasons.
+
+## System measures
+
+Derived measures use explicit definitions:
+
+- **wall time**: first `run.started` to terminal event;
+- **time to first visible progress**: `run.started` to first public agent/tool
+  event;
+- **time to mitigation**: `run.started` to approved mitigation execution;
+- **useful tool call**: result contributes a ground-truth evidence class or
+  required post-action check;
+- **redundant tool call**: same normalized query and materially equivalent
+  result after the fact was already available to the same agent/context;
+- **coordination overhead**: model tokens/calls not attributable to specialist
+  evidence collection or final synthesis, reported with transparent rules;
+- **recovery**: run completes the relevant subgoal after an injected failure
+  without operator intervention;
+- **trace completeness**: expected semantic operations with correlated native
+  spans divided by expected operations.
+
+Ambiguous derived measures must include an audit sample before being used in a
+headline claim.
+
+## Statistical plan
+
+The pilot estimates variance and failure modes. Before the measured study:
+
+- choose the primary outcome and smallest practically meaningful difference;
+- estimate sample size from pilot paired differences;
+- freeze exclusions and outlier handling;
+- freeze model/server/config/tool/prompt versions;
+- preregister which comparisons are confirmatory versus exploratory.
+
+For the measured study:
+
+- report paired raw points and distributions;
+- report effect sizes, not only p-values;
+- use paired bootstrap confidence intervals for continuous/ordinal differences;
+- use paired binary tests for success/safety outcomes;
+- correct or clearly label multiple exploratory comparisons;
+- include all operational failures in reliability reporting;
+- publish seeds, manifests, scorer version, and report code in the private repo.
+
+## Model nondeterminism
+
+The configured seed is a requested control, not a guarantee of identical GPU
+generation. Repetitions are therefore mandatory. Exact reproducibility applies
+to world generation and scorer inputs; statistical reproducibility applies to
+model behavior.
+
+## Performance controls on one RTX 4090
+
+- measured runs are sequential;
+- warm and cold cohorts are separated;
+- lane order is balanced within blocks;
+- no other GPU workload is allowed;
+- model server is restarted on a recorded schedule, not selectively;
+- prefix-cache settings are fixed and reported;
+- concurrent subagent requests are allowed only when native to the lane and
+  queue time is recorded;
+- GPU power/thermal state and peak VRAM are recorded;
+- CPU offload settings are held fixed within a model profile.
+
+## Interpretation rules
+
+- A framework failure is still a result.
+- A model tool-call parsing failure is classified separately from a framework
+  routing failure when wire evidence allows.
+- Built-in prompt/harness behavior is part of a harness result.
+- More agents or calls are not evidence of better coordination.
+- The single-agent baseline is required before claiming multi-agent value.
+- A richer native trace UI does not imply better task performance; it is an
+  operability result.
+- A demo is illustrative, never inferential.

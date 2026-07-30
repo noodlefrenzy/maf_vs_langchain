@@ -1,0 +1,24 @@
+.env
+.idea/
+.pytest_cache/
+.ruff_cache/
+.venv/
+**/.venv/
+**/__pycache__/
+*.egg-info/
+*.py[cod]
+.coverage
+coverage.xml
+dist/
+build/
+
+# Runtime state and downloaded/private data.
+runs/
+data/private/
+infra/phoenix/data/
+.cache/
+
+# Local model artifacts must never be committed.
+models/
+*.gguf
+*.safetensors

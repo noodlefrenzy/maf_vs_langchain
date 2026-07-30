@@ -1,0 +1,18 @@
+schema_version = "0.1.0"
+experiment_id = "smoke_all_lanes"
+scenario = "incident_response"
+lanes = ["maf_workflow", "maf_harness", "langgraph", "deep_agents"]
+seeds = [42]
+repetitions = 1
+order = "alternating"
+model_profile = "configs/models/qwen35_9b_vllm.toml"
+fault_profile = "none"
+capture_sensitive = false
+capture_reasoning = false
+
+[budget]
+wall_clock_seconds = 600
+model_calls = 24
+tool_calls = 48
+output_tokens = 24000
+approval_requests = 1

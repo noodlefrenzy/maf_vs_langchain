@@ -1,0 +1,18 @@
+schema_version = "0.1.0"
+experiment_id = "paired_pilot_v1"
+scenario = "incident_response"
+lanes = ["maf_workflow", "langgraph", "maf_harness", "deep_agents"]
+seeds = [101, 202, 303, 404, 505]
+repetitions = 3
+order = "randomized"
+model_profile = "configs/models/qwen35_9b_vllm.toml"
+fault_profile = "standard"
+capture_sensitive = false
+capture_reasoning = false
+
+[budget]
+wall_clock_seconds = 900
+model_calls = 32
+tool_calls = 64
+output_tokens = 32000
+approval_requests = 1
