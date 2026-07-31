@@ -81,6 +81,12 @@ Framework-native objects do not cross the process boundary. A prepared run
 returns a framework-neutral topology description, effective prompt hashes,
 tool catalog hashes, and checkpoint capability metadata.
 
+The implemented v0.1 process boundary is the typed JSON-lines protocol
+documented in [runner-protocol.md](runner-protocol.md). Requests pass
+credentials over stdin, persist only a redacted request view, and expose
+workspace/checkpoint/state/trace paths while keeping the service-owned world
+directory outside the runner message and environment.
+
 ## Matched explicit workflow
 
 The workflow track uses the same logical graph in both runtimes:

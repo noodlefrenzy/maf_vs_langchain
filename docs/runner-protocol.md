@@ -1,0 +1,75 @@
+# Runner protocol v0.1
+
+The control plane and every framework runner communicate over a versioned
+JSON-lines protocol on stdin/stdout. Framework-native objects, credentials in
+environment variables, and hidden world state never cross this boundary.
+
+## Lifecycle
+
+The control plane sends:
+
+1. `prepare`, containing the immutable run manifest, public ticket,
+   role-scoped MCP endpoints, and runner-visible paths;
+2. `start`, after validating the runner's prepared provenance;
+3. zero or more `approval` decisions;
+4. `cancel` when an outer limit or operator cancellation fires;
+5. `shutdown` for graceful process teardown.
+
+The runner emits:
+
+- `prepared`, with topology, effective-prompt, tool-catalog, framework-version,
+  and checkpoint-capability metadata;
+- cumulative `usage` before the corresponding model, tool, output-token, or
+  approval dispatch;
+- ordered normalized `event` envelopes;
+- optional `heartbeat` phase updates;
+- exactly one `terminal` outcome, or an `error`.
+
+Every object rejects unknown fields and carries protocol version `0.1.0`.
+Messages with the wrong run ID, lane, provenance hashes, or event sequence fail
+closed.
+
+## Isolation and secrets
+
+Each run is created exclusively under its run UUID:
+
+```text
+<runs>/<run-id>/
+  manifest.json
+  events.jsonl
+  terminal.json
+  world/                 service/control-plane only
+  workspace/             runner-visible files
+  checkpoints/           framework-native checkpoints
+  state/                 runner-owned durable state
+  native/
+    prepared-run.json
+    run-request.redacted.json
+    runner.stderr.log
+    traces/
+  metrics/
+```
+
+The typed request contains only the runner's role endpoints. Bearer tokens are
+sent through stdin and are redacted from the persisted request view. The world
+directory is neither included in the runner protocol nor exported in its
+environment.
+
+## Outer limits and terminal states
+
+The control plane checks cumulative counters monotonically and cancels on the
+first model-call, tool-call, output-token, or approval-request overage. The
+wall-clock deadline is always external to the framework. A deadline while the
+runner reports `awaiting_approval` becomes `approval_timeout`; other wall-clock
+overruns become `budget_exhausted`.
+
+Launch failure, malformed protocol output, identity drift, invalid event order,
+and a process exit without a terminal message become a persisted
+`runner_failure` or `invalid_provenance` terminal. Cancellation and shutdown
+first use protocol commands, then process termination, and finally a kill only
+after the configured grace period.
+
+The current mock-runner matrix covers success, startup/launch failure, crash,
+wall timeout, approval timeout, explicit cancellation, graceful shutdown, and
+all four usage budgets. Native MAF and LangGraph handlers will plug into this
+same protocol as their lane issues are implemented.
