@@ -38,6 +38,14 @@ must not already exist. Each HMAC-signed token expires with its run. A token is
 accepted only by its exact run and role catalog; all role sessions for that run
 share one serialized world and audit log.
 
+`IncidentWorld.save_checkpoint` writes an immutable `0600` service-owned
+snapshot containing simulated time, fault cadence, evidence, approval state,
+audit history, and the per-world approval-token secret.
+`IncidentWorld.load_checkpoint` restores it in a fresh process. Approval
+timeouts are explicit audited control operations and never change incident
+state. Framework-native checkpoints remain the responsibility of each runner;
+their restart tests must pair runner resume with this service-state resume.
+
 The service binds only to `127.0.0.1`, enables DNS-rebinding protection, and
 exposes `/healthz` and `/readyz`. Exercise the official SDK plus both native
 framework adapters, including authentication, lifecycle, reconnect,

@@ -5,13 +5,15 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent_lab.contracts import (
     ApprovalDecision,
@@ -27,6 +29,31 @@ from agent_lab.tool_catalog import get_tool_definition
 
 FaultProfile = Literal["none", "standard", "adversarial"]
 _ResultModel = TypeVar("_ResultModel", bound=BaseModel)
+
+
+class WorldSnapshot(BaseModel):
+    """Complete service-owned state required to resume one hidden world."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["0.1.0"] = "0.1.0"
+    incident: IncidentCase
+    fault_profile: FaultProfile
+    world_tick: int = Field(ge=0)
+    tool_calls: int = Field(ge=0)
+    audit_log: list[ToolAuditEvent]
+    observed_evidence_ids: set[str]
+    approval_requests: dict[str, ApprovalRequest]
+    approval_records: dict[str, ApprovalRecord]
+    timed_out_request_ids: set[str]
+    hypotheses: list[dict[str, Any]]
+    applied_request_id: str | None = None
+    applied_action: str | None = None
+    mitigation_effective: bool
+    recovery_verified: bool
+    safety_violation: bool
+    last_mitigation_result: dict[str, Any] | None = None
+    approval_secret_hex: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class WorldToolError(RuntimeError):
@@ -50,6 +77,7 @@ class IncidentWorld:
     observed_evidence_ids: set[str] = field(default_factory=set)
     approval_requests: dict[str, ApprovalRequest] = field(default_factory=dict)
     approval_records: dict[str, ApprovalRecord] = field(default_factory=dict)
+    timed_out_request_ids: set[str] = field(default_factory=set)
     hypotheses: list[dict[str, Any]] = field(default_factory=list)
     applied_request_id: str | None = None
     applied_action: str | None = None
@@ -57,6 +85,7 @@ class IncidentWorld:
     recovery_verified: bool = False
     safety_violation: bool = False
     _last_mitigation_result: dict[str, Any] | None = None
+    _approval_secret: bytes = field(default_factory=lambda: secrets.token_bytes(32), repr=False)
     _lock: RLock = field(default_factory=RLock, repr=False)
 
     @classmethod
@@ -86,6 +115,75 @@ class IncidentWorld:
                 safety_violation=self.safety_violation,
             )
 
+    def snapshot(self) -> WorldSnapshot:
+        """Capture hidden state for a service-owned, permission-restricted checkpoint."""
+
+        with self._lock:
+            return WorldSnapshot(
+                incident=self.incident,
+                fault_profile=self.fault_profile,
+                world_tick=self.world_tick,
+                tool_calls=self.tool_calls,
+                audit_log=self.audit_log,
+                observed_evidence_ids=self.observed_evidence_ids,
+                approval_requests=self.approval_requests,
+                approval_records=self.approval_records,
+                timed_out_request_ids=self.timed_out_request_ids,
+                hypotheses=self.hypotheses,
+                applied_request_id=self.applied_request_id,
+                applied_action=self.applied_action,
+                mitigation_effective=self.mitigation_effective,
+                recovery_verified=self.recovery_verified,
+                safety_violation=self.safety_violation,
+                last_mitigation_result=self._last_mitigation_result,
+                approval_secret_hex=self._approval_secret.hex(),
+            )
+
+    def save_checkpoint(self, path: Path) -> Path:
+        """Write one immutable hidden-world checkpoint with owner-only permissions."""
+
+        payload = self.snapshot().model_dump_json(indent=2) + "\n"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(
+            path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        return path
+
+    @classmethod
+    def load_checkpoint(
+        cls,
+        path: Path,
+        *,
+        audit_path: Path | None = None,
+    ) -> IncidentWorld:
+        """Restore a hidden world in a fresh service process."""
+
+        snapshot = WorldSnapshot.model_validate_json(path.read_text(encoding="utf-8"))
+        return cls(
+            incident=IncidentCase.model_validate(snapshot.incident.model_dump(mode="json")),
+            fault_profile=snapshot.fault_profile,
+            audit_path=audit_path,
+            world_tick=snapshot.world_tick,
+            tool_calls=snapshot.tool_calls,
+            audit_log=list(snapshot.audit_log),
+            observed_evidence_ids=set(snapshot.observed_evidence_ids),
+            approval_requests=dict(snapshot.approval_requests),
+            approval_records=dict(snapshot.approval_records),
+            timed_out_request_ids=set(snapshot.timed_out_request_ids),
+            hypotheses=list(snapshot.hypotheses),
+            applied_request_id=snapshot.applied_request_id,
+            applied_action=snapshot.applied_action,
+            mitigation_effective=snapshot.mitigation_effective,
+            recovery_verified=snapshot.recovery_verified,
+            safety_violation=snapshot.safety_violation,
+            _last_mitigation_result=snapshot.last_mitigation_result,
+            _approval_secret=bytes.fromhex(snapshot.approval_secret_hex),
+        )
+
     def get_incident_brief(self) -> dict[str, Any]:
         return self._run_tool(
             "get_incident_brief",
@@ -100,6 +198,7 @@ class IncidentWorld:
                     request.request_id
                     for request in self.approval_requests.values()
                     if request.request_id not in self.approval_records
+                    and request.request_id not in self.timed_out_request_ids
                 ),
                 None,
             )
@@ -109,13 +208,19 @@ class IncidentWorld:
                 state = "mitigated" if self.mitigation_effective else "degraded"
             elif pending:
                 state = "awaiting_approval"
+            elif self.timed_out_request_ids:
+                state = "approval_timed_out"
             else:
                 state = "investigating"
             return {
                 "case_id": self.incident.case_id,
                 "world_tick": self.world_tick,
                 "state": state,
-                "mitigation_request_id": pending or self.applied_request_id,
+                "mitigation_request_id": (
+                    pending
+                    or self.applied_request_id
+                    or next(iter(sorted(self.timed_out_request_ids)), None)
+                ),
                 "recovery_verified": self.recovery_verified,
             }
 
@@ -515,6 +620,13 @@ class IncidentWorld:
                 ToolErrorCode.CONFLICT,
                 f"mitigation request {request_id!r} already has a decision",
             )
+        if request_id in self.timed_out_request_ids:
+            self._raise_and_audit_control(
+                "approval_decision",
+                {"request_id": request_id, "decision": decision.value},
+                ToolErrorCode.CONFLICT,
+                f"mitigation request {request_id!r} already timed out",
+            )
 
         request = self.approval_requests[request_id]
         if decision is ApprovalDecision.EDIT and not edited_action:
@@ -555,6 +667,53 @@ class IncidentWorld:
         )
         return record
 
+    def timeout_mitigation(
+        self,
+        request_id: str,
+        *,
+        decided_by: str = "control-plane-deadline",
+    ) -> dict[str, Any]:
+        """Expire a pending approval without changing incident state."""
+
+        with self._lock:
+            self.world_tick += 1
+            if request_id not in self.approval_requests:
+                self._raise_and_audit_control(
+                    "approval_timeout",
+                    {"request_id": request_id, "decided_by": decided_by},
+                    ToolErrorCode.NOT_FOUND,
+                    f"mitigation request {request_id!r} was not found",
+                )
+            if request_id in self.approval_records:
+                self._raise_and_audit_control(
+                    "approval_timeout",
+                    {"request_id": request_id, "decided_by": decided_by},
+                    ToolErrorCode.CONFLICT,
+                    f"mitigation request {request_id!r} already has a decision",
+                )
+            if request_id in self.timed_out_request_ids:
+                self._raise_and_audit_control(
+                    "approval_timeout",
+                    {"request_id": request_id, "decided_by": decided_by},
+                    ToolErrorCode.CONFLICT,
+                    f"mitigation request {request_id!r} already timed out",
+                )
+
+            self.timed_out_request_ids.add(request_id)
+            result = {
+                "request_id": request_id,
+                "status": "timed_out",
+                "decided_by": decided_by,
+                "decided_tick": self.world_tick,
+            }
+            self._append_audit(
+                operation="approval_timeout",
+                arguments={"request_id": request_id, "decided_by": decided_by},
+                outcome="decided",
+                result=result,
+            )
+            return result
+
     def apply_mitigation(self, request_id: str, approval_token: str) -> dict[str, Any]:
         def result(tick: int) -> dict[str, Any]:
             request = self.approval_requests.get(request_id)
@@ -563,6 +722,12 @@ class IncidentWorld:
                 self._raise(
                     ToolErrorCode.NOT_FOUND,
                     f"mitigation request {request_id!r} was not found",
+                )
+            if request_id in self.timed_out_request_ids:
+                self._raise(
+                    ToolErrorCode.APPROVAL_REJECTED,
+                    f"mitigation request {request_id!r} timed out",
+                    details={"resolution": "timeout"},
                 )
             if record is None:
                 self._raise(
@@ -612,13 +777,14 @@ class IncidentWorld:
             self._last_mitigation_result = mitigation_result
             return mitigation_result
 
-        replay = self.applied_request_id == request_id
-        return self._run_tool(
-            "apply_mitigation",
-            {"request_id": request_id, "approval_token": approval_token},
-            result,
-            state_changed=not replay,
-        )
+        with self._lock:
+            replay = self.applied_request_id == request_id
+            return self._run_tool_locked(
+                "apply_mitigation",
+                {"request_id": request_id, "approval_token": approval_token},
+                result,
+                state_changed=not replay,
+            )
 
     def verify_recovery(self, services: list[str]) -> dict[str, Any]:
         def result(tick: int) -> dict[str, Any]:
@@ -874,7 +1040,7 @@ class IncidentWorld:
 
     def _approval_token(self, request_id: str, action: str) -> str:
         token_input = f"{self.incident.case_id}:{request_id}:{action}".encode()
-        return hashlib.sha256(token_input).hexdigest()
+        return hmac.new(self._approval_secret, token_input, hashlib.sha256).hexdigest()
 
     def _evidence_id(self, source: str, tick: int) -> str:
         digest = hashlib.sha256(f"{self.incident.case_id}:{source}:{tick}".encode()).hexdigest()[

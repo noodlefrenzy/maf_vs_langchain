@@ -1,4 +1,6 @@
 import json
+import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -139,6 +141,94 @@ def test_duplicate_decision_is_audited_conflict() -> None:
     assert world.audit_log[-1].outcome == "failed"
 
 
+def test_approval_timeout_is_audited_and_cannot_execute() -> None:
+    world = IncidentWorld.from_seed(102, fault_profile="none")
+    request = _request_correct_mitigation(world)
+    request_id = str(request["request_id"])
+    state_before_timeout = world.evaluation_state()
+
+    timeout = world.timeout_mitigation(request_id)
+
+    assert timeout["status"] == "timed_out"
+    assert world.evaluation_state() == state_before_timeout
+    assert world.get_incident_status()["state"] == "approval_timed_out"
+    assert world.audit_log[-2].operation == "approval_timeout"
+    assert world.audit_log[-2].outcome == "decided"
+    with pytest.raises(WorldToolError) as timed_out:
+        world.apply_mitigation(request_id, "any-token")
+    assert timed_out.value.error.code is ToolErrorCode.APPROVAL_REJECTED
+    assert timed_out.value.error.details == {"resolution": "timeout"}
+    with pytest.raises(WorldToolError) as late_approval:
+        world.decide_mitigation(
+            request_id,
+            ApprovalDecision.APPROVE,
+            decided_by="late-reviewer",
+        )
+    assert late_approval.value.error.code is ToolErrorCode.CONFLICT
+
+
+def test_world_checkpoint_is_owner_only_and_immutable(tmp_path: Path) -> None:
+    world = IncidentWorld.from_seed(103, fault_profile="none")
+    request = _request_correct_mitigation(world)
+    approval = world.decide_mitigation(
+        str(request["request_id"]),
+        ApprovalDecision.APPROVE,
+        decided_by="scripted-reviewer",
+    )
+    checkpoint = tmp_path / "world-checkpoint.json"
+
+    world.save_checkpoint(checkpoint)
+    restored = IncidentWorld.load_checkpoint(checkpoint)
+    result = restored.apply_mitigation(
+        approval.request_id,
+        approval.approval_token or "",
+    )
+
+    assert stat.S_IMODE(checkpoint.stat().st_mode) == 0o600
+    assert result["effective"] is True
+    assert restored.audit_log[-1].sequence == len(restored.audit_log) - 1
+    with pytest.raises(FileExistsError):
+        world.save_checkpoint(checkpoint)
+
+
+def test_approved_mitigation_resumes_in_a_fresh_process(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "restart-checkpoint.json"
+    command = [
+        "uv",
+        "run",
+        "--project",
+        "services/incident_mcp",
+        "python",
+        "-m",
+        "incident_lab_mcp.restart_compat",
+    ]
+    prepared = subprocess.run(
+        [*command, "prepare", "--checkpoint", str(checkpoint), "--seed", "104"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    resumed = subprocess.run(
+        [*command, "resume", "--checkpoint", str(checkpoint)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    prepared_payload = json.loads(prepared.stdout)
+    resumed_payload = json.loads(resumed.stdout)
+
+    assert prepared_payload["pid"] != resumed_payload["pid"]
+    assert prepared_payload["applied"] is False
+    assert resumed_payload["applied"] is True
+    assert resumed_payload["recovered"] is True
+    assert resumed_payload["request_id"] == prepared_payload["request_id"]
+    assert resumed_payload["audit_sequences"] == list(
+        range(len(resumed_payload["audit_sequences"]))
+    )
+
+
 def test_seeded_transient_failure_schedule_replays_exactly() -> None:
     first = IncidentWorld.from_seed(42, fault_profile="standard")
     second = IncidentWorld.from_seed(42, fault_profile="standard")
@@ -159,6 +249,22 @@ def test_seeded_transient_failure_schedule_replays_exactly() -> None:
     assert first_outcomes == outcomes(second)
     assert first_outcomes[cadence - 1] == ToolErrorCode.TRANSIENT_TIMEOUT.value
     assert first_outcomes[(cadence * 2) - 1] == ToolErrorCode.TRANSIENT_TIMEOUT.value
+
+
+def test_transient_failure_cadence_survives_checkpoint_resume(tmp_path: Path) -> None:
+    world = IncidentWorld.from_seed(42, fault_profile="standard")
+    cadence = world.incident.transient_failure_every
+    for _ in range(cadence - 1):
+        world.get_incident_brief()
+    checkpoint = world.save_checkpoint(tmp_path / "fault-checkpoint.json")
+
+    restored = IncidentWorld.load_checkpoint(checkpoint)
+
+    with pytest.raises(WorldToolError) as scheduled:
+        restored.get_incident_brief()
+    assert scheduled.value.error.code is ToolErrorCode.TRANSIENT_TIMEOUT
+    assert restored.tool_calls == cadence
+    assert len(restored.audit_log) == cadence
 
 
 def test_every_incident_family_recovers_under_correct_mitigation() -> None:
