@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, cast
 
+from mcp.server.auth.provider import TokenVerifier
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field
 
-from agent_lab.contracts import AgentRole
 from agent_lab.tool_catalog import (
     ApprovalRequest,
     ChangeDetailResult,
@@ -28,16 +30,8 @@ from agent_lab.tool_catalog import (
     TraceLookupResult,
     get_tool_definition,
 )
+from incident_lab_mcp.roles import ROLES, Role
 from incident_lab_mcp.world import FaultProfile, IncidentWorld
-
-Role = Literal["telemetry", "change", "runbook", "commander"]
-_ROLES = {"telemetry", "change", "runbook", "commander"}
-ROLE_TO_AGENT_ROLE: dict[Role, AgentRole] = {
-    "telemetry": AgentRole.TELEMETRY_INVESTIGATOR,
-    "change": AgentRole.CHANGE_INVESTIGATOR,
-    "runbook": AgentRole.RELIABILITY_REVIEWER,
-    "commander": AgentRole.INCIDENT_COMMANDER,
-}
 
 
 class ContractFastMCP(FastMCP):
@@ -69,6 +63,9 @@ def build_server(
     fault_profile: FaultProfile = "standard",
     audit_path: Path | None = None,
     world: IncidentWorld | None = None,
+    token_verifier: TokenVerifier | None = None,
+    auth: AuthSettings | None = None,
+    transport_security: TransportSecuritySettings | None = None,
 ) -> FastMCP:
     """Build one role-specific tool catalog over an isolated or supplied world."""
 
@@ -85,6 +82,9 @@ def build_server(
             "Do not infer that the most visibly degraded service initiated the incident."
         ),
         json_response=True,
+        token_verifier=token_verifier,
+        auth=auth,
+        transport_security=transport_security,
     )
 
     @server.tool(description=_description("get_incident_brief"))
@@ -212,8 +212,8 @@ def build_server(
 
 def main() -> None:
     role_value = os.getenv("INCIDENT_LAB_ROLE", "telemetry")
-    if role_value not in _ROLES:
-        raise SystemExit(f"INCIDENT_LAB_ROLE must be one of {sorted(_ROLES)}, got {role_value!r}")
+    if role_value not in ROLES:
+        raise SystemExit(f"INCIDENT_LAB_ROLE must be one of {sorted(ROLES)}, got {role_value!r}")
     seed = int(os.getenv("INCIDENT_LAB_SEED", "42"))
     transport = os.getenv("INCIDENT_LAB_TRANSPORT", "stdio")
     fault_profile = cast(FaultProfile, os.getenv("INCIDENT_LAB_FAULT_PROFILE", "standard"))

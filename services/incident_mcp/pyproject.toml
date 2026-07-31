@@ -14,6 +14,7 @@ dependencies = [
 [project.scripts]
 incident-lab-mcp = "incident_lab_mcp.server:main"
 incident-lab-oracle = "incident_lab_mcp.oracle:main"
+incident-lab-http = "incident_lab_mcp.http_service:main"
 
 [tool.uv.sources]
 agent-framework-field-lab = { path = "../..", editable = true }

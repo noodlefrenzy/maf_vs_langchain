@@ -57,10 +57,11 @@ observable and restartable as its own process.
 The v0.1 design is approved and implementation is underway. The repository now
 contains the frozen shared prompt/tool/schema bundle, a stateful and auditable
 incident simulator, approval-gated mitigation and recovery semantics, the
-deterministic scorer, and a scripted-oracle end-to-end run-bundle path. It does
-not yet claim a benchmark result. The next implementation milestones are the
-authenticated Streamable HTTP world service, control plane, and matched
-explicit-workflow adapters. Run bundles can already be checked with
-`agent-lab bundle validate` and `agent-lab bundle validate-pair`.
+deterministic scorer, a scripted-oracle end-to-end run-bundle path, and the
+authenticated Streamable HTTP service for isolated paired world clones. It
+does not yet claim a benchmark result. The next implementation milestones are
+the control plane and matched explicit-workflow adapters. Run bundles can
+already be checked with `agent-lab bundle validate` and
+`agent-lab bundle validate-pair`.
 
 No license is granted by this private repository unless one is added later.

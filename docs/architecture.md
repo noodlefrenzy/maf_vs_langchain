@@ -127,11 +127,12 @@ and tool catalogs are captured for later interpretation.
 
 ## MCP world isolation
 
-Development starts with role-specific stdio catalogs. The measured design uses
-one Streamable HTTP service per run with:
+Development supports role-specific stdio catalogs. The paired-run substrate
+mounts one role-authenticated Streamable HTTP endpoint per run and role in a
+loopback-only service, with:
 
-- a random run-scoped bearer credential;
-- a server-owned SQLite or equivalent state store;
+- an HMAC-signed, expiring run/lane/role bearer credential;
+- one server-owned, lock-serialized world and audit log per run;
 - role claims that determine the visible tool catalog;
 - a world manifest initialized from the paired seed;
 - explicit simulated time advanced by calls/actions;
@@ -139,8 +140,10 @@ one Streamable HTTP service per run with:
 - an append-only server audit log;
 - no host filesystem or network tools.
 
-The control plane creates world A and B from the same manifest. It validates
-their manifest digests, then passes different credentials to each runner.
+The service currently creates world A and B from the same generated manifest,
+validates their manifest digests, and emits different endpoint credentials for
+each runner. The control-plane milestone will own that lifecycle and pass only
+the appropriate credentials to each runner.
 
 ## Event flow and ordering
 

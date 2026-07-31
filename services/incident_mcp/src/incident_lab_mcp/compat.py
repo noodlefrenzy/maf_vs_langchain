@@ -9,7 +9,8 @@ from agent_lab.tool_catalog import (
     get_tool_definition,
     tool_definitions_for_role,
 )
-from incident_lab_mcp.server import ROLE_TO_AGENT_ROLE, Role, build_server
+from incident_lab_mcp.roles import ROLE_TO_AGENT_ROLE, Role
+from incident_lab_mcp.server import build_server
 
 EXPECTED_CATALOGS: dict[Role, set[str]] = {
     role: {tool.name for tool in tool_definitions_for_role(agent_role)}

@@ -8,6 +8,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import RLock
 from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel
@@ -32,7 +33,7 @@ class WorldToolError(RuntimeError):
     """A stable tool failure with a transport-independent payload."""
 
     def __init__(self, error: ToolError) -> None:
-        super().__init__(f"{error.code.value}: {error.message}")
+        super().__init__(error.model_dump_json())
         self.error = error
 
 
@@ -56,6 +57,7 @@ class IncidentWorld:
     recovery_verified: bool = False
     safety_violation: bool = False
     _last_mitigation_result: dict[str, Any] | None = None
+    _lock: RLock = field(default_factory=RLock, repr=False)
 
     @classmethod
     def from_seed(
@@ -74,14 +76,15 @@ class IncidentWorld:
     def evaluation_state(self) -> WorldEvaluationState:
         """Return only hidden terminal fields that the deterministic scorer needs."""
 
-        return WorldEvaluationState(
-            case_id=self.incident.case_id,
-            applied_request_id=self.applied_request_id,
-            applied_action=self.applied_action,
-            mitigation_effective=self.mitigation_effective,
-            recovery_verified=self.recovery_verified,
-            safety_violation=self.safety_violation,
-        )
+        with self._lock:
+            return WorldEvaluationState(
+                case_id=self.incident.case_id,
+                applied_request_id=self.applied_request_id,
+                applied_action=self.applied_action,
+                mitigation_effective=self.mitigation_effective,
+                recovery_verified=self.recovery_verified,
+                safety_violation=self.safety_violation,
+            )
 
     def get_incident_brief(self) -> dict[str, Any]:
         return self._run_tool(
@@ -481,6 +484,22 @@ class IncidentWorld:
     ) -> ApprovalRecord:
         """Record one approval response; this is a control-plane operation, not a tool."""
 
+        with self._lock:
+            return self._decide_mitigation(
+                request_id,
+                decision,
+                decided_by=decided_by,
+                edited_action=edited_action,
+            )
+
+    def _decide_mitigation(
+        self,
+        request_id: str,
+        decision: ApprovalDecision,
+        *,
+        decided_by: str,
+        edited_action: str | None,
+    ) -> ApprovalRecord:
         self.world_tick += 1
         if request_id not in self.approval_requests:
             self._raise_and_audit_control(
@@ -680,6 +699,22 @@ class IncidentWorld:
         operation: Callable[[int], dict[str, Any]],
         *,
         state_changed: bool = False,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self._run_tool_locked(
+                name,
+                arguments,
+                operation,
+                state_changed=state_changed,
+            )
+
+    def _run_tool_locked(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        operation: Callable[[int], dict[str, Any]],
+        *,
+        state_changed: bool,
     ) -> dict[str, Any]:
         self.tool_calls += 1
         self.world_tick += 1
