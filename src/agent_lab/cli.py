@@ -22,13 +22,20 @@ from agent_lab.bundle_validation import (
 from agent_lab.config import load_experiment, load_model_profile
 from agent_lab.scenario import generate_incident
 
+_DEFAULT_REPOSITORY_ROOT = Path.cwd()
+
 app = typer.Typer(no_args_is_help=True, help="Agent Framework Field Lab.")
 scenario_app = typer.Typer(no_args_is_help=True, help="Generate and inspect scenarios.")
 config_app = typer.Typer(no_args_is_help=True, help="Validate experiment configuration.")
 bundle_app = typer.Typer(no_args_is_help=True, help="Validate run-bundle provenance.")
+experiment_app = typer.Typer(
+    no_args_is_help=True,
+    help="Launch framework-neutral experiment control-plane operations.",
+)
 app.add_typer(scenario_app, name="scenario")
 app.add_typer(config_app, name="config")
 app.add_typer(bundle_app, name="bundle")
+app.add_typer(experiment_app, name="experiment")
 console = Console()
 
 
@@ -121,6 +128,77 @@ def validate_run_pair(
         console.print(render_validation(result))
     if not result.valid:
         raise typer.Exit(code=1)
+
+
+@experiment_app.command("probe")
+def run_experiment_probe(
+    experiment: Annotated[
+        Path,
+        typer.Option(
+            "--experiment",
+            "-e",
+            help="Experiment profile to resolve.",
+        ),
+    ] = Path("configs/experiments/smoke.toml"),
+    runs_dir: Annotated[
+        Path,
+        typer.Option(help="Destination for isolated protocol-probe bundles."),
+    ] = Path("runs"),
+    order_seed: Annotated[
+        int,
+        typer.Option(help="Recorded seed for deterministic lane ordering."),
+    ] = 1729,
+    repository_root: Annotated[
+        Path,
+        typer.Option(help="Repository root containing runner/service projects."),
+    ] = _DEFAULT_REPOSITORY_ROOT,
+) -> None:
+    """Run real native process lifecycle probes without invoking a model."""
+
+    uv = shutil.which("uv")
+    if uv is None:
+        console.print("[red]Cannot run experiment probe: uv is not on PATH.[/red]")
+        raise typer.Exit(code=1)
+    root = repository_root.resolve()
+    command = [
+        uv,
+        "run",
+        "--project",
+        str(root / "services/incident_mcp"),
+        "--no-sync",
+        "python",
+        "-m",
+        "incident_lab_mcp.experiment_control",
+        "--repository-root",
+        str(root),
+        "--experiment",
+        str(experiment),
+        "--runs-dir",
+        str(runs_dir),
+        "--order-seed",
+        str(order_seed),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        if result.stderr:
+            console.print(result.stderr.rstrip())
+        if result.stdout:
+            console.print(result.stdout.rstrip())
+        raise typer.Exit(code=result.returncode)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        console.print("[red]Experiment probe returned invalid JSON.[/red]")
+        if result.stderr:
+            console.print(result.stderr.rstrip())
+        raise typer.Exit(code=1) from exc
+    console.print_json(data=payload)
 
 
 @app.command()

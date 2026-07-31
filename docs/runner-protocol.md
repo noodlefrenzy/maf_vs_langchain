@@ -55,6 +55,27 @@ sent through stdin and are redacted from the persisted request view. The world
 directory is neither included in the runner protocol nor exported in its
 environment.
 
+## Paired protocol preflight
+
+Run the checked-in smoke profile through all native process boundaries with:
+
+```bash
+uv run agent-lab experiment probe \
+  --experiment configs/experiments/smoke.toml \
+  --runs-dir runs \
+  --order-seed 1729
+```
+
+For each seed/repetition block, the command creates equal isolated world
+clones for both comparison tracks, starts the authenticated loopback service,
+resolves native runner descriptors and lock hashes, records deterministic lane
+order, and launches lanes sequentially. It saves an immutable summary index
+plus one terminal bundle and owner-only world checkpoint per lane.
+
+The execution mode is always labeled `protocol_probe`. It invokes no model or
+MCP tool, produces no score, and is infrastructure evidence only. Actual task
+runs remain gated on the lane implementations and their checkpoint metadata.
+
 ## Outer limits and terminal states
 
 The control plane checks cumulative counters monotonically and cancels on the

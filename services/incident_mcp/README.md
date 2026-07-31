@@ -56,6 +56,22 @@ uv run --project services/incident_mcp \
   python -m incident_lab_mcp.http_compat
 ```
 
+Exercise the complete paired control-plane boundary with real isolated runner
+processes but without invoking a model:
+
+```bash
+uv run agent-lab experiment probe \
+  --experiment configs/experiments/smoke.toml \
+  --runs-dir runs \
+  --order-seed 1729
+```
+
+The probe creates one real authenticated world per lane, runs lanes
+sequentially in the recorded order, and saves each hidden-world checkpoint
+under its control-plane-only `world/` directory. Probe bundles intentionally
+contain no task artifacts or scores and must not be treated as experiment
+results.
+
 Validate the simulator, approval/recovery path, deterministic scorer, and run
 bundle without a model:
 
