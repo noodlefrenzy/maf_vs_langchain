@@ -30,6 +30,41 @@ Chat Completions is selected over Responses because it currently has the
 broadest local-server/tool-call compatibility in both stacks. Both runners
 translate one shared `ModelProfile` into their native client construction.
 
+## Cross-framework compatibility gate
+
+Run the hermetic gate before starting or changing a local inference server:
+
+```bash
+uv run python -m agent_lab.model_compat_suite \
+  --output runs/model-compatibility/stub.json
+```
+
+The command starts a loopback-only deterministic Chat Completions stub and runs
+the installed `OpenAIChatCompletionClient` and `ChatOpenAI` clients through the
+same plain, structured, streaming, one-tool, parallel-tool, multi-turn, and
+malformed-tool fixtures. The report contains redacted request and response
+shapes, wire and effective-request SHA-256 hashes, server-default expansion,
+explicit sampling/output/timeout settings, normalized usage including reasoning
+tokens, and package versions. It classifies failures at the model parser,
+client serialization, framework tool loop, or transport layer.
+
+The stub is the CI path and does not install or resolve dependencies. To run the
+same native client fixtures against an already-running loopback vLLM server:
+
+```bash
+uv run python -m agent_lab.model_compat_suite \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model Qwen/Qwen3.5-9B \
+  --output runs/model-compatibility/vllm.json
+```
+
+Live mode records behavioral and client-side usage results. It marks the lack of
+endpoint-side wire/default evidence as a gap; retain the corresponding vLLM
+request log with the report when accepting a model profile. LangChain's parsed
+`with_structured_output` surface does not expose its raw usage object unless raw
+output is requested, so the report records that per-fixture accounting gap
+instead of silently treating it as zero.
+
 ## Fit-check model: Qwen3.5-9B
 
 Qwen3.5-9B:

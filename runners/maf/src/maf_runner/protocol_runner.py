@@ -25,9 +25,7 @@ def descriptor() -> NativeRunnerDescriptor:
         framework_versions={
             "agent-framework-core": version("agent-framework-core"),
             "agent-framework-openai": version("agent-framework-openai"),
-            "agent-framework-orchestrations": version(
-                "agent-framework-orchestrations"
-            ),
+            "agent-framework-orchestrations": version("agent-framework-orchestrations"),
             "agent-framework-tools": version("agent-framework-tools"),
         },
         topology={

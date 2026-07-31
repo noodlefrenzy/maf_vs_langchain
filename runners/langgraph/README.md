@@ -23,3 +23,16 @@ canonical start/finish events, and shuts down cleanly. It deliberately invokes
 no model or MCP tool and advertises checkpoint support as unavailable. The
 actual LangGraph and Deep Agents executions remain owned by their lane
 implementation issues.
+
+The model compatibility entry point exercises the installed native LangChain
+OpenAI client without starting a lane:
+
+```bash
+uv run --project runners/langgraph --no-sync \
+  python -m langgraph_runner.model_compat \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model Qwen/Qwen3.5-9B
+```
+
+Use the top-level `agent_lab.model_compat_suite` command for paired execution,
+wire evidence, and pass/fail comparison.

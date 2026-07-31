@@ -24,7 +24,7 @@ jobs:
       - name: Check formatting
         run: uv run ruff format --check .
       - name: Test
-        run: uv run pytest
+        run: uv run pytest --ignore tests/test_model_compatibility.py
       - name: Validate checked-in profiles
         run: |
           uv run agent-lab config validate configs/experiments/smoke.toml
@@ -59,3 +59,20 @@ jobs:
         run: uv sync --project "${{ matrix.project }}" --locked
       - name: Verify current API surface
         run: uv run --project "${{ matrix.project }}" python -m "${{ matrix.module }}"
+
+  model-compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install locked core environment
+        run: uv sync --locked
+      - name: Install locked native client environments
+        run: |
+          uv sync --project runners/maf --locked
+          uv sync --project runners/langgraph --locked
+      - name: Run cross-framework protocol gate
+        run: uv run pytest tests/test_model_compatibility.py

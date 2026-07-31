@@ -113,14 +113,14 @@ def test_native_runner_protocol_probe(
     assert version_key in result.prepared.framework_versions
     assert result.prepared.checkpoint.resumable is False
     events = [
-        json.loads(line)
-        for line in (result.paths.bundle / "events.jsonl").read_text().splitlines()
+        json.loads(line) for line in (result.paths.bundle / "events.jsonl").read_text().splitlines()
     ]
     assert [event["kind"] for event in events] == ["run.started", "run.finished"]
     assert events[-1]["payload"]["status"] == "completed"
-    assert "native-probe-secret" not in (
-        result.paths.bundle / "native" / "run-request.redacted.json"
-    ).read_text()
+    assert (
+        "native-probe-secret"
+        not in (result.paths.bundle / "native" / "run-request.redacted.json").read_text()
+    )
 
 
 @pytest.mark.parametrize(

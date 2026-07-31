@@ -1,0 +1,41 @@
+import json
+
+from agent_lab.model_compat_contracts import ModelFixture
+from agent_lab.model_compat_suite import run_suite
+
+
+def test_native_clients_pass_protocol_stub_compatibility_suite() -> None:
+    report = run_suite()
+
+    assert report["passed"] is True
+    assert report["errors"] == []
+    assert report["mode"] == "protocol_stub"
+    assert report["wire_capture_gap"] is None
+    assert set(report["frameworks"]) == {"maf", "langchain"}
+
+    for framework in report["frameworks"].values():
+        fixtures = framework["fixtures"]
+        assert set(fixtures) == {fixture.value for fixture in ModelFixture}
+        assert fixtures["malformed_tool"]["failure_class"] == "model_parser"
+        assert fixtures["multi_turn"]["executed_tools"] == [
+            {"name": "lookup_incident", "incident_id": "INC-42"}
+        ]
+        assert fixtures["multi_turn"]["usage"]["reasoning_tokens"] == 4
+        assert len(framework["wire_exchanges"]) == 8
+
+    wire_exchanges = [
+        exchange
+        for framework in report["frameworks"].values()
+        for exchange in framework["wire_exchanges"]
+    ]
+    for exchange in wire_exchanges:
+        assert exchange["validation_errors"] == []
+        assert len(exchange["wire_request_sha256"]) == 64
+        assert len(exchange["effective_request_sha256"]) == 64
+        assert len(exchange["wire_response_sha256"]) == 64
+        assert exchange["request_shape"]
+        assert exchange["response_shape"]
+
+    assert any(exchange["server_default_expansion"] for exchange in wire_exchanges)
+    assert "model-wire-test" not in json.dumps(report)
+    assert report["frameworks"]["langchain"]["fixtures"]["structured"]["usage_gap"]

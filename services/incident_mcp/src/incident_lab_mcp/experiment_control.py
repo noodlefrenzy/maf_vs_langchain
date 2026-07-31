@@ -75,9 +75,7 @@ async def run_experiment_protocol_probe(
     source_commit = _source_commit(repository_root)
     source_tree_sha256 = _source_tree_sha256(repository_root)
     runs_dir.mkdir(parents=True, exist_ok=True)
-    index_path = runs_dir / (
-        f"protocol-probe-{experiment.experiment_id}-order-{order_seed}.json"
-    )
+    index_path = runs_dir / (f"protocol-probe-{experiment.experiment_id}-order-{order_seed}.json")
     if index_path.exists():
         raise FileExistsError(f"protocol probe index already exists at {index_path}")
     control_plane = ControlPlane(runs_dir)
@@ -97,10 +95,7 @@ async def run_experiment_protocol_probe(
             pair_by_lane = {}
             for track, left_lane, right_lane in tracks:
                 receipt = registry.create_pair(
-                    pair_id=(
-                        f"{experiment.experiment_id}:{track}:"
-                        f"seed-{seed}:rep-{repetition}"
-                    ),
+                    pair_id=(f"{experiment.experiment_id}:{track}:seed-{seed}:rep-{repetition}"),
                     seed=seed,
                     left_lane=left_lane,
                     right_lane=right_lane,
@@ -155,9 +150,7 @@ async def run_experiment_protocol_probe(
                         source_commit=source_commit,
                         source_tree_sha256=source_tree_sha256,
                         framework_versions=descriptor.framework_versions,
-                        dependency_lock_sha256=_file_sha256(
-                            repository_root / project / "uv.lock"
-                        ),
+                        dependency_lock_sha256=_file_sha256(repository_root / project / "uv.lock"),
                         prompt_bundle_sha256=hashes["prompt_bundle_sha256"],
                         tool_catalog_sha256=hashes["tool_catalog_sha256"],
                         world_manifest_sha256=receipt.world_manifest_sha256,
@@ -248,9 +241,7 @@ def _selected_tracks(
         name, left, right = track
         present = {left, right} & lane_set
         if present and present != {left, right}:
-            raise ValueError(
-                f"{name} protocol probe requires both {left.value} and {right.value}"
-            )
+            raise ValueError(f"{name} protocol probe requires both {left.value} and {right.value}")
         if present:
             selected.append(track)
     if not selected:
