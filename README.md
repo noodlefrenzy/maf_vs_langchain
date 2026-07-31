@@ -21,10 +21,11 @@ mitigation. Each paired run gets an isolated copy of the same world.
 1. Read the [experiment specification](docs/SPEC.md).
 2. Review the [architecture](docs/architecture.md) and
    [comparison protocol](docs/comparison-protocol.md).
-3. Read the [research summary](docs/research/framework-landscape.md) and
+3. Inspect the [frozen v0.1 contract bundle](docs/contracts-v0.1.md).
+4. Read the [research summary](docs/research/framework-landscape.md) and
    [task selection](docs/research/task-options.md).
-4. Review the decisions in [docs/adr](docs/adr/README.md).
-5. Record the review in
+5. Review the decisions in [docs/adr](docs/adr/README.md).
+6. Record the review in
    [issue #10](https://github.com/noodlefrenzy/maf_vs_langchain/issues/10)
    and follow implementation on the
    [project board](https://github.com/users/noodlefrenzy/projects/21).
@@ -53,10 +54,12 @@ observable and restartable as its own process.
 
 ## Current status
 
-This initial baseline contains the research, specification, ADRs, typed
-contracts, deterministic scenario generator, run-bundle writer, configuration
-profiles, infrastructure skeleton, and implementation backlog. It does not yet
-claim a benchmark result. The first implementation milestone is an end-to-end
-single-seed smoke test in all four matched lanes.
+The v0.1 design is approved and implementation is underway. The repository now
+contains the frozen shared prompt/tool/schema bundle, a stateful and auditable
+incident simulator, approval-gated mitigation and recovery semantics, the
+deterministic scorer, and a scripted-oracle end-to-end run-bundle path. It does
+not yet claim a benchmark result. The next implementation milestones are the
+authenticated Streamable HTTP world service, run-bundle provenance validator,
+control plane, and matched explicit-workflow adapters.
 
 No license is granted by this private repository unless one is added later.

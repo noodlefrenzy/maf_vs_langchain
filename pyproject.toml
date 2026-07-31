@@ -30,6 +30,7 @@ packages = ["src/agent_lab"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+pythonpath = ["services/incident_mcp/src"]
 
 [tool.ruff]
 line-length = 100

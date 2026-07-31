@@ -1,36 +1,23 @@
-# Initial review guide
+# Initial review outcome
 
-This baseline is ready for design review, not benchmark-result review.
+The v0.1 specification was approved for implementation on 2026-07-31. This
+approval keeps seeded incident response, the two matched tracks, role-scoped
+MCP capabilities, Qwen3.5-9B as the fit-check model, and the browser-first
+neutral observer described in the specification.
 
-Use
-[issue #10](https://github.com/noodlefrenzy/maf_vs_langchain/issues/10)
-as the review checklist. Accepted follow-up work is organized on the
+Implementation follows the dependency-ordered backlog on the
 [Agent Framework Field Lab project](https://github.com/users/noodlefrenzy/projects/21).
+The measured-study runtime ceiling remains a Phase 3 operating decision after
+the model characterization and paired pilot establish throughput and variance;
+it does not block the vertical smoke slice.
 
-Recommended reading order:
+The first implementation increment freezes the shared v0.1 prompt/tool/schema
+bundle, makes the incident world stateful and auditable, enforces
+approval-gated idempotent mitigation, adds deterministic scoring, and provides
+a scripted-oracle end-to-end bundle.
 
-1. [Specification](SPEC.md)
-2. [Architecture](architecture.md)
-3. [Framework research](research/framework-landscape.md)
-4. [Task options](research/task-options.md)
-5. [Comparison protocol](comparison-protocol.md)
-6. [ADRs](adr/README.md)
+Items intentionally still deferred to their scheduled phases:
 
-Please focus on these decisions:
-
-- Primary scenario: keep seeded incident response, or promote another task?
-- Comparison shape: approve explicit-workflow and opinionated-harness tracks?
-- Capability separation: approve role-scoped MCP tools that force coordination?
-- Local model: approve Qwen3.5-9B for fit testing and the 35B-A3B quantized model
-  as a separate quality-tier spike?
-- Live experience: start with a browser-based paired observer (recommended) or
-  a Textual terminal UI?
-- Scale: how much overnight GPU time is acceptable for the measured study?
-
-Items intentionally deferred until those decisions are accepted:
-
-- final prompt wording;
-- final MCP tool schemas and error messages;
 - a model download;
 - executable framework adapters;
 - the observer UI;

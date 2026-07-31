@@ -1,6 +1,6 @@
 # Experiment specification
 
-Status: Draft for review
+Status: Approved for implementation
 
 Version: 0.1
 

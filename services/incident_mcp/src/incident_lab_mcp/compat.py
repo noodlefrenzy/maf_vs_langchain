@@ -4,30 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import cast
 
-from incident_lab_mcp.server import Role, build_server
+from agent_lab.tool_catalog import (
+    get_tool_definition,
+    tool_definitions_for_role,
+)
+from incident_lab_mcp.server import ROLE_TO_AGENT_ROLE, Role, build_server
 
-EXPECTED_CATALOGS = {
-    "telemetry": {
-        "get_incident_brief",
-        "query_service_health",
-        "search_logs",
-    },
-    "change": {
-        "get_incident_brief",
-        "list_recent_changes",
-        "get_config_diff",
-    },
-    "runbook": {
-        "get_incident_brief",
-        "search_runbooks",
-    },
-    "commander": {
-        "get_incident_brief",
-        "submit_hypothesis",
-        "request_mitigation",
-    },
+EXPECTED_CATALOGS: dict[Role, set[str]] = {
+    role: {tool.name for tool in tool_definitions_for_role(agent_role)}
+    for role, agent_role in ROLE_TO_AGENT_ROLE.items()
 }
 
 
@@ -38,14 +24,26 @@ async def get_catalog(role: Role) -> set[str]:
 
 async def check_catalogs() -> dict[str, list[str]]:
     observed: dict[str, list[str]] = {}
-    for raw_role, expected in EXPECTED_CATALOGS.items():
-        role = cast(Role, raw_role)
+    for role, expected in EXPECTED_CATALOGS.items():
         catalog = await get_catalog(role)
         if catalog != expected:
             raise RuntimeError(
                 f"catalog mismatch for {role}: expected {sorted(expected)}, "
                 f"observed {sorted(catalog)}"
             )
+        server = build_server(role, seed=42, fault_profile="none")
+        for observed_tool in await server.list_tools():
+            definition = get_tool_definition(observed_tool.name)
+            if observed_tool.description != definition.description:
+                raise RuntimeError(f"description mismatch for {observed_tool.name}")
+            expected_input = definition.input_model.model_json_schema()
+            observed_input = observed_tool.inputSchema
+            if observed_input != expected_input:
+                raise RuntimeError(f"input schema mismatch for {observed_tool.name}")
+            expected_output = definition.output_model.model_json_schema()
+            observed_output = observed_tool.outputSchema
+            if observed_output != expected_output:
+                raise RuntimeError(f"output schema mismatch for {observed_tool.name}")
         observed[role] = sorted(catalog)
     return observed
 

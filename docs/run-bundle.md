@@ -10,7 +10,9 @@ Each execution writes an immutable directory under `runs/<run-id>/`.
 ├── terminal.json
 ├── artifacts/
 │   ├── incident-report.json
-│   └── evidence-ledger.json
+│   ├── evidence-ledger.json
+│   ├── command-audit.json
+│   └── evaluation-state.json
 ├── checkpoints/
 │   └── index.json
 ├── native/
@@ -21,15 +23,16 @@ Each execution writes an immutable directory under `runs/<run-id>/`.
     └── host.jsonl
 ```
 
-Only `manifest.json`, `events.jsonl`, `artifacts/`, and `scores.json` are
-implemented in the core skeleton. The remaining entries are part of the first
-vertical slice.
+The core writer creates this full directory shape and writes immutable
+manifests, events, JSON artifacts, scores, and terminal records. Checkpoint,
+native-trace, and metric producers will populate their directories in the
+framework vertical slices.
 
 ## `manifest.json`
 
 Written before execution and never updated. It contains:
 
-- run, experiment, lane, seed, and repetition identifiers;
+- run, experiment, lane, generator version, seed, and repetition identifiers;
 - exact model profile;
 - budgets;
 - source commit and dependency/image/model digests;

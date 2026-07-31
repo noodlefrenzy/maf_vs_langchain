@@ -5,8 +5,11 @@ from __future__ import annotations
 import hashlib
 import random
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
+GENERATOR_VERSION = "0.1.0"
 
 
 class IncidentVariant(StrEnum):
@@ -26,6 +29,7 @@ class IncidentCase(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    generator_version: Literal["0.1.0"] = GENERATOR_VERSION
     case_id: str
     seed: int
     variant: IncidentVariant
@@ -134,6 +138,7 @@ def generate_incident(seed: int) -> IncidentCase:
     )
 
     return IncidentCase(
+        generator_version=GENERATOR_VERSION,
         case_id=case_id,
         seed=seed,
         variant=variant,

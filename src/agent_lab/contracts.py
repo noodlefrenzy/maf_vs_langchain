@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SCHEMA_VERSION = "0.1.0"
 
@@ -59,6 +59,46 @@ class ApprovalDecision(StrEnum):
     APPROVE = "approve"
     EDIT = "edit"
     REJECT = "reject"
+
+
+class ApprovalStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXECUTED = "executed"
+
+
+class AgentRole(StrEnum):
+    """Stable role identifiers shared by prompts, tools, and event actors."""
+
+    INCIDENT_COMMANDER = "incident_commander"
+    TELEMETRY_INVESTIGATOR = "telemetry_investigator"
+    CHANGE_INVESTIGATOR = "change_investigator"
+    RELIABILITY_REVIEWER = "reliability_reviewer"
+
+
+class CapabilityGroup(StrEnum):
+    """MCP capability groups used to enforce role boundaries."""
+
+    INCIDENT = "incident"
+    TELEMETRY = "telemetry"
+    CHANGES = "changes"
+    RUNBOOKS = "runbooks"
+    COMMAND = "command"
+
+
+class ToolErrorCode(StrEnum):
+    """Frozen, transport-independent MCP error taxonomy."""
+
+    INVALID_ARGUMENTS = "invalid_arguments"
+    PERMISSION_DENIED = "permission_denied"
+    NOT_FOUND = "not_found"
+    TRANSIENT_TIMEOUT = "transient_timeout"
+    APPROVAL_REQUIRED = "approval_required"
+    APPROVAL_REJECTED = "approval_rejected"
+    STALE_APPROVAL = "stale_approval"
+    CONFLICT = "conflict"
+    INTERNAL_ERROR = "internal_error"
 
 
 class TerminalStatus(StrEnum):
@@ -160,6 +200,7 @@ class RunManifest(BaseModel):
     experiment_id: str
     lane: FrameworkLane
     scenario: str
+    scenario_generator_version: str
     scenario_seed: int
     repetition: int = Field(ge=0)
     model: ModelProfile
@@ -186,6 +227,89 @@ class EvidenceItem(BaseModel):
     world_tick: int = Field(ge=0)
     result_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     supports: Literal["root_cause", "mitigation", "recovery"]
+
+
+class EvidenceLedger(BaseModel):
+    """Auditable evidence exchanged between specialists and the commander."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["0.1.0"] = SCHEMA_VERSION
+    case_id: str
+    items: list[EvidenceItem] = Field(default_factory=list)
+
+
+class ApprovalRequest(BaseModel):
+    """A proposed simulator action that has not changed world state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["0.1.0"] = SCHEMA_VERSION
+    request_id: str
+    case_id: str
+    proposed_action: str
+    rationale: str
+    evidence_ids: list[str] = Field(min_length=1)
+    requested_by: str
+    created_tick: int = Field(ge=0)
+    status: Literal[ApprovalStatus.PENDING] = ApprovalStatus.PENDING
+
+
+class ApprovalRecord(BaseModel):
+    """Audited human or scripted decision for one mitigation request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["0.1.0"] = SCHEMA_VERSION
+    request_id: str
+    case_id: str
+    decision: ApprovalDecision
+    decided_by: str
+    decided_tick: int = Field(ge=0)
+    action_to_execute: str | None = None
+    approval_token: str | None = None
+
+    @model_validator(mode="after")
+    def validate_decision_payload(self) -> ApprovalRecord:
+        if self.decision in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:
+            if not self.action_to_execute or not self.approval_token:
+                raise ValueError(
+                    "approved or edited decisions require an action and approval token"
+                )
+        elif self.action_to_execute is not None or self.approval_token is not None:
+            raise ValueError("rejected decisions cannot authorize an action")
+        return self
+
+
+class ToolError(BaseModel):
+    """Stable error payload returned by the simulator without hidden retries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["0.1.0"] = SCHEMA_VERSION
+    code: ToolErrorCode
+    message: str
+    retryable: bool
+    world_tick: int = Field(ge=0)
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolAuditEvent(BaseModel):
+    """One append-only simulator call/control record used by the evaluator."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["0.1.0"] = SCHEMA_VERSION
+    sequence: int = Field(ge=0)
+    world_tick: int = Field(ge=0)
+    operation: str
+    arguments: dict[str, Any]
+    outcome: Literal["succeeded", "failed", "decided"]
+    evidence_id: str | None = None
+    result_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    result_size_bytes: int | None = Field(default=None, ge=0)
+    error: ToolError | None = None
+    state_changed: bool = False
 
 
 class IncidentReport(BaseModel):
@@ -220,3 +344,17 @@ class RunTerminal(BaseModel):
     used_tool_calls: int = Field(ge=0)
     used_output_tokens: int = Field(ge=0)
     elapsed_seconds: float = Field(ge=0)
+
+
+class WorldEvaluationState(BaseModel):
+    """Minimal hidden terminal state passed from the simulator to the scorer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["0.1.0"] = SCHEMA_VERSION
+    case_id: str
+    applied_request_id: str | None = None
+    applied_action: str | None = None
+    mitigation_effective: bool
+    recovery_verified: bool
+    safety_violation: bool

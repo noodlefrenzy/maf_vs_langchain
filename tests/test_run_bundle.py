@@ -1,12 +1,16 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from agent_lab.contracts import (
     Budget,
     EventKind,
     FrameworkLane,
     ModelProfile,
     RunManifest,
+    RunTerminal,
+    TerminalStatus,
 )
 from agent_lab.run_bundle import RunBundle
 
@@ -16,6 +20,7 @@ def _manifest() -> RunManifest:
         experiment_id="test_experiment",
         lane=FrameworkLane.DEEP_AGENTS,
         scenario="incident_response",
+        scenario_generator_version="0.1.0",
         scenario_seed=42,
         repetition=0,
         model=ModelProfile(
@@ -55,3 +60,37 @@ def test_run_bundle_assigns_ordered_sequence_numbers(tmp_path: Path) -> None:
     events = [json.loads(line) for line in lines]
     assert [event["sequence"] for event in events] == [0, 1]
     assert json.loads((bundle.path / "scores.json").read_text())["task_success"] == 1
+
+
+def test_run_bundle_writes_immutable_artifact_and_terminal(tmp_path: Path) -> None:
+    manifest = _manifest()
+    bundle = RunBundle.create(tmp_path, manifest)
+    artifact = bundle.write_artifact("evidence-ledger.json", {"items": []})
+    terminal = RunTerminal(
+        run_id=manifest.run_id,
+        status=TerminalStatus.COMPLETED,
+        reason="scripted fixture completed",
+        used_model_calls=0,
+        used_tool_calls=3,
+        used_output_tokens=0,
+        elapsed_seconds=0.1,
+    )
+    terminal_path = bundle.write_terminal(terminal)
+
+    assert json.loads(artifact.read_text(encoding="utf-8")) == {"items": []}
+    assert json.loads(terminal_path.read_text(encoding="utf-8"))["status"] == "completed"
+    assert (bundle.path / "checkpoints").is_dir()
+    assert (bundle.path / "native").is_dir()
+    assert (bundle.path / "metrics").is_dir()
+
+    with pytest.raises(FileExistsError):
+        bundle.write_artifact("evidence-ledger.json", {"items": []})
+    with pytest.raises(FileExistsError):
+        bundle.write_terminal(terminal)
+
+
+def test_run_bundle_rejects_artifact_path_traversal(tmp_path: Path) -> None:
+    bundle = RunBundle.create(tmp_path, _manifest())
+
+    with pytest.raises(ValueError):
+        bundle.write_artifact("../outside.json", {})
