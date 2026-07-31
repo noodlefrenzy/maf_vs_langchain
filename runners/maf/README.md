@@ -51,3 +51,20 @@ uv run --project runners/maf --no-sync python -m maf_runner.model_compat \
 
 Use the top-level `agent_lab.model_compat_suite` command for paired execution,
 wire evidence, and pass/fail comparison.
+
+The first executable `maf_workflow` slice uses a native `WorkflowBuilder`
+fan-out from one dispatcher to telemetry, change, and reliability agents, then
+a synchronized fan-in to a deterministic evidence gate. Each agent receives
+only its role-authenticated MCP endpoint and the shared model profile. Run the
+live slice against the aligned lonestar model through the direct SSH tunnel:
+
+```bash
+uv run --project services/incident_mcp --no-sync python -m \
+  incident_lab_mcp.maf_workflow_compat \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF:UD-Q4_K_XL
+```
+
+This phase is read-only: it must pass the evidence gate without creating an
+approval request or changing the incident world. Commander synthesis,
+approval, mitigation, and recovery are the next workflow nodes.
