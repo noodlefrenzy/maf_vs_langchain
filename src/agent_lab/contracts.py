@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SCHEMA_VERSION = "0.1.0"
+Sha256Hex = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+GitCommit = Annotated[str, Field(pattern=r"^[a-f0-9]{40}$")]
 
 
 class FrameworkLane(StrEnum):
@@ -205,11 +207,13 @@ class RunManifest(BaseModel):
     repetition: int = Field(ge=0)
     model: ModelProfile
     budget: Budget
-    source_commit: str
-    framework_versions: dict[str, str]
-    prompt_bundle_sha256: str
-    tool_catalog_sha256: str
-    world_manifest_sha256: str
+    source_commit: GitCommit
+    source_tree_sha256: Sha256Hex
+    framework_versions: dict[str, str] = Field(min_length=1)
+    dependency_lock_sha256: Sha256Hex
+    prompt_bundle_sha256: Sha256Hex
+    tool_catalog_sha256: Sha256Hex
+    world_manifest_sha256: Sha256Hex
     started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     host_fingerprint: dict[str, str] = Field(default_factory=dict)
 

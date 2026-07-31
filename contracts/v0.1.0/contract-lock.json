@@ -1,6 +1,6 @@
 {
-  "artifact_schemas_sha256": "235f334446c52f9cb892f7e57c412782f0c0b515cf66161901012d6aeddabcd2",
-  "contract_bundle_sha256": "2889b922b6c89d933cdf4aaae2a6488c2ea817e85db8573b76f945a38620235c",
+  "artifact_schemas_sha256": "7b954d4ab9fa8aa9e6c6983ca6368e4bf5061ba33cb3b98839b33e3c53f3ae32",
+  "contract_bundle_sha256": "6b25773e0bbfc70a8c904d54e716d13943de95db1b47ac76af6c6cd68cf17cbc",
   "error_taxonomy_sha256": "745145a68ca360b4854ee30beb6e0a27cc17f94cf583b254123073aac76b7c51",
   "prompt_bundle_sha256": "864ed9ac2d825ff73b46747ed29039bc6da2b4505bca7a91b1bce34ac97ada9d",
   "schema_version": "0.1.0",

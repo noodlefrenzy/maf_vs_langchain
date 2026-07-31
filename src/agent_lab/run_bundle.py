@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -37,8 +38,10 @@ class RunBundle:
         (path / "checkpoints").mkdir()
         (path / "native").mkdir()
         (path / "metrics").mkdir()
-        (path / "manifest.json").write_text(
-            manifest.model_dump_json(indent=2) + "\n",
+        manifest_bytes = (manifest.model_dump_json(indent=2) + "\n").encode("utf-8")
+        (path / "manifest.json").write_bytes(manifest_bytes)
+        (path / "manifest.sha256").write_text(
+            hashlib.sha256(manifest_bytes).hexdigest() + "\n",
             encoding="utf-8",
         )
         (path / "events.jsonl").touch()

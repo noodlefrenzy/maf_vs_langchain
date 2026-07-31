@@ -59,7 +59,8 @@ contains the frozen shared prompt/tool/schema bundle, a stateful and auditable
 incident simulator, approval-gated mitigation and recovery semantics, the
 deterministic scorer, and a scripted-oracle end-to-end run-bundle path. It does
 not yet claim a benchmark result. The next implementation milestones are the
-authenticated Streamable HTTP world service, run-bundle provenance validator,
-control plane, and matched explicit-workflow adapters.
+authenticated Streamable HTTP world service, control plane, and matched
+explicit-workflow adapters. Run bundles can already be checked with
+`agent-lab bundle validate` and `agent-lab bundle validate-pair`.
 
 No license is granted by this private repository unless one is added later.

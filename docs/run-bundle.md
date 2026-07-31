@@ -5,6 +5,7 @@ Each execution writes an immutable directory under `runs/<run-id>/`.
 ```text
 <run-id>/
 ├── manifest.json
+├── manifest.sha256
 ├── events.jsonl
 ├── scores.json
 ├── terminal.json
@@ -12,7 +13,8 @@ Each execution writes an immutable directory under `runs/<run-id>/`.
 │   ├── incident-report.json
 │   ├── evidence-ledger.json
 │   ├── command-audit.json
-│   └── evaluation-state.json
+│   ├── evaluation-state.json
+│   └── world-manifest.json
 ├── checkpoints/
 │   └── index.json
 ├── native/
@@ -35,7 +37,7 @@ Written before execution and never updated. It contains:
 - run, experiment, lane, generator version, seed, and repetition identifiers;
 - exact model profile;
 - budgets;
-- source commit and dependency/image/model digests;
+- source commit, exact source-tree digest, and dependency/image/model digests;
 - framework versions;
 - effective prompt, tool catalog, and world manifest hashes;
 - host/GPU/server fingerprint;
@@ -85,7 +87,7 @@ without retaining sensitive content.
 
 ## Validation
 
-A bundle validator will check:
+`agent-lab bundle validate <run-dir>` checks:
 
 - known schema version;
 - immutable-manifest hash;
@@ -97,5 +99,11 @@ A bundle validator will check:
 - scorer version and ground-truth manifest linkage;
 - within-pair held-constant hashes.
 
-Invalid bundles stay available for debugging but are marked
-`invalid_provenance` and excluded from task-performance inference.
+`agent-lab bundle validate-pair <left-run-dir> <right-run-dir>` additionally
+checks matched lane topology and held-constant prompt, tool, world, model,
+budget, source, seed, repetition, and generator provenance. Framework
+dependency-lock digests are required but intentionally lane-specific.
+
+Invalid bundles stay available for debugging. The validator writes
+`validation.json` or `pair-validation.json` with
+`inference_status = "invalid_provenance"` and returns a nonzero CLI status.

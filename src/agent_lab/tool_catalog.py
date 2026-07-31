@@ -429,14 +429,28 @@ def tool_catalog_payload() -> dict[str, object]:
 def artifact_schema_payload() -> dict[str, object]:
     """Return command artifacts that all lanes must read and write identically."""
 
-    from agent_lab.contracts import EvidenceLedger, IncidentReport, RunTerminal
+    from agent_lab.contracts import (
+        EvidenceLedger,
+        IncidentReport,
+        NormalizedEvent,
+        RunManifest,
+        RunTerminal,
+        ToolAuditEvent,
+        WorldEvaluationState,
+    )
+    from agent_lab.scenario import IncidentCase
 
     return {
         "schema_version": SCHEMA_VERSION,
+        "run_manifest": RunManifest.model_json_schema(),
+        "normalized_event": NormalizedEvent.model_json_schema(),
         "incident_report": IncidentReport.model_json_schema(),
         "evidence_ledger": EvidenceLedger.model_json_schema(),
         "approval_request": ApprovalRequest.model_json_schema(),
         "approval_record": ApprovalRecord.model_json_schema(),
+        "tool_audit_event": ToolAuditEvent.model_json_schema(),
+        "world_evaluation_state": WorldEvaluationState.model_json_schema(),
+        "incident_world_manifest": IncidentCase.model_json_schema(),
         "terminal": RunTerminal.model_json_schema(),
         "tool_result_envelope": ToolResultEnvelope.model_json_schema(),
     }

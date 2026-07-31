@@ -28,6 +28,7 @@ def test_scripted_oracle_writes_complete_successful_bundle(tmp_path: Path) -> No
         "evaluation-state.json",
         "incident-report.json",
         "evidence-ledger.json",
+        "world-manifest.json",
     }
 
     events = [

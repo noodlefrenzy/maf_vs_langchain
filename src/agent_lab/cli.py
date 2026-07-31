@@ -14,14 +14,21 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
+from agent_lab.bundle_validation import (
+    render_validation,
+    validate_bundle,
+    validate_pair,
+)
 from agent_lab.config import load_experiment, load_model_profile
 from agent_lab.scenario import generate_incident
 
 app = typer.Typer(no_args_is_help=True, help="Agent Framework Field Lab.")
 scenario_app = typer.Typer(no_args_is_help=True, help="Generate and inspect scenarios.")
 config_app = typer.Typer(no_args_is_help=True, help="Validate experiment configuration.")
+bundle_app = typer.Typer(no_args_is_help=True, help="Validate run-bundle provenance.")
 app.add_typer(scenario_app, name="scenario")
 app.add_typer(config_app, name="config")
+app.add_typer(bundle_app, name="bundle")
 console = Console()
 
 
@@ -67,6 +74,53 @@ def validate_config(path: Path) -> None:
     console.print(
         f"[green]Valid {profile_type} profile[/green]: {profile.model_dump_json(exclude_none=True)}"
     )
+
+
+@bundle_app.command("validate")
+def validate_run_bundle(
+    path: Path,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+    no_mark: Annotated[
+        bool,
+        typer.Option(help="Do not write validation.json into the bundle."),
+    ] = False,
+) -> None:
+    """Validate one run bundle and mark its inference eligibility."""
+
+    result = validate_bundle(path, mark=not no_mark)
+    if json_output:
+        console.print_json(result.model_dump_json())
+    else:
+        console.print(render_validation(result))
+    if not result.valid:
+        raise typer.Exit(code=1)
+
+
+@bundle_app.command("validate-pair")
+def validate_run_pair(
+    left: Path,
+    right: Path,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+    no_mark: Annotated[
+        bool,
+        typer.Option(help="Do not write pair validation sidecars."),
+    ] = False,
+) -> None:
+    """Validate a matched explicit-workflow or harness pair."""
+
+    result = validate_pair(left, right, mark=not no_mark)
+    if json_output:
+        console.print_json(result.model_dump_json())
+    else:
+        console.print(render_validation(result))
+    if not result.valid:
+        raise typer.Exit(code=1)
 
 
 @app.command()

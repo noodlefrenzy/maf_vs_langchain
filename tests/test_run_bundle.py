@@ -40,7 +40,9 @@ def _manifest() -> RunManifest:
             approval_requests=1,
         ),
         source_commit="0" * 40,
+        source_tree_sha256="5" * 64,
         framework_versions={"deepagents": "test"},
+        dependency_lock_sha256="4" * 64,
         prompt_bundle_sha256="1" * 64,
         tool_catalog_sha256="2" * 64,
         world_manifest_sha256="3" * 64,
@@ -82,6 +84,7 @@ def test_run_bundle_writes_immutable_artifact_and_terminal(tmp_path: Path) -> No
     assert (bundle.path / "checkpoints").is_dir()
     assert (bundle.path / "native").is_dir()
     assert (bundle.path / "metrics").is_dir()
+    assert len((bundle.path / "manifest.sha256").read_text().strip()) == 64
 
     with pytest.raises(FileExistsError):
         bundle.write_artifact("evidence-ledger.json", {"items": []})

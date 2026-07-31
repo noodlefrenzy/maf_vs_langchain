@@ -61,11 +61,13 @@ def run_oracle(
         model=model,
         budget=experiment.budget,
         source_commit=_source_commit(),
+        source_tree_sha256=_source_tree_sha256(),
         framework_versions={
             "agent-framework-field-lab": _package_version("agent-framework-field-lab"),
             "incident-lab-mcp": _package_version("incident-lab-mcp"),
             "scripted-oracle": "0.1.0",
         },
+        dependency_lock_sha256=_file_sha256(Path("services/incident_mcp/uv.lock")),
         prompt_bundle_sha256=hashes["prompt_bundle_sha256"],
         tool_catalog_sha256=hashes["tool_catalog_sha256"],
         world_manifest_sha256=sha256_payload(world.incident.model_dump(mode="json")),
@@ -284,6 +286,7 @@ def run_oracle(
             "evidence-ledger.json": ledger.model_dump(mode="json"),
             "command-audit.json": [event.model_dump(mode="json") for event in world.audit_log],
             "evaluation-state.json": world.evaluation_state().model_dump(mode="json"),
+            "world-manifest.json": world.incident.model_dump(mode="json"),
         }
         for name, artifact in artifacts.items():
             bundle.write_artifact(name, artifact)
@@ -382,6 +385,23 @@ def _source_commit() -> str:
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
+def _source_tree_sha256() -> str:
+    result = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    digest = hashlib.sha256()
+    for raw_path in sorted(filter(None, result.stdout.split(b"\0"))):
+        path = Path(raw_path.decode())
+        digest.update(raw_path)
+        digest.update(b"\0")
+        digest.update(path.read_bytes() if path.is_file() else b"[MISSING]")
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def _package_version(package: str) -> str:
     try:
         return version(package)
@@ -391,6 +411,10 @@ def _package_version(package: str) -> str:
 
 def _artifact_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value)).hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def main() -> None:
