@@ -10,6 +10,16 @@ This process will host two adapters over the same shared contracts:
 The runner converts LangGraph/Deep Agents streaming events to
 `NormalizedEvent` and also emits native LangChain/OpenInference telemetry.
 
-The executable adapter is intentionally a backlog item. Implement it only
-after the prompt bundle and MCP tool schemas are frozen for the first smoke
-test.
+The native process now implements the shared lifecycle boundary:
+
+```bash
+uv run --project runners/langgraph --no-sync \
+  python -m langgraph_runner.protocol_runner --describe
+```
+
+`--protocol-probe` accepts the versioned JSON-lines protocol on stdin, reports
+the installed LangGraph/Deep Agents versions and planned lane topology, emits
+canonical start/finish events, and shuts down cleanly. It deliberately invokes
+no model or MCP tool and advertises checkpoint support as unavailable. The
+actual LangGraph and Deep Agents executions remain owned by their lane
+implementation issues.

@@ -11,6 +11,16 @@ The runner owns translation from native workflow/agent events into
 `NormalizedEvent`. Native OpenTelemetry spans are exported in parallel; they
 are not used as the canonical scorer input.
 
-The executable adapter is intentionally a backlog item. Implement it only
-after the prompt bundle and MCP tool schemas are frozen for the first smoke
-test.
+The native process now implements the shared lifecycle boundary:
+
+```bash
+uv run --project runners/maf --no-sync \
+  python -m maf_runner.protocol_runner --describe
+```
+
+`--protocol-probe` accepts the versioned JSON-lines protocol on stdin, reports
+the installed MAF versions and planned lane topology, emits canonical
+start/finish events, and shuts down cleanly. It deliberately invokes no model
+or MCP tool and advertises checkpoint support as unavailable. The actual
+Workflow and Harness executions remain owned by their lane implementation
+issues.

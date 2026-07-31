@@ -69,7 +69,10 @@ and a process exit without a terminal message become a persisted
 first use protocol commands, then process termination, and finally a kill only
 after the configured grace period.
 
-The current mock-runner matrix covers success, startup/launch failure, crash,
-wall timeout, approval timeout, explicit cancellation, graceful shutdown, and
-all four usage budgets. Native MAF and LangGraph handlers will plug into this
-same protocol as their lane issues are implemented.
+The mock-runner matrix covers success, startup/launch failure, crash, wall
+timeout, approval timeout, explicit cancellation, graceful shutdown, and all
+four usage budgets. Native MAF and LangGraph processes also implement the
+boundary in an explicit `protocol_probe` mode. They report installed framework
+versions and planned topology, emit canonical run lifecycle events, and prove
+process compatibility without calling a model or MCP tool. Actual lane
+execution plugs into the same handlers in the lane implementation issues.
