@@ -19,6 +19,6 @@ infra/phoenix/data/
 .cache/
 
 # Local model artifacts must never be committed.
-models/
+/models/
 *.gguf
 *.safetensors
