@@ -24,6 +24,10 @@ mitigation. Each paired run gets an isolated copy of the same world.
 3. Read the [research summary](docs/research/framework-landscape.md) and
    [task selection](docs/research/task-options.md).
 4. Review the decisions in [docs/adr](docs/adr/README.md).
+5. Record the review in
+   [issue #10](https://github.com/noodlefrenzy/maf_vs_langchain/issues/10)
+   and follow implementation on the
+   [project board](https://github.com/users/noodlefrenzy/projects/21).
 
 The core skeleton is runnable without either agent framework or a downloaded
 model:

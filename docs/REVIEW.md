@@ -2,6 +2,11 @@
 
 This baseline is ready for design review, not benchmark-result review.
 
+Use
+[issue #10](https://github.com/noodlefrenzy/maf_vs_langchain/issues/10)
+as the review checklist. Accepted follow-up work is organized on the
+[Agent Framework Field Lab project](https://github.com/users/noodlefrenzy/projects/21).
+
 Recommended reading order:
 
 1. [Specification](SPEC.md)
