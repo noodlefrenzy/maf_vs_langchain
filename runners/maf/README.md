@@ -21,9 +21,24 @@ uv run --project runners/maf --no-sync \
 `--protocol-probe` accepts the versioned JSON-lines protocol on stdin, reports
 the installed MAF versions and planned lane topology, emits canonical
 start/finish events, and shuts down cleanly. It deliberately invokes no model
-or MCP tool and advertises checkpoint support as unavailable. The actual
-Workflow and Harness executions remain owned by their lane implementation
-issues.
+or MCP tool. The explicit Workflow substrate advertises restart-safe
+`FileCheckpointStorage`; Harness checkpointing remains unavailable. The actual
+Workflow and Harness executions remain owned by their lane implementation issues.
+
+The checkpoint compatibility entry point builds a native approval-request
+workflow, pauses it, and resumes its owner-only file checkpoint in a fresh
+process:
+
+```bash
+uv run --project runners/maf --no-sync \
+  python -m maf_runner.checkpoint_compat prepare \
+  --checkpoint-path /tmp/maf-checkpoints \
+  --request-id mitigation-request-1
+```
+
+The cross-process test pairs that checkpoint with a separate incident-world
+checkpoint and fresh service process; run it with
+`uv run pytest tests/test_framework_restart.py`.
 
 The model compatibility entry point exercises the installed native MAF OpenAI
 client without starting a lane:

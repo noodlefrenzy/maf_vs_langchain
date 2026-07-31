@@ -24,7 +24,10 @@ jobs:
       - name: Check formatting
         run: uv run ruff format --check .
       - name: Test
-        run: uv run pytest --ignore tests/test_model_compatibility.py
+        run: |
+          uv run pytest \
+            --ignore tests/test_model_compatibility.py \
+            --ignore tests/test_framework_restart.py
       - name: Validate checked-in profiles
         run: |
           uv run agent-lab config validate configs/experiments/smoke.toml
@@ -60,7 +63,7 @@ jobs:
       - name: Verify current API surface
         run: uv run --project "${{ matrix.project }}" python -m "${{ matrix.module }}"
 
-  model-compatibility:
+  native-integration:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -74,5 +77,9 @@ jobs:
         run: |
           uv sync --project runners/maf --locked
           uv sync --project runners/langgraph --locked
-      - name: Run cross-framework protocol gate
-        run: uv run pytest tests/test_model_compatibility.py
+          uv sync --project services/incident_mcp --locked
+      - name: Run native integration gates
+        run: |
+          uv run pytest \
+            tests/test_model_compatibility.py \
+            tests/test_framework_restart.py

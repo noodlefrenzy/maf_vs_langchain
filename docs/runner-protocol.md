@@ -76,6 +76,23 @@ The execution mode is always labeled `protocol_probe`. It invokes no model or
 MCP tool, produces no score, and is infrastructure evidence only. Actual task
 runs remain gated on the lane implementations and their checkpoint metadata.
 
+## Checkpoint restart gate
+
+The MAF Workflow and custom LangGraph substrates have restart-safe approval
+checkpoint probes. Each probe pauses at one native human-input boundary, writes
+an owner-only checkpoint, exits, reconstructs the same topology in a new
+process, and resumes the exact request ID. The integration test pairs that
+framework state with the immutable hidden-world checkpoint and also restarts
+the service before the approved mitigation and recovery check:
+
+```bash
+uv run pytest tests/test_framework_restart.py
+```
+
+Only `maf_workflow` and `langgraph` advertise this capability. The MAF Harness
+and Deep Agents lanes remain non-resumable until their lane-specific state
+implementations are built and tested.
+
 ## Outer limits and terminal states
 
 The control plane checks cumulative counters monotonically and cancels on the

@@ -111,7 +111,8 @@ def test_native_runner_protocol_probe(
     assert result.terminal.reason == "native_protocol_probe_completed"
     assert result.prepared is not None
     assert version_key in result.prepared.framework_versions
-    assert result.prepared.checkpoint.resumable is False
+    assert result.prepared.checkpoint.resumable is True
+    assert result.prepared.checkpoint.restart_safe is True
     events = [
         json.loads(line) for line in (result.paths.bundle / "events.jsonl").read_text().splitlines()
     ]
@@ -124,17 +125,19 @@ def test_native_runner_protocol_probe(
 
 
 @pytest.mark.parametrize(
-    ("project", "module", "expected_lanes"),
+    ("project", "module", "expected_lanes", "restart_lane"),
     [
         (
             "runners/maf",
             "maf_runner.protocol_runner",
             {"maf_workflow", "maf_harness"},
+            "maf_workflow",
         ),
         (
             "runners/langgraph",
             "langgraph_runner.protocol_runner",
             {"langgraph", "deep_agents"},
+            "langgraph",
         ),
     ],
 )
@@ -142,6 +145,7 @@ def test_native_runner_describes_supported_lanes(
     project: str,
     module: str,
     expected_lanes: set[str],
+    restart_lane: str,
 ) -> None:
     import subprocess
 
@@ -166,3 +170,7 @@ def test_native_runner_describes_supported_lanes(
 
     assert set(payload["supported_lanes"]) == expected_lanes
     assert set(payload["topology"]) == expected_lanes
+    assert payload["checkpoint"][restart_lane]["resumable"] is True
+    assert payload["checkpoint"][restart_lane]["restart_safe"] is True
+    unavailable = expected_lanes - {restart_lane}
+    assert all(payload["checkpoint"][lane]["resumable"] is False for lane in unavailable)

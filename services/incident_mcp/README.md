@@ -43,8 +43,10 @@ snapshot containing simulated time, fault cadence, evidence, approval state,
 audit history, and the per-world approval-token secret.
 `IncidentWorld.load_checkpoint` restores it in a fresh process. Approval
 timeouts are explicit audited control operations and never change incident
-state. Framework-native checkpoints remain the responsibility of each runner;
-their restart tests must pair runner resume with this service-state resume.
+state. Framework-native checkpoints remain the responsibility of each runner.
+`tests/test_framework_restart.py` proves both explicit-workflow runners and
+their isolated service world pause on the same approval request, then resume in
+fresh runner and service processes before applying and verifying recovery.
 
 The service binds only to `127.0.0.1`, enables DNS-rebinding protection, and
 exposes `/healthz` and `/readyz`. Exercise the official SDK plus both native

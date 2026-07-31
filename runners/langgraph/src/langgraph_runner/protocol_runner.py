@@ -58,9 +58,9 @@ def descriptor() -> NativeRunnerDescriptor:
         },
         checkpoint={
             FrameworkLane.LANGGRAPH: CheckpointCapability(
-                resumable=False,
-                restart_safe=False,
-                format="pending-langgraph-implementation",
+                resumable=True,
+                restart_safe=True,
+                format="langgraph-checkpoint-v4+agent-lab-json-envelope/v1",
             ),
             FrameworkLane.DEEP_AGENTS: CheckpointCapability(
                 resumable=False,

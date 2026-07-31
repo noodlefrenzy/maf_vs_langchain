@@ -11,7 +11,7 @@ from agent_lab.contracts import ApprovalDecision
 from incident_lab_mcp.world import IncidentWorld
 
 
-def prepare(checkpoint: Path, *, seed: int) -> dict[str, object]:
+def prepare(checkpoint: Path, *, seed: int, pending: bool = False) -> dict[str, object]:
     world = IncidentWorld.from_seed(seed, fault_profile="none")
     evidence = [
         world.query_service_health(world.incident.affected_service)["evidence_id"],
@@ -23,16 +23,22 @@ def prepare(checkpoint: Path, *, seed: int) -> dict[str, object]:
         "Independent telemetry, change, and policy evidence support this action.",
         evidence,
     )
-    approval = world.decide_mitigation(
-        str(request["request_id"]),
-        ApprovalDecision.APPROVE,
-        decided_by="restart-compat-reviewer",
+    request_id = str(request["request_id"])
+    approval = (
+        None
+        if pending
+        else world.decide_mitigation(
+            request_id,
+            ApprovalDecision.APPROVE,
+            decided_by="restart-compat-reviewer",
+        )
     )
     world.save_checkpoint(checkpoint)
     return {
         "phase": "prepared",
         "pid": os.getpid(),
-        "request_id": approval.request_id,
+        "request_id": request_id,
+        "approval_state": "pending" if approval is None else approval.decision.value,
         "world_tick": world.world_tick,
         "applied": world.applied_request_id is not None,
     }
@@ -40,9 +46,16 @@ def prepare(checkpoint: Path, *, seed: int) -> dict[str, object]:
 
 def resume(checkpoint: Path) -> dict[str, object]:
     world = IncidentWorld.load_checkpoint(checkpoint)
-    if len(world.approval_records) != 1:
-        raise RuntimeError("restart fixture requires exactly one approval record")
-    approval = next(iter(world.approval_records.values()))
+    if len(world.approval_requests) != 1 or len(world.approval_records) > 1:
+        raise RuntimeError("restart fixture requires exactly one mitigation request")
+    request_id = next(iter(world.approval_requests))
+    approval = world.approval_records.get(request_id)
+    if approval is None:
+        approval = world.decide_mitigation(
+            request_id,
+            ApprovalDecision.APPROVE,
+            decided_by="restart-compat-reviewer",
+        )
     result = world.apply_mitigation(
         approval.request_id,
         approval.approval_token or "",
@@ -52,6 +65,7 @@ def resume(checkpoint: Path) -> dict[str, object]:
         "phase": "resumed",
         "pid": os.getpid(),
         "request_id": approval.request_id,
+        "approval_state": approval.decision.value,
         "world_tick": world.world_tick,
         "applied": result["effective"],
         "recovered": recovery["recovered"],
@@ -65,12 +79,13 @@ def main() -> None:
     prepare_parser = subparsers.add_parser("prepare")
     prepare_parser.add_argument("--checkpoint", type=Path, required=True)
     prepare_parser.add_argument("--seed", type=int, default=42)
+    prepare_parser.add_argument("--pending", action="store_true")
     resume_parser = subparsers.add_parser("resume")
     resume_parser.add_argument("--checkpoint", type=Path, required=True)
     args = parser.parse_args()
 
     if args.phase == "prepare":
-        result = prepare(args.checkpoint, seed=args.seed)
+        result = prepare(args.checkpoint, seed=args.seed, pending=args.pending)
     else:
         result = resume(args.checkpoint)
     print(json.dumps(result, sort_keys=True))

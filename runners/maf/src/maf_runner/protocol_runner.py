@@ -57,9 +57,9 @@ def descriptor() -> NativeRunnerDescriptor:
         },
         checkpoint={
             FrameworkLane.MAF_WORKFLOW: CheckpointCapability(
-                resumable=False,
-                restart_safe=False,
-                format="pending-maf-workflow-implementation",
+                resumable=True,
+                restart_safe=True,
+                format="agent-framework-file-checkpoint/v1",
             ),
             FrameworkLane.MAF_HARNESS: CheckpointCapability(
                 resumable=False,
