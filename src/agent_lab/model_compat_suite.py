@@ -8,7 +8,8 @@ import subprocess
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from urllib.request import Request, urlopen
 
 from agent_lab.model_compat_contracts import MODEL_NAME, SUCCESS_FIXTURES, ModelFixture
 from agent_lab.model_compat_stub import CompatibilityStub
@@ -18,6 +19,46 @@ _RUNNERS = {
     "maf": ("runners/maf", "maf_runner.model_compat"),
     "langchain": ("runners/langgraph", "langgraph_runner.model_compat"),
 }
+
+ServerKind = Literal["openai_compatible", "llama_cpp", "vllm"]
+
+
+def _advertised_model_ids(payload: object) -> list[str]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        raise ValueError("model inventory is not an OpenAI-compatible list response")
+    model_ids = sorted(
+        {
+            item["id"]
+            for item in payload["data"]
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+    )
+    if not model_ids:
+        raise ValueError("model inventory advertised no model identifiers")
+    return model_ids
+
+
+def _endpoint_inventory(base_url: str, requested_model: str) -> dict[str, Any]:
+    models_url = f"{base_url.rstrip('/')}/models"
+    request = Request(models_url, headers={"Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=5) as response:  # noqa: S310 - loopback endpoint
+            payload = json.load(response)
+    except Exception as exc:
+        raise RuntimeError(
+            f"could not verify the live endpoint model at {models_url}: {exc}"
+        ) from exc
+    model_ids = _advertised_model_ids(payload)
+    if requested_model not in model_ids:
+        raise RuntimeError(
+            "refusing to run against an unexpected model: "
+            f"requested {requested_model!r}, endpoint advertised {model_ids!r}"
+        )
+    return {
+        "models_url": models_url,
+        "advertised_models": model_ids,
+        "requested_model_advertised": True,
+    }
 
 
 def _run_native(framework: str, base_url: str, model: str) -> dict[str, Any]:
@@ -121,12 +162,20 @@ def _compare(
     return errors
 
 
-def run_suite(*, base_url: str | None = None, model: str = MODEL_NAME) -> dict[str, Any]:
-    """Run both native clients against the stub or a supplied local vLLM endpoint."""
+def run_suite(
+    *,
+    base_url: str | None = None,
+    model: str = MODEL_NAME,
+    server_kind: ServerKind = "openai_compatible",
+) -> dict[str, Any]:
+    """Run both native clients against the stub or a supplied loopback endpoint."""
 
     stub_context = CompatibilityStub() if base_url is None else nullcontext(None)
     with stub_context as stub:
         effective_base_url = stub.base_url if stub is not None else str(base_url)
+        endpoint_inventory = (
+            None if stub is not None else _endpoint_inventory(effective_base_url, model)
+        )
         reports = {
             framework: _run_native(framework, effective_base_url, model) for framework in _RUNNERS
         }
@@ -139,9 +188,12 @@ def run_suite(*, base_url: str | None = None, model: str = MODEL_NAME) -> dict[s
     return {
         "schema_version": "model-compatibility/v1",
         "generated_at": datetime.now(UTC).isoformat(),
-        "mode": "protocol_stub" if stub is not None else "live_vllm",
+        "mode": "protocol_stub" if stub is not None else f"live_{server_kind}",
         "protocol": "openai/chat-completions",
         "model": model,
+        "server": (
+            None if stub is not None else {"kind": server_kind, "inventory": endpoint_inventory}
+        ),
         "passed": not errors,
         "errors": errors,
         "failure_classes": {
@@ -153,7 +205,7 @@ def run_suite(*, base_url: str | None = None, model: str = MODEL_NAME) -> dict[s
         "wire_capture_gap": (
             None
             if stub is not None
-            else "live endpoint mode requires server-side vLLM logging for wire/default evidence"
+            else "live endpoint mode requires server-side request logging for wire/default evidence"
         ),
         "frameworks": reports,
     }
@@ -161,11 +213,18 @@ def run_suite(*, base_url: str | None = None, model: str = MODEL_NAME) -> dict[s
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", help="Existing loopback vLLM /v1 URL; omit for protocol stub")
+    parser.add_argument(
+        "--base-url", help="Existing loopback OpenAI-compatible /v1 URL; omit for protocol stub"
+    )
     parser.add_argument("--model", default=MODEL_NAME)
+    parser.add_argument(
+        "--server-kind",
+        choices=("openai_compatible", "llama_cpp", "vllm"),
+        default="openai_compatible",
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    report = run_suite(base_url=args.base_url, model=args.model)
+    report = run_suite(base_url=args.base_url, model=args.model, server_kind=args.server_kind)
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

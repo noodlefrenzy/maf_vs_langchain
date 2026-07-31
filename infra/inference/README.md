@@ -1,4 +1,23 @@
-# Local inference profile
+# Inference profiles
+
+## Active smoke-development profile
+
+Smoke development uses the aligned
+`unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF:UD-Q4_K_XL` already served by
+llama.cpp on `lonestar:8080`. Expose that direct endpoint locally without going
+through the LiteLLM router:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8080 lonestar
+```
+
+The smoke experiment resolves
+`configs/models/qwen3_next_80b_lonestar_llamacpp.toml`, whose exact model ID is
+checked against `/v1/models` by the live compatibility gate before any fixture
+prompt is sent. This profile supports implementation smoke tests without a new
+model download. It is not yet the accepted measured-study model.
+
+## RTX 4090 characterization candidate
 
 Both framework lanes call the same OpenAI-compatible Chat Completions endpoint.
 The initial fit-check model is `Qwen/Qwen3.5-9B` in text-only mode. It is a
@@ -35,7 +54,8 @@ The quality-tier candidate is
 `Qwen/Qwen3.5-35B-A3B-GPTQ-Int4`. Its repository is about 24.5 GB before
 runtime overhead, so it cannot be assumed to fit wholly in VRAM. Evaluate it
 separately with bounded CPU offload into the available 128 GB system RAM. The
-9B profile remains the smoke-test default until measurements justify a change.
+9B profile remains the required 4090 characterization candidate until
+measurements accept or reject it.
 
 See [ADR 0004](../../docs/adr/0004-local-inference.md) for the decision and
 [local-model research](../../docs/research/local-inference.md) for sources.

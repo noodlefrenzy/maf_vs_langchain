@@ -1,7 +1,7 @@
 import json
 
 from agent_lab.model_compat_contracts import ModelFixture
-from agent_lab.model_compat_suite import run_suite
+from agent_lab.model_compat_suite import _advertised_model_ids, run_suite
 
 
 def test_native_clients_pass_protocol_stub_compatibility_suite() -> None:
@@ -11,6 +11,7 @@ def test_native_clients_pass_protocol_stub_compatibility_suite() -> None:
     assert report["errors"] == []
     assert report["mode"] == "protocol_stub"
     assert report["wire_capture_gap"] is None
+    assert report["server"] is None
     assert set(report["frameworks"]) == {"maf", "langchain"}
 
     for framework in report["frameworks"].values():
@@ -39,3 +40,15 @@ def test_native_clients_pass_protocol_stub_compatibility_suite() -> None:
     assert any(exchange["server_default_expansion"] for exchange in wire_exchanges)
     assert "model-wire-test" not in json.dumps(report)
     assert report["frameworks"]["langchain"]["fixtures"]["structured"]["usage_gap"]
+
+
+def test_live_inventory_extracts_openai_model_ids() -> None:
+    payload = {
+        "object": "list",
+        "data": [
+            {"id": "aligned-model", "object": "model"},
+            {"id": "second-model", "object": "model"},
+        ],
+    }
+
+    assert _advertised_model_ids(payload) == ["aligned-model", "second-model"]

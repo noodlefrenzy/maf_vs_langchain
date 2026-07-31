@@ -1,0 +1,12 @@
+name = "unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF:UD-Q4_K_XL"
+base_url = "http://127.0.0.1:8000/v1"
+api_style = "chat_completions"
+temperature = 0.2
+top_p = 0.9
+presence_penalty = 0.0
+repetition_penalty = 1.0
+max_output_tokens = 8192
+context_window_tokens = 65536
+request_timeout_seconds = 300
+seed = 1729
+thinking = false

@@ -48,13 +48,16 @@ explicit sampling/output/timeout settings, normalized usage including reasoning
 tokens, and package versions. It classifies failures at the model parser,
 client serialization, framework tool loop, or transport layer.
 
-The stub is the CI path and does not install or resolve dependencies. To run the
-same native client fixtures against an already-running loopback vLLM server:
+The stub is the CI path and does not install or resolve dependencies. Live mode
+first reads `/v1/models` and refuses to send fixture prompts unless the exact
+requested model identifier is advertised. To run the same native client
+fixtures against an already-running loopback vLLM server:
 
 ```bash
 uv run python -m agent_lab.model_compat_suite \
   --base-url http://127.0.0.1:8000/v1 \
   --model Qwen/Qwen3.5-9B \
+  --server-kind vllm \
   --output runs/model-compatibility/vllm.json
 ```
 
@@ -64,6 +67,28 @@ request log with the report when accepting a model profile. LangChain's parsed
 `with_structured_output` surface does not expose its raw usage object unless raw
 output is requested, so the report records that per-fixture accounting gap
 instead of silently treating it as zero.
+
+### Aligned lonestar smoke profile
+
+Development smoke tests use the already-cached aligned
+`unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF:UD-Q4_K_XL` served directly by
+llama.cpp on `lonestar:8080`. The LiteLLM router is deliberately bypassed so a
+marker or routing failure cannot send experiment traffic to a cloud model.
+Create a loopback tunnel before running the smoke profile:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8080 lonestar
+
+uv run --no-sync python -m agent_lab.model_compat_suite \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF:UD-Q4_K_XL \
+  --server-kind llama_cpp \
+  --output runs/model-compatibility/lonestar-aligned-qwen3-next-80b.json
+```
+
+This is the active smoke-development profile, not a replacement for the RTX
+4090 vLLM characterization required by issue 13 or the final paired-study model
+selection. Both framework lanes must still use the same profile within a pair.
 
 ## Fit-check model: Qwen3.5-9B
 
