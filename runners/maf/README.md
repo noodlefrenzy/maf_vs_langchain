@@ -54,9 +54,12 @@ wire evidence, and pass/fail comparison.
 
 The first executable `maf_workflow` slice uses a native `WorkflowBuilder`
 fan-out from one dispatcher to telemetry, change, and reliability agents, then
-a synchronized fan-in to a deterministic evidence gate. Each agent receives
-only its role-authenticated MCP endpoint and the shared model profile. Run the
-live slice against the aligned lonestar model through the direct SSH tunnel:
+a synchronized fan-in to a model-backed incident commander and deterministic
+evidence gate. The gate rejects unknown citations, fewer than two cited
+specialist roles, or a commander judgment that evidence is insufficient. Each
+agent receives only its role-authenticated MCP endpoint and the shared model
+profile. Run the live slice against the aligned lonestar model through the
+direct SSH tunnel:
 
 ```bash
 uv run --project services/incident_mcp --no-sync python -m \
@@ -66,5 +69,5 @@ uv run --project services/incident_mcp --no-sync python -m \
 ```
 
 This phase is read-only: it must pass the evidence gate without creating an
-approval request or changing the incident world. Commander synthesis,
-approval, mitigation, and recovery are the next workflow nodes.
+approval request or changing the incident world. Approval, mitigation, and
+recovery are the next workflow nodes.

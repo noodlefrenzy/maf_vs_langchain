@@ -61,10 +61,12 @@ deterministic scorer, a scripted-oracle end-to-end run-bundle path, and the
 authenticated Streamable HTTP service for isolated paired world clones. The
 control plane now supplies a typed runner protocol, isolated run paths,
 deterministic lane ordering, outer lifecycle/budget enforcement, native
-MAF/LangGraph process handlers, and a mock failure matrix. It does not yet
-claim a benchmark result. The next implementation milestones are the matched
-explicit-workflow adapters. Run bundles can already be checked with
-`agent-lab bundle validate` and `agent-lab bundle validate-pair`.
+MAF/LangGraph process handlers, a mock failure matrix, and matched native
+MAF/LangGraph investigation, commander-synthesis, and evidence-gate slices. It
+does not yet claim a benchmark result. The next explicit-workflow milestones
+are approval, mitigation, and recovery. Run bundles can already be
+checked with `agent-lab bundle validate` and
+`agent-lab bundle validate-pair`.
 
 Exercise the full four-lane process boundary without loading a model:
 

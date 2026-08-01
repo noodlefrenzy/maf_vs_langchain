@@ -22,8 +22,8 @@ the installed LangGraph/Deep Agents versions and planned lane topology, emits
 canonical start/finish events, and shuts down cleanly. It deliberately invokes
 no model or MCP tool. The explicit LangGraph substrate advertises restart-safe
 native checkpoints in an owner-only JSON envelope; Deep Agents checkpointing
-remains unavailable. The actual LangGraph and Deep Agents executions remain
-owned by their lane implementation issues.
+remains unavailable. The later LangGraph workflow phases and Deep Agents
+execution remain owned by their lane implementation issues.
 
 The checkpoint compatibility entry point builds a native `interrupt` approval
 graph, pauses it, and resumes its file-backed checkpoint in a fresh process:
@@ -51,3 +51,22 @@ uv run --project runners/langgraph --no-sync \
 
 Use the top-level `agent_lab.model_compat_suite` command for paired execution,
 wire evidence, and pass/fail comparison.
+
+The first executable `langgraph` slice uses a native `StateGraph` fan-out to
+telemetry, change, and reliability nodes, then a synchronized multi-predecessor
+edge into a model-backed incident commander and deterministic evidence gate.
+The gate rejects unknown citations, fewer than two cited specialist roles, or
+a commander judgment that evidence is insufficient. Each agent receives only
+its role-authenticated MCP endpoint and the shared model profile. Run the live
+slice against the aligned lonestar model through the direct SSH tunnel:
+
+```bash
+uv run --project services/incident_mcp --no-sync python -m \
+  incident_lab_mcp.langgraph_workflow_compat \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF:UD-Q4_K_XL
+```
+
+This phase is read-only: it must pass the evidence gate without creating an
+approval request or changing the incident world. Approval, mitigation, and
+recovery are the next workflow nodes.

@@ -11,7 +11,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 ALIGNED_LONESTAR_MODEL = "unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF:UD-Q4_K_XL"
 
 
-def test_native_maf_investigation_fans_out_and_joins_at_evidence_gate() -> None:
+def test_native_maf_investigation_synthesizes_before_evidence_gate() -> None:
     result = subprocess.run(
         [
             "uv",
@@ -48,6 +48,16 @@ def test_native_maf_investigation_fans_out_and_joins_at_evidence_gate() -> None:
             AgentRole.RELIABILITY_REVIEWER,
         )
     )
+    assert payload["synthesis"] == {
+        "role": AgentRole.INCIDENT_COMMANDER.value,
+        "root_cause": "correlated root cause",
+        "chronology": ["change preceded symptoms", "telemetry confirmed impact"],
+        "evidence_ids": ["ev-change", "ev-runbook", "ev-telemetry"],
+        "proposed_mitigation": "apply the reversible runbook action",
+        "recovery_checks": ["verify affected service health"],
+        "evidence_sufficient": True,
+        "uncertainties": [],
+    }
 
 
 @pytest.mark.skipif(
@@ -83,6 +93,8 @@ def test_live_maf_investigation_uses_aligned_lonestar_model_and_scoped_mcp() -> 
     assert payload["model"] == ALIGNED_LONESTAR_MODEL
     assert payload["advertised_models"] == [ALIGNED_LONESTAR_MODEL]
     assert payload["packet"]["passed"] is True
+    assert payload["packet"]["synthesis"]["role"] == AgentRole.INCIDENT_COMMANDER.value
+    assert payload["packet"]["synthesis"]["evidence_sufficient"] is True
     assert all(item.startswith("ev-") for item in payload["packet"]["evidence_ids"])
     assert payload["world_state_changed"] is False
     assert sorted(payload["world_operations"]) == sorted(
@@ -96,4 +108,12 @@ def test_live_maf_investigation_uses_aligned_lonestar_model_and_scoped_mcp() -> 
         ]
     )
     assert all(stats["model_calls"] == 1 for stats in payload["role_stats"].values())
-    assert all(stats["tool_calls"] == 2 for stats in payload["role_stats"].values())
+    assert payload["role_stats"][AgentRole.INCIDENT_COMMANDER.value]["tool_calls"] == 0
+    assert all(
+        payload["role_stats"][role.value]["tool_calls"] == 2
+        for role in (
+            AgentRole.TELEMETRY_INVESTIGATOR,
+            AgentRole.CHANGE_INVESTIGATOR,
+            AgentRole.RELIABILITY_REVIEWER,
+        )
+    )
