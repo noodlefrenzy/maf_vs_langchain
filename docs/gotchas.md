@@ -320,3 +320,36 @@ Neither state fails the agent run. A content-free local `spans.jsonl` ledger is
 written independently, and the bundle validator treats collector degradation
 as a warning while still failing closed on ledger, correlation, or
 completeness tampering.
+
+### Native operation kinds do not line up one-for-one
+
+Observed in the seed-42 explicit pair with MAF 1.12.1, LangGraph 1.2.10, and
+OpenInference LangChain 0.1.68.
+
+OpenInference reports the LangGraph approval node as a generic `CHAIN`, not as
+an interrupt or approval kind. Its span name is `approval`, so completeness
+classification must apply the stable semantic name before the broad native
+kind. OpenInference also emits many internal `CHAIN` spans for runnable
+sequences, assignments, fallbacks, and routing functions. Counting every chain
+as an agent inflated four role turns into 49 apparent agent operations. Only
+role-named chains and native `AGENT` spans are projected as agents.
+
+MAF emits MCP session negotiation spans with `mcp.method.name = initialize` and
+`tools/list` in addition to actual `tools/call` spans. Those are valuable native
+transport details but are not agent tool dispatches and must not count toward
+the normalized tool-call denominator.
+
+Neither native trace contained a checkpoint span even though both adapters
+persisted and normalized the approval checkpoint. The completeness matrix keeps
+that checkpoint as uncovered rather than adding a synthetic native span. In the
+first traced full pair this left checkpoint coverage at zero for both lanes;
+that is a real observability result, not a provenance failure.
+
+The runtime context exposed to the normalized adapter also differs. In the
+second traced explicit pair, MAF's 57 normalized events correlated across seven
+native span IDs, while all 57 LangGraph events carried the shared root span ID.
+OpenInference creates its callback spans below the adapter calls but does not
+make those callback spans the adapter's active context. Both lanes still share
+one verified trace ID per run, but MAF provides finer event-to-span drilldown.
+Do not post-hoc guess a LangGraph child span from timing or name alone; retain
+that correlation-granularity difference as measured evidence.

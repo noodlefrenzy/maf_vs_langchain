@@ -268,13 +268,16 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
     assert result.terminal.used_output_tokens == 12
     events_text = (result.paths.bundle / "events.jsonl").read_text()
     assert approval_token not in events_text
-    assert [json.loads(line)["kind"] for line in events_text.splitlines()] == [
+    events = [json.loads(line) for line in events_text.splitlines()]
+    assert [event["kind"] for event in events] == [
         "run.started",
         "tool.requested",
         "tool.started",
         "tool.finished",
+        "agent.started",
         "model.requested",
         "model.responded",
+        "agent.finished",
         "approval.requested",
         "checkpoint.saved",
         "approval.decided",
@@ -282,6 +285,13 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
         "artifact.written",
         "run.finished",
     ]
+    agent_started = next(event for event in events if event["kind"] == "agent.started")
+    model_requested = next(event for event in events if event["kind"] == "model.requested")
+    model_responded = next(event for event in events if event["kind"] == "model.responded")
+    agent_finished = next(event for event in events if event["kind"] == "agent.finished")
+    assert model_requested["parent_event_id"] == agent_started["event_id"]
+    assert model_responded["parent_event_id"] == model_requested["event_id"]
+    assert agent_finished["parent_event_id"] == agent_started["event_id"]
     state_path = result.paths.state / "workflow-execution.json"
     assert state_path.stat().st_mode & 0o777 == 0o600
     assert approval_token not in state_path.read_text()

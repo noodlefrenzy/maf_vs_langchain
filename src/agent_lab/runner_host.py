@@ -66,6 +66,7 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         self.sequence = 0
         self.usage = RunnerUsage()
         self.events: list[NormalizedEvent] = []
+        self._agent_events: dict[str, list[NormalizedEvent]] = {}
         self._model_events: dict[str, NormalizedEvent] = {}
         self._tool_events: dict[tuple[str, str], list[NormalizedEvent]] = {}
 
@@ -78,9 +79,16 @@ class WorkflowProtocolSession(WorkflowTelemetry):
 
     async def model_started(self, *, actor: str, model: str) -> None:
         self._advance_usage("model_calls", 1, "model_call_budget_exhausted")
+        agent_event = self.emit(
+            EventKind.AGENT_STARTED,
+            actor=actor,
+            payload={"phase": "model_turn"},
+        )
+        self._agent_events.setdefault(actor, []).append(agent_event)
         event = self.emit(
             EventKind.MODEL_REQUESTED,
             actor=actor,
+            parent_event_id=agent_event.event_id,
             payload={"model": model},
         )
         self._model_events[actor] = event
@@ -104,6 +112,16 @@ class WorkflowProtocolSession(WorkflowTelemetry):
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
             },
+        )
+        pending_agents = self._agent_events.get(actor, [])
+        agent_parent = pending_agents.pop(0) if pending_agents else None
+        if not pending_agents:
+            self._agent_events.pop(actor, None)
+        self.emit(
+            EventKind.AGENT_FINISHED,
+            actor=actor,
+            parent_event_id=(agent_parent.event_id if agent_parent is not None else None),
+            payload={"phase": "model_turn"},
         )
         if output_limit_exceeded:
             raise WorkflowBudgetExceeded("output_token_budget_exhausted")

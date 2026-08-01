@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -77,6 +79,18 @@ def test_native_semantics_are_classified_without_content_fields() -> None:
         TraceOperation.TOOL
     )
     assert classify_native_span("approval interrupt", {}) is TraceOperation.APPROVAL
+    assert classify_native_span(
+        "telemetry_investigator",
+        {"openinference.span.kind": "CHAIN"},
+    ) is TraceOperation.AGENT
+    assert classify_native_span(
+        "RunnableSequence",
+        {"openinference.span.kind": "CHAIN"},
+    ) is TraceOperation.OTHER
+    assert classify_native_span(
+        "tools/list",
+        {"mcp.method.name": "tools/list"},
+    ) is TraceOperation.OTHER
 
 
 def test_trace_completeness_retains_operation_level_gaps() -> None:
@@ -99,3 +113,28 @@ def test_trace_completeness_retains_operation_level_gaps() -> None:
     assert completeness.ratio == 0.75
     assert completeness.operations[TraceOperation.APPROVAL].expected == 1
     assert completeness.operations[TraceOperation.APPROVAL].observed == 0
+
+
+def test_full_native_trace_fixture_keeps_the_checkpoint_gap_visible() -> None:
+    fixture = json.loads(
+        Path("tests/fixtures/native-trace-completeness-seed-42.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert fixture["expected_operations"] == {
+        "run": 1,
+        "agent": 4,
+        "model": 4,
+        "tool": 10,
+        "approval": 1,
+        "checkpoint": 1,
+    }
+    for lane in fixture["lanes"].values():
+        assert lane["collector_status"] == "exported"
+        assert lane["normalized_event_count"] == lane["correlated_event_count"]
+        assert lane["observed_operations"]["checkpoint"] == 0
+        assert lane["covered_operations"] == 20
+        assert lane["expected_operation_count"] == 21
+        assert lane["completeness_ratio"] == pytest.approx(20 / 21)
+    assert fixture["local_ledger_sensitive_pattern_matches"] == 0

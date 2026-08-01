@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_lab.contracts import (
     SCHEMA_VERSION,
+    AgentRole,
     EventKind,
     FrameworkLane,
     NativeTracingProfile,
@@ -180,6 +181,7 @@ _STRUCTURAL_ATTRIBUTE_KEYS = frozenset(
         "server.address",
     }
 )
+_ROLE_SPAN_NAMES = frozenset(role.value for role in AgentRole)
 
 
 def structural_span_attributes(attributes: Any) -> dict[str, str | int | float | bool]:
@@ -206,25 +208,30 @@ def classify_native_span(name: str, attributes: dict[str, Any]) -> TraceOperatio
     explicit = str(attributes.get("agent.lab.operation", "")).lower()
     if explicit in {operation.value for operation in TraceOperation}:
         return TraceOperation(explicit)
-    openinference_kind = str(attributes.get("openinference.span.kind", "")).lower()
-    if openinference_kind == "llm":
-        return TraceOperation.MODEL
-    if openinference_kind == "tool":
-        return TraceOperation.TOOL
-    if openinference_kind in {"agent", "chain"}:
-        return TraceOperation.AGENT
-    gen_ai_operation = str(attributes.get("gen_ai.operation.name", "")).lower()
-    if any(marker in gen_ai_operation for marker in ("chat", "completion", "generate")):
-        return TraceOperation.MODEL
-    if "tool" in gen_ai_operation or "mcp.method.name" in attributes:
-        return TraceOperation.TOOL
-    if "agent" in gen_ai_operation:
-        return TraceOperation.AGENT
     lowered_name = name.lower()
     if "checkpoint" in lowered_name:
         return TraceOperation.CHECKPOINT
     if "approval" in lowered_name or "interrupt" in lowered_name:
         return TraceOperation.APPROVAL
+    openinference_kind = str(attributes.get("openinference.span.kind", "")).lower()
+    if openinference_kind == "llm":
+        return TraceOperation.MODEL
+    if openinference_kind == "tool":
+        return TraceOperation.TOOL
+    if openinference_kind == "agent":
+        return TraceOperation.AGENT
+    if openinference_kind == "chain" and lowered_name in _ROLE_SPAN_NAMES:
+        return TraceOperation.AGENT
+    gen_ai_operation = str(attributes.get("gen_ai.operation.name", "")).lower()
+    if any(marker in gen_ai_operation for marker in ("chat", "completion", "generate")):
+        return TraceOperation.MODEL
+    if (
+        "tool" in gen_ai_operation
+        or str(attributes.get("mcp.method.name", "")).lower() == "tools/call"
+    ):
+        return TraceOperation.TOOL
+    if "agent" in gen_ai_operation:
+        return TraceOperation.AGENT
     return TraceOperation.OTHER
 
 
