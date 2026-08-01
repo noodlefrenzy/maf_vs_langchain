@@ -60,11 +60,38 @@ def test_native_maf_investigation_synthesizes_before_evidence_gate() -> None:
     }
 
 
+def test_native_maf_approval_resumes_through_recovery() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(REPOSITORY_ROOT / "runners/maf"),
+            "--no-sync",
+            "python",
+            "-m",
+            "maf_runner.workflow_lane",
+            "--deterministic-approved-probe",
+        ],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["status"] == "completed"
+    assert payload["approval_decision"] == "approve"
+    assert payload["mitigation"]["effective"] is True
+    assert payload["recovery"]["recovered"] is True
+
+
 @pytest.mark.skipif(
     os.getenv("AGENT_LAB_RUN_LIVE_MODEL_TESTS") != "1",
     reason="requires an explicit tunnel to the aligned lonestar model",
 )
-def test_live_maf_investigation_uses_aligned_lonestar_model_and_scoped_mcp() -> None:
+def test_live_maf_workflow_uses_native_approval_and_recovers() -> None:
     result = subprocess.run(
         [
             "uv",
@@ -92,11 +119,16 @@ def test_live_maf_investigation_uses_aligned_lonestar_model_and_scoped_mcp() -> 
     assert payload["framework"] == "maf_workflow"
     assert payload["model"] == ALIGNED_LONESTAR_MODEL
     assert payload["advertised_models"] == [ALIGNED_LONESTAR_MODEL]
-    assert payload["packet"]["passed"] is True
-    assert payload["packet"]["synthesis"]["role"] == AgentRole.INCIDENT_COMMANDER.value
-    assert payload["packet"]["synthesis"]["evidence_sufficient"] is True
-    assert all(item.startswith("ev-") for item in payload["packet"]["evidence_ids"])
-    assert payload["world_state_changed"] is False
+    execution = payload["execution"]
+    assert execution["status"] == "completed"
+    assert execution["evidence"]["passed"] is True
+    assert execution["approval_decision"] == "edit"
+    assert execution["action_to_execute"] == "rollback checkout-api and cap retries"
+    assert execution["mitigation"]["effective"] is True
+    assert execution["recovery"]["recovered"] is True
+    assert payload["world_state_changed"] is True
+    assert payload["checkpoint_contains_approval_token"] is False
+    assert payload["compatibility_approval_policy"] == ("seed_42_edit_to_known_recovery_action")
     assert sorted(payload["world_operations"]) == sorted(
         [
             "query_service_health",
@@ -105,10 +137,15 @@ def test_live_maf_investigation_uses_aligned_lonestar_model_and_scoped_mcp() -> 
             "get_config_diff",
             "search_runbooks",
             "get_runbook",
+            "submit_hypothesis",
+            "request_mitigation",
+            "approval_decision",
+            "apply_mitigation",
+            "verify_recovery",
         ]
     )
     assert all(stats["model_calls"] == 1 for stats in payload["role_stats"].values())
-    assert payload["role_stats"][AgentRole.INCIDENT_COMMANDER.value]["tool_calls"] == 0
+    assert payload["role_stats"][AgentRole.INCIDENT_COMMANDER.value]["tool_calls"] == 4
     assert all(
         payload["role_stats"][role.value]["tool_calls"] == 2
         for role in (

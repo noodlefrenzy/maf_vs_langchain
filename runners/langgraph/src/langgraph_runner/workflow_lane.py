@@ -7,7 +7,9 @@ import asyncio
 import json
 import operator
 import sys
+import tempfile
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import AIMessage
@@ -16,12 +18,18 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import BaseModel, ConfigDict, Field
+from langgraph.types import Command, interrupt
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agent_lab.contracts import AgentRole, ModelProfile
+from agent_lab.contracts import AgentRole, ApprovalDecision, ApprovalRequest, ModelProfile
 from agent_lab.prompt_bundle import render_role_prompt
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
-from agent_lab.tool_catalog import tool_definitions_for_role
+from agent_lab.tool_catalog import (
+    MitigationResult,
+    RecoveryCheckResult,
+    tool_definitions_for_role,
+)
+from langgraph_runner.checkpoint_compat import _FileBackedSaver
 
 SPECIALIST_ROLES = (
     AgentRole.TELEMETRY_INVESTIGATOR,
@@ -35,6 +43,8 @@ MIN_EVIDENCE_IDS = 2
 
 Investigator = Callable[["InvestigationTask"], Awaitable["SpecialistFinding"]]
 Commander = Callable[[list["SpecialistFinding"]], Awaitable["CommanderSynthesis"]]
+MitigationPreparer = Callable[["EvidencePacket"], Awaitable[ApprovalRequest]]
+MitigationExecutor = Callable[[str], Awaitable[tuple[MitigationResult, RecoveryCheckResult]]]
 
 
 class LaneModel(BaseModel):
@@ -77,6 +87,39 @@ class EvidencePacket(LaneModel):
     attempt: int = Field(ge=0, le=1)
 
 
+class ApprovalResponse(LaneModel):
+    request_id: str
+    decision: ApprovalDecision
+    action_to_execute: str | None = None
+    approval_token: str | None = Field(default=None, repr=False, exclude=True)
+
+
+class WorkflowExecutionResult(LaneModel):
+    status: Literal["completed", "approval_rejected"]
+    evidence: EvidencePacket
+    approval_request: ApprovalRequest
+    approval_decision: ApprovalDecision
+    action_to_execute: str | None = None
+    mitigation: MitigationResult | None = None
+    recovery: RecoveryCheckResult | None = None
+
+    @model_validator(mode="after")
+    def validate_terminal_state(self) -> WorkflowExecutionResult:
+        if self.status == "completed":
+            if self.approval_decision not in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:
+                raise ValueError("completed execution requires an approved decision")
+            if not self.action_to_execute or self.mitigation is None or self.recovery is None:
+                raise ValueError("completed execution requires action, mitigation, and recovery")
+        elif (
+            self.approval_decision is not ApprovalDecision.REJECT
+            or self.action_to_execute is not None
+            or self.mitigation is not None
+            or self.recovery is not None
+        ):
+            raise ValueError("rejected execution cannot contain authorized execution state")
+        return self
+
+
 class RoleRunStats(LaneModel):
     model_calls: int = Field(ge=0)
     tool_calls: int = Field(ge=0)
@@ -91,6 +134,10 @@ class _InvestigationState(TypedDict):
     findings: Annotated[list[dict[str, Any]], operator.add]
     synthesis: dict[str, Any] | None
     packet: dict[str, Any] | None
+    approval_request: dict[str, Any] | None
+    approval_decision: str | None
+    action_to_execute: str | None
+    execution: dict[str, Any] | None
 
 
 class _SpecialistNode:
@@ -175,6 +222,77 @@ def _evidence_gate(state: _InvestigationState) -> dict[str, dict[str, Any]]:
     return {"packet": packet.model_dump(mode="json")}
 
 
+class _PrepareMitigationNode:
+    def __init__(self, preparer: MitigationPreparer) -> None:
+        self._preparer = preparer
+
+    async def __call__(self, state: _InvestigationState) -> dict[str, dict[str, Any]]:
+        evidence = EvidencePacket.model_validate(state["packet"])
+        request = await self._preparer(evidence)
+        return {"approval_request": request.model_dump(mode="json")}
+
+
+def _approval_node(state: _InvestigationState) -> dict[str, Any]:
+    request = ApprovalRequest.model_validate(state["approval_request"])
+    raw_response = interrupt(
+        {
+            "kind": "approval_requested",
+            "request": request.model_dump(mode="json"),
+        }
+    )
+    response = ApprovalResponse.model_validate(raw_response)
+    if response.request_id != request.request_id:
+        raise ValueError("approval response request ID differs from the pending request")
+    evidence = EvidencePacket.model_validate(state["packet"])
+    if response.decision is ApprovalDecision.REJECT:
+        execution = WorkflowExecutionResult(
+            status="approval_rejected",
+            evidence=evidence,
+            approval_request=request,
+            approval_decision=response.decision,
+        )
+        return {
+            "approval_decision": response.decision.value,
+            "execution": execution.model_dump(mode="json"),
+        }
+    if not response.action_to_execute:
+        raise ValueError("approved mitigation requires the authorized action")
+    return {
+        "approval_decision": response.decision.value,
+        "action_to_execute": response.action_to_execute,
+    }
+
+
+class _MitigateAndVerifyNode:
+    def __init__(self, executor: MitigationExecutor) -> None:
+        self._executor = executor
+
+    async def __call__(self, state: _InvestigationState) -> dict[str, dict[str, Any]]:
+        request = ApprovalRequest.model_validate(state["approval_request"])
+        evidence = EvidencePacket.model_validate(state["packet"])
+        decision = ApprovalDecision(state["approval_decision"])
+        mitigation, recovery = await self._executor(request.request_id)
+        execution = WorkflowExecutionResult(
+            status="completed",
+            evidence=evidence,
+            approval_request=request,
+            approval_decision=decision,
+            action_to_execute=state["action_to_execute"],
+            mitigation=mitigation,
+            recovery=recovery,
+        )
+        return {"execution": execution.model_dump(mode="json")}
+
+
+def _route_after_gate(state: _InvestigationState) -> str:
+    packet = EvidencePacket.model_validate(state["packet"])
+    return "prepare_mitigation" if packet.passed else END
+
+
+def _route_after_approval(state: _InvestigationState) -> str:
+    return END if state.get("execution") is not None else "mitigation_and_recovery"
+
+
 def build_investigation_graph(
     investigators: dict[AgentRole, Investigator],
     commander: Commander,
@@ -198,6 +316,43 @@ def build_investigation_graph(
     builder.add_edge(AgentRole.INCIDENT_COMMANDER.value, "evidence_gate")
     builder.add_edge("evidence_gate", END)
     return builder.compile(name="agent-lab-langgraph-explicit-investigation-v1")
+
+
+def build_approved_graph(
+    investigators: dict[AgentRole, Investigator],
+    commander: Commander,
+    preparer: MitigationPreparer,
+    executor: MitigationExecutor,
+    checkpointer: _FileBackedSaver,
+) -> CompiledStateGraph:
+    """Build the full native graph through approval, mitigation, and recovery."""
+
+    if set(investigators) != set(SPECIALIST_ROLES):
+        missing = sorted(role.value for role in set(SPECIALIST_ROLES) - set(investigators))
+        extra = sorted(role.value for role in set(investigators) - set(SPECIALIST_ROLES))
+        raise ValueError(f"investigator role mismatch: missing={missing}, extra={extra}")
+    builder = StateGraph(_InvestigationState)
+    specialist_nodes: list[str] = []
+    for role in SPECIALIST_ROLES:
+        node_name = role.value
+        specialist_nodes.append(node_name)
+        builder.add_node(node_name, _SpecialistNode(role, investigators[role]))
+        builder.add_edge(START, node_name)
+    builder.add_node(AgentRole.INCIDENT_COMMANDER.value, _CommanderNode(commander))
+    builder.add_node("evidence_gate", _evidence_gate)
+    builder.add_node("prepare_mitigation", _PrepareMitigationNode(preparer))
+    builder.add_node("approval", _approval_node)
+    builder.add_node("mitigation_and_recovery", _MitigateAndVerifyNode(executor))
+    builder.add_edge(specialist_nodes, AgentRole.INCIDENT_COMMANDER.value)
+    builder.add_edge(AgentRole.INCIDENT_COMMANDER.value, "evidence_gate")
+    builder.add_conditional_edges("evidence_gate", _route_after_gate)
+    builder.add_edge("prepare_mitigation", "approval")
+    builder.add_conditional_edges("approval", _route_after_approval)
+    builder.add_edge("mitigation_and_recovery", END)
+    return builder.compile(
+        checkpointer=checkpointer,
+        name="agent-lab-langgraph-explicit-approved-v1",
+    )
 
 
 class LangGraphRoleAgent:
@@ -319,6 +474,17 @@ class LangGraphCommanderAgent:
         if endpoint.role is not AgentRole.INCIDENT_COMMANDER:
             raise ValueError("commander endpoint does not match the incident commander")
         self.stats = RoleRunStats(model_calls=0, tool_calls=0, input_tokens=0, output_tokens=0)
+        self._mcp = MultiServerMCPClient(
+            {
+                "incident": {
+                    "transport": "streamable_http",
+                    "url": endpoint.url,
+                    "headers": {"Authorization": f"Bearer {endpoint.token}"},
+                }
+            }
+        )
+        self._tools: dict[str, BaseTool] = {}
+        self._called_tools: list[str] = []
         client = ChatOpenAI(
             model=profile.name,
             api_key="agent-lab-local",
@@ -339,6 +505,18 @@ class LangGraphCommanderAgent:
             include_raw=True,
             strict=True,
         )
+
+    async def initialize(self) -> LangGraphCommanderAgent:
+        tools = await self._mcp.get_tools(server_name="incident")
+        expected = {tool.name for tool in tool_definitions_for_role(AgentRole.INCIDENT_COMMANDER)}
+        observed = {tool.name for tool in tools}
+        if observed != expected:
+            raise RuntimeError(
+                "incident commander MCP catalog mismatch: "
+                f"expected={sorted(expected)}, observed={sorted(observed)}"
+            )
+        self._tools = {tool.name: tool for tool in tools}
+        return self
 
     async def synthesize(self, findings: list[SpecialistFinding]) -> CommanderSynthesis:
         available_ids = sorted(
@@ -375,6 +553,57 @@ class LangGraphCommanderAgent:
             output_tokens=usage["output_tokens"],
         )
         return synthesis
+
+    async def prepare_mitigation(self, evidence: EvidencePacket) -> ApprovalRequest:
+        synthesis = evidence.synthesis
+        await self._call_tool(
+            "submit_hypothesis",
+            {
+                "root_cause": synthesis.root_cause,
+                "evidence_ids": synthesis.evidence_ids,
+                "mitigation": synthesis.proposed_mitigation,
+            },
+        )
+        result = await self._call_tool(
+            "request_mitigation",
+            {
+                "proposed_action": synthesis.proposed_mitigation,
+                "rationale": (
+                    "The incident commander synthesized independently sourced specialist evidence."
+                ),
+                "evidence_ids": synthesis.evidence_ids,
+            },
+        )
+        return ApprovalRequest.model_validate(
+            _structured_payload(result, {"request_id", "proposed_action", "status"})
+        )
+
+    async def apply_and_verify(
+        self,
+        request_id: str,
+        approval_token: str,
+    ) -> tuple[MitigationResult, RecoveryCheckResult]:
+        mitigation_result = await self._call_tool(
+            "apply_mitigation",
+            {"request_id": request_id, "approval_token": approval_token},
+        )
+        recovery_result = await self._call_tool(
+            "verify_recovery",
+            {"services": ["checkout-api"]},
+        )
+        mitigation = MitigationResult.model_validate(
+            _structured_payload(mitigation_result, {"request_id", "effective", "action"})
+        )
+        recovery = RecoveryCheckResult.model_validate(
+            _structured_payload(recovery_result, {"case_id", "recovered", "checks"})
+        )
+        return mitigation, recovery
+
+    async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        result = await self._tools[name].ainvoke(arguments)
+        self._called_tools.append(name)
+        self.stats = self.stats.model_copy(update={"tool_calls": len(self._called_tools)})
+        return result
 
 
 def _usage(raw: Any) -> dict[str, int]:
@@ -424,6 +653,38 @@ def _render_tool_result(result: Any) -> str:
     raise TypeError(f"unsupported MCP result type {type(result).__name__}")
 
 
+def _structured_payload(result: Any, required_keys: set[str]) -> dict[str, Any]:
+    rendered = _render_tool_result(result)
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(rendered):
+        if character not in "[{":
+            continue
+        try:
+            value, _end = decoder.raw_decode(rendered, index)
+        except json.JSONDecodeError:
+            continue
+        found = _find_payload(value, required_keys)
+        if found is not None:
+            return found
+    raise ValueError(f"MCP result did not contain required fields {sorted(required_keys)}")
+
+
+def _find_payload(value: Any, required_keys: set[str]) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        if required_keys.issubset(value):
+            return value
+        for child in value.values():
+            found = _find_payload(child, required_keys)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_payload(child, required_keys)
+            if found is not None:
+                return found
+    return None
+
+
 def _evidence_ids(text: str) -> set[str]:
     values: set[str] = set()
     decoder = json.JSONDecoder()
@@ -463,9 +724,9 @@ async def run_live_investigation(request: RunRequest) -> dict[str, Any]:
         ).initialize()
         for role in SPECIALIST_ROLES
     }
-    commander_agent = LangGraphCommanderAgent(
+    commander_agent = await LangGraphCommanderAgent(
         request.role_endpoints[AgentRole.INCIDENT_COMMANDER], request.manifest.model
-    )
+    ).initialize()
     graph = build_investigation_graph(
         {role: agent.investigate for role, agent in agents.items()},
         commander_agent.synthesize,
@@ -479,6 +740,10 @@ async def run_live_investigation(request: RunRequest) -> dict[str, Any]:
             "findings": [],
             "synthesis": None,
             "packet": None,
+            "approval_request": None,
+            "approval_decision": None,
+            "action_to_execute": None,
+            "execution": None,
         }
     )
     packet = EvidencePacket.model_validate(state["packet"])
@@ -491,6 +756,96 @@ async def run_live_investigation(request: RunRequest) -> dict[str, Any]:
             AgentRole.INCIDENT_COMMANDER.value: commander_agent.stats.model_dump(mode="json"),
         },
     }
+
+
+async def run_live_approved(request: RunRequest) -> dict[str, Any]:
+    """Run through native approval, then apply mitigation and verify recovery."""
+
+    required_roles = (*SPECIALIST_ROLES, AgentRole.INCIDENT_COMMANDER)
+    missing = [role.value for role in required_roles if role not in request.role_endpoints]
+    if missing:
+        raise ValueError(f"run request is missing workflow endpoints: {missing}")
+    agents = {
+        role: await LangGraphRoleAgent(
+            role, request.role_endpoints[role], request.manifest.model
+        ).initialize()
+        for role in SPECIALIST_ROLES
+    }
+    commander_agent = await LangGraphCommanderAgent(
+        request.role_endpoints[AgentRole.INCIDENT_COMMANDER], request.manifest.model
+    ).initialize()
+    approval_tokens: dict[str, str] = {}
+
+    async def execute(request_id: str) -> tuple[MitigationResult, RecoveryCheckResult]:
+        token = approval_tokens.pop(request_id, None)
+        if token is None:
+            raise RuntimeError("approved mitigation token was not available in process memory")
+        return await commander_agent.apply_and_verify(request_id, token)
+
+    checkpointer = _FileBackedSaver(request.paths.checkpoints / "workflow.json")
+    graph = build_approved_graph(
+        {role: agent.investigate for role, agent in agents.items()},
+        commander_agent.synthesize,
+        commander_agent.prepare_mitigation,
+        execute,
+        checkpointer,
+    )
+    task = InvestigationTask(public_ticket=request.public_ticket)
+    config = {"configurable": {"thread_id": str(request.manifest.run_id)}}
+    initial = await graph.ainvoke(
+        {
+            "public_ticket": task.public_ticket,
+            "attempt": task.attempt,
+            "feedback": task.feedback,
+            "findings": [],
+            "synthesis": None,
+            "packet": None,
+            "approval_request": None,
+            "approval_decision": None,
+            "action_to_execute": None,
+            "execution": None,
+        },
+        config,
+    )
+    if "__interrupt__" not in initial:
+        raise RuntimeError("LangGraph did not persist an approval interrupt")
+    snapshot = graph.get_state(config)
+    approval_request = ApprovalRequest.model_validate(snapshot.values["approval_request"])
+    _emit_json_line(
+        {
+            "kind": "approval_requested",
+            "request": approval_request.model_dump(mode="json"),
+        }
+    )
+    response_line = await asyncio.to_thread(sys.stdin.buffer.readline)
+    if not response_line:
+        raise RuntimeError("approval response stream closed before a decision")
+    response = ApprovalResponse.model_validate_json(response_line)
+    if response.request_id != approval_request.request_id:
+        raise ValueError("approval response request ID differs from the pending request")
+    if response.decision in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:
+        if not response.approval_token or not response.action_to_execute:
+            raise ValueError("approved response requires an action and an approval token")
+        approval_tokens[response.request_id] = response.approval_token
+    resumed = await graph.ainvoke(
+        Command(resume=response.model_dump(mode="json")),
+        config,
+    )
+    execution = WorkflowExecutionResult.model_validate(resumed["execution"])
+    return {
+        "framework": "langgraph",
+        "model": request.manifest.model.name,
+        "execution": execution.model_dump(mode="json"),
+        "role_stats": {
+            **{role.value: agent.stats.model_dump(mode="json") for role, agent in agents.items()},
+            AgentRole.INCIDENT_COMMANDER.value: commander_agent.stats.model_dump(mode="json"),
+        },
+    }
+
+
+def _emit_json_line(payload: dict[str, Any]) -> None:
+    sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
+    sys.stdout.flush()
 
 
 async def _deterministic_probe() -> dict[str, Any]:
@@ -536,19 +891,141 @@ async def _deterministic_probe() -> dict[str, Any]:
             "findings": [],
             "synthesis": None,
             "packet": None,
+            "approval_request": None,
+            "approval_decision": None,
+            "action_to_execute": None,
+            "execution": None,
         }
     )
     return EvidencePacket.model_validate(state["packet"]).model_dump(mode="json")
+
+
+async def _deterministic_approved_probe() -> dict[str, Any]:
+    async def finding(role: AgentRole, evidence_id: str) -> SpecialistFinding:
+        return SpecialistFinding(
+            role=role,
+            summary=f"{role.value} summary",
+            claims=[f"claim from {role.value}"],
+            evidence_ids=[evidence_id],
+            tools_used=[f"{role.value}_tool"],
+        )
+
+    investigators = {
+        AgentRole.TELEMETRY_INVESTIGATOR: lambda _task: finding(
+            AgentRole.TELEMETRY_INVESTIGATOR, "ev-telemetry"
+        ),
+        AgentRole.CHANGE_INVESTIGATOR: lambda _task: finding(
+            AgentRole.CHANGE_INVESTIGATOR, "ev-change"
+        ),
+        AgentRole.RELIABILITY_REVIEWER: lambda _task: finding(
+            AgentRole.RELIABILITY_REVIEWER, "ev-runbook"
+        ),
+    }
+
+    async def synthesize(findings: list[SpecialistFinding]) -> CommanderSynthesis:
+        return CommanderSynthesis(
+            root_cause="correlated root cause",
+            chronology=["change preceded symptoms", "telemetry confirmed impact"],
+            evidence_ids=sorted(
+                {evidence_id for finding in findings for evidence_id in finding.evidence_ids}
+            ),
+            proposed_mitigation="apply the reversible runbook action",
+            recovery_checks=["verify affected service health"],
+            evidence_sufficient=True,
+        )
+
+    async def prepare(evidence: EvidencePacket) -> ApprovalRequest:
+        return ApprovalRequest(
+            request_id="mit-deterministic-01",
+            case_id="case-deterministic",
+            proposed_action=evidence.synthesis.proposed_mitigation,
+            rationale="grounded deterministic evidence",
+            evidence_ids=evidence.synthesis.evidence_ids,
+            requested_by=AgentRole.INCIDENT_COMMANDER.value,
+            created_tick=1,
+        )
+
+    async def execute(_request_id: str) -> tuple[MitigationResult, RecoveryCheckResult]:
+        mitigation = MitigationResult(
+            case_id="case-deterministic",
+            request_id="mit-deterministic-01",
+            world_tick=2,
+            action="apply the reversible runbook action",
+            status="applied",
+            effective=True,
+        )
+        recovery = RecoveryCheckResult.model_validate(
+            {
+                "evidence_id": "ev-recovery",
+                "case_id": "case-deterministic",
+                "world_tick": 3,
+                "recovered": True,
+                "checks": [
+                    {
+                        "evidence_id": "ev-health-checkout",
+                        "world_tick": 3,
+                        "service": "checkout-api",
+                        "error_rate": 0.01,
+                        "p95_ms": 260.0,
+                        "saturation": 0.38,
+                    }
+                ],
+                "summary": "customer-facing health recovered after mitigation",
+            }
+        )
+        return mitigation, recovery
+
+    with tempfile.TemporaryDirectory(prefix="agent-lab-langgraph-approved-probe-") as raw_path:
+        saver = _FileBackedSaver(Path(raw_path) / "workflow.json")
+        graph = build_approved_graph(investigators, synthesize, prepare, execute, saver)
+        config = {"configurable": {"thread_id": "deterministic-approved-probe"}}
+        initial = await graph.ainvoke(
+            {
+                "public_ticket": "deterministic probe",
+                "attempt": 0,
+                "feedback": (),
+                "findings": [],
+                "synthesis": None,
+                "packet": None,
+                "approval_request": None,
+                "approval_decision": None,
+                "action_to_execute": None,
+                "execution": None,
+            },
+            config,
+        )
+        if "__interrupt__" not in initial:
+            raise RuntimeError("deterministic LangGraph did not pause for approval")
+        resumed = await graph.ainvoke(
+            Command(
+                resume={
+                    "request_id": "mit-deterministic-01",
+                    "decision": ApprovalDecision.APPROVE.value,
+                    "action_to_execute": "apply the reversible runbook action",
+                }
+            ),
+            config,
+        )
+        return WorkflowExecutionResult.model_validate(resumed["execution"]).model_dump(mode="json")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--deterministic-probe", action="store_true")
+    mode.add_argument("--deterministic-approved-probe", action="store_true")
     mode.add_argument("--live-investigation", action="store_true")
+    mode.add_argument("--live-approved-run", action="store_true")
     args = parser.parse_args()
     if args.deterministic_probe:
         payload = asyncio.run(_deterministic_probe())
+    elif args.deterministic_approved_probe:
+        payload = asyncio.run(_deterministic_approved_probe())
+    elif args.live_approved_run:
+        request_line = sys.stdin.buffer.readline()
+        if not request_line:
+            parser.error("live approved run requires one RunRequest JSON line")
+        payload = asyncio.run(run_live_approved(RunRequest.model_validate_json(request_line)))
     else:
         payload = asyncio.run(
             run_live_investigation(RunRequest.model_validate_json(sys.stdin.read()))

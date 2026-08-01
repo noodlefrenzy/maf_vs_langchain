@@ -68,6 +68,11 @@ uv run --project services/incident_mcp --no-sync python -m \
   --model unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF:UD-Q4_K_XL
 ```
 
-This phase is read-only: it must pass the evidence gate without creating an
-approval request or changing the incident world. Approval, mitigation, and
-recovery are the next workflow nodes.
+The compatibility controller records an explicit edited approval after the
+native workflow pauses, then resumes the checkpoint, applies the exact
+token-bound action, and verifies recovery. For this seed-42 smoke probe only,
+the reviewer edits the model proposal to the known recovery fixture so model
+quality cannot prevent the orchestration path from being exercised. Approval
+tokens remain in process memory and are excluded from checkpoints and output.
+This scripted policy inspects fixture truth, so its runs are benchmark-ineligible
+test infrastructure, not a substitute for the control-plane approval command.

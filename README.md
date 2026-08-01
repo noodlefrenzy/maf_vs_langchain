@@ -25,7 +25,9 @@ mitigation. Each paired run gets an isolated copy of the same world.
 4. Read the [research summary](docs/research/framework-landscape.md) and
    [task selection](docs/research/task-options.md).
 5. Review the decisions in [docs/adr](docs/adr/README.md).
-6. Record the review in
+6. Check the framework-specific [implementation gotchas](docs/gotchas.md)
+   before changing an adapter.
+7. Record the review in
    [issue #10](https://github.com/noodlefrenzy/maf_vs_langchain/issues/10)
    and follow implementation on the
    [project board](https://github.com/users/noodlefrenzy/projects/21).
@@ -62,10 +64,12 @@ authenticated Streamable HTTP service for isolated paired world clones. The
 control plane now supplies a typed runner protocol, isolated run paths,
 deterministic lane ordering, outer lifecycle/budget enforcement, native
 MAF/LangGraph process handlers, a mock failure matrix, and matched native
-MAF/LangGraph investigation, commander-synthesis, and evidence-gate slices. It
-does not yet claim a benchmark result. The next explicit-workflow milestones
-are approval, mitigation, and recovery. Run bundles can already be
-checked with `agent-lab bundle validate` and
+MAF/LangGraph explicit workflows through investigation, commander synthesis,
+evidence gating, native approval checkpoints, token-bound mitigation, and
+recovery verification. It does not yet claim a benchmark result. The next
+explicit-workflow milestone is integrating these live executions with the
+normalized runner protocol, final incident artifacts, and scored run bundles.
+Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 
 Exercise the full four-lane process boundary without loading a model:

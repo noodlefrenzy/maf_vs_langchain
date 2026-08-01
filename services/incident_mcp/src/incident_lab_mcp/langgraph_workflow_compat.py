@@ -1,4 +1,4 @@
-"""Run the LangGraph investigation graph against a live model and isolated world."""
+"""Run the LangGraph workflow through approved recovery against an isolated world."""
 
 from __future__ import annotations
 
@@ -14,17 +14,21 @@ import httpx
 import uvicorn
 
 from agent_lab.contract_bundle import contract_bundle_hashes
-from agent_lab.contracts import Budget, FrameworkLane, ModelProfile, RunManifest
+from agent_lab.contracts import ApprovalDecision, Budget, FrameworkLane, ModelProfile, RunManifest
 from agent_lab.runner_protocol import RoleEndpoint, RunPaths, RunRequest
 from incident_lab_mcp.http_auth import RunCredentialSigner, RunWorldRegistry
 from incident_lab_mcp.http_service import build_http_app, issue_endpoint_credentials
 from incident_lab_mcp.roles import ROLE_TO_AGENT_ROLE
+from incident_lab_mcp.workflow_compat_policy import (
+    COMPATIBILITY_APPROVAL_POLICY,
+    SEED_42_RECOVERY_ACTION,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 
-async def run_live_langgraph_investigation(base_url: str, model: str) -> dict[str, object]:
-    """Exercise role-scoped LangChain agents through the native fan-out/join graph."""
+async def run_live_langgraph_workflow(base_url: str, model: str) -> dict[str, object]:
+    """Exercise the native LangGraph workflow through approved recovery."""
 
     advertised_models = await _verify_model(base_url, model)
     registry = RunWorldRegistry()
@@ -121,22 +125,34 @@ async def run_live_langgraph_investigation(base_url: str, model: str) -> dict[st
                 ),
                 order_seed=1729,
             )
-            payload = await _run_langgraph_subprocess(request)
+            payload = await _run_langgraph_approved_subprocess(request, registry)
+            checkpoint_path = run_root / "checkpoints" / "workflow.json"
+            checkpoint_text = checkpoint_path.read_text(encoding="utf-8")
+            if "approval_token" in checkpoint_text:
+                raise RuntimeError("LangGraph checkpoint persisted an approval token")
 
         world = registry.get(receipt.right.run_id).world
         operations = [event.operation for event in world.audit_log]
-        if world.applied_request_id is not None or world.recovery_verified:
-            raise RuntimeError("investigation phase changed the isolated world")
-        if not payload["packet"]["passed"]:
-            raise RuntimeError(f"live evidence gate failed: {payload['packet']['gate_reasons']}")
+        execution = payload["execution"]
+        if world.applied_request_id is None or not world.recovery_verified:
+            raise RuntimeError(
+                "approved workflow did not apply an effective mitigation and recover: "
+                f"action={execution['action_to_execute']!r}, "
+                f"effective={execution['mitigation']['effective']!r}, "
+                f"recovered={execution['recovery']['recovered']!r}"
+            )
+        if execution["status"] != "completed" or not execution["recovery"]["recovered"]:
+            raise RuntimeError("LangGraph workflow returned without verified recovery")
         if payload["model"] != model:
-            raise RuntimeError("LangGraph live investigation reported an unexpected model")
+            raise RuntimeError("LangGraph live workflow reported an unexpected model")
         return {
             **payload,
             "status": "ok",
             "advertised_models": advertised_models,
             "world_operations": operations,
-            "world_state_changed": False,
+            "world_state_changed": True,
+            "checkpoint_contains_approval_token": False,
+            "compatibility_approval_policy": COMPATIBILITY_APPROVAL_POLICY,
         }
     finally:
         server.should_exit = True
@@ -144,7 +160,10 @@ async def run_live_langgraph_investigation(base_url: str, model: str) -> dict[st
         listener.close()
 
 
-async def _run_langgraph_subprocess(request: RunRequest) -> dict[str, object]:
+async def _run_langgraph_approved_subprocess(
+    request: RunRequest,
+    registry: RunWorldRegistry,
+) -> dict[str, object]:
     environment = dict(os.environ)
     environment.pop("VIRTUAL_ENV", None)
     process = await asyncio.create_subprocess_exec(
@@ -156,23 +175,68 @@ async def _run_langgraph_subprocess(request: RunRequest) -> dict[str, object]:
         "python",
         "-m",
         "langgraph_runner.workflow_lane",
-        "--live-investigation",
+        "--live-approved-run",
         cwd=REPOSITORY_ROOT,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=environment,
     )
+    if process.stdin is None or process.stdout is None or process.stderr is None:
+        raise RuntimeError("LangGraph approved subprocess pipes were not created")
+    process.stdin.write(request.model_dump_json().encode() + b"\n")
+    await process.stdin.drain()
+    approval_line = await asyncio.wait_for(
+        process.stdout.readline(),
+        timeout=request.manifest.budget.wall_clock_seconds,
+    )
+    if not approval_line:
+        _stdout, stderr = await process.communicate()
+        raise RuntimeError(
+            f"LangGraph workflow exited before requesting approval with {process.returncode}: "
+            f"{stderr.decode(errors='replace')}"
+        )
+    approval_event = json.loads(approval_line)
+    if approval_event.get("kind") != "approval_requested":
+        raise RuntimeError(
+            f"LangGraph workflow returned an unexpected approval event: {approval_event}"
+        )
+    request_id = str(approval_event["request"]["request_id"])
+    world = registry.get(request.manifest.run_id).world
+    approval = world.decide_mitigation(
+        request_id,
+        ApprovalDecision.EDIT,
+        decided_by="langgraph-live-compat-reviewer",
+        edited_action=SEED_42_RECOVERY_ACTION,
+    )
+    process.stdin.write(
+        (
+            json.dumps(
+                {
+                    "request_id": approval.request_id,
+                    "decision": approval.decision.value,
+                    "action_to_execute": approval.action_to_execute,
+                    "approval_token": approval.approval_token,
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode()
+    )
+    await process.stdin.drain()
     stdout, stderr = await asyncio.wait_for(
-        process.communicate(input=request.model_dump_json().encode()),
+        process.communicate(),
         timeout=request.manifest.budget.wall_clock_seconds,
     )
     if process.returncode != 0:
         raise RuntimeError(
-            f"LangGraph live investigation failed with {process.returncode}: "
+            f"LangGraph live approved workflow failed with {process.returncode}: "
             f"{stderr.decode(errors='replace')}"
         )
-    return json.loads(stdout)
+    lines = stdout.splitlines()
+    if len(lines) != 1:
+        raise RuntimeError(f"LangGraph workflow emitted {len(lines)} terminal payloads")
+    return json.loads(lines[0])
 
 
 async def _verify_model(base_url: str, model: str) -> list[str]:
@@ -212,7 +276,7 @@ def main() -> None:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--model", required=True)
     args = parser.parse_args()
-    result = asyncio.run(run_live_langgraph_investigation(args.base_url, args.model))
+    result = asyncio.run(run_live_langgraph_workflow(args.base_url, args.model))
     print(json.dumps(result, sort_keys=True))
 
 
