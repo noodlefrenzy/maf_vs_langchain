@@ -297,6 +297,14 @@ The runner therefore instruments before importing a lane implementation and
 calls `uninstrument()` during trace finalization. Process isolation prevents
 those wrappers from leaking into the MAF lane.
 
+The fixed setup cost is visible even without a model call. In the 12-repetition
+protocol-probe ablation, LangGraph/OpenInference tracing added a median 528 ms
+to the runner lifecycle, compared with 107 ms for MAF tracing. This tiny probe
+contains only the manual root span, so the result mainly measures imports,
+patching, provider setup, and OTLP flush; it is not a per-span cost or a fair
+percentage estimate for long agent runs. See
+`docs/research/native-tracing-overhead.md` for the method and limitations.
+
 ### An OTLP timeout alone is not the clean Phoenix-down path
 
 Observed with the OpenTelemetry OTLP/HTTP exporter 1.44.0.

@@ -1,7 +1,8 @@
 # Local Phoenix
 
-The experiment uses the pinned `arizephoenix/phoenix:version-19.10.0` image in
-`compose.yaml`. Both the UI/HTTP OTLP receiver on port 6006 and the gRPC OTLP
+The experiment uses Phoenix `version-19.10.0`, pinned to image digest
+`sha256:3092f5543a3ddd35db7390cf971027c33be6be1f171274d57f3c8658c2193d67`
+in `compose.yaml`. Both the UI/HTTP OTLP receiver on port 6006 and the gRPC OTLP
 receiver on port 4317 bind only to loopback. Phoenix state persists in the
 ignored `infra/phoenix/data/` directory.
 
