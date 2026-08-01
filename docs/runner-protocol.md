@@ -100,6 +100,12 @@ and Deep Agents lanes execute through the same protocol but advertise
 process-local, non-resumable state; their native harness sessions cannot be
 reconstructed after a runner restart.
 
+Runner description metadata also reports the frozen contract hashes loaded in
+the isolated environment and a framework-neutral normalized topology for each
+lane. Experiment startup compares those values across the matched pair before
+allocating execution to either framework; native topology and checkpoint format
+remain lane-specific metadata.
+
 ## Outer limits and terminal states
 
 The control plane checks cumulative counters monotonically and cancels on the
@@ -114,10 +120,17 @@ and a process exit without a terminal message become a persisted
 first use protocol commands, then process termination, and finally a kill only
 after the configured grace period.
 
+An exception escaping while a normalized model request is in flight becomes
+`model_failure`. An exception following a normalized failed tool boundary (or
+while that tool is still in flight) becomes `tool_service_failure`. The error
+and terminal events retain only the bounded exception class and classification,
+while detailed framework tracebacks stay in the runner-local stderr artifact.
+
 The mock-runner matrix covers success, startup/launch failure, crash, wall
-timeout, approval timeout, explicit cancellation, graceful shutdown, and all
-four usage budgets. Native MAF and LangGraph processes also implement the
-boundary in an explicit `protocol_probe` mode. They report installed framework
+timeout, approval timeout, model-request timeout classification, explicit
+cancellation, graceful shutdown, and all four usage budgets. Native MAF and
+LangGraph processes also implement the boundary in an explicit `protocol_probe`
+mode. They report installed framework
 versions and planned topology, emit canonical run lifecycle events, and prove
 process compatibility without calling a model or MCP tool. All four native
 lanes additionally run through the same boundary with `--run`, emit

@@ -7,7 +7,9 @@ import asyncio
 import json
 from importlib.metadata import version
 
+from agent_lab.contract_bundle import contract_bundle_hashes
 from agent_lab.contracts import FrameworkLane
+from agent_lab.matched_contracts import normalized_topology_for_lane
 from agent_lab.runner_host import (
     ApprovalProvider,
     NativeRunnerDescriptor,
@@ -64,6 +66,7 @@ def descriptor() -> NativeRunnerDescriptor:
             "agent-framework-orchestrations": version("agent-framework-orchestrations"),
             "agent-framework-tools": version("agent-framework-tools"),
         },
+        contract_hashes=contract_bundle_hashes(),
         topology={
             FrameworkLane.MAF_WORKFLOW: {
                 "kind": "explicit_workflow",
@@ -90,6 +93,10 @@ def descriptor() -> NativeRunnerDescriptor:
                     "reliability_reviewer",
                 ],
             },
+        },
+        normalized_topology={
+            FrameworkLane.MAF_WORKFLOW: normalized_topology_for_lane(FrameworkLane.MAF_WORKFLOW),
+            FrameworkLane.MAF_HARNESS: normalized_topology_for_lane(FrameworkLane.MAF_HARNESS),
         },
         checkpoint={
             FrameworkLane.MAF_WORKFLOW: CheckpointCapability(

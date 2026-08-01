@@ -7,7 +7,9 @@ import asyncio
 import json
 from importlib.metadata import version
 
+from agent_lab.contract_bundle import contract_bundle_hashes
 from agent_lab.contracts import FrameworkLane
+from agent_lab.matched_contracts import normalized_topology_for_lane
 from agent_lab.runner_host import (
     ApprovalProvider,
     NativeRunnerDescriptor,
@@ -83,6 +85,7 @@ def descriptor() -> NativeRunnerDescriptor:
             "langchain-openai": version("langchain-openai"),
             "langgraph": version("langgraph"),
         },
+        contract_hashes=contract_bundle_hashes(),
         topology={
             FrameworkLane.LANGGRAPH: {
                 "kind": "explicit_workflow",
@@ -109,6 +112,10 @@ def descriptor() -> NativeRunnerDescriptor:
                     "reliability_reviewer",
                 ],
             },
+        },
+        normalized_topology={
+            FrameworkLane.LANGGRAPH: normalized_topology_for_lane(FrameworkLane.LANGGRAPH),
+            FrameworkLane.DEEP_AGENTS: normalized_topology_for_lane(FrameworkLane.DEEP_AGENTS),
         },
         checkpoint={
             FrameworkLane.LANGGRAPH: CheckpointCapability(

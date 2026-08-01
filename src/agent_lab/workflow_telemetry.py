@@ -6,6 +6,14 @@ from typing import Protocol
 
 
 class WorkflowTelemetry(Protocol):
+    async def handoff(
+        self,
+        *,
+        source_actor: str,
+        target_actor: str,
+        phase: str,
+    ) -> None: ...
+
     async def model_started(self, *, actor: str, model: str) -> None: ...
 
     async def model_finished(
@@ -29,6 +37,15 @@ class WorkflowTelemetry(Protocol):
 
 
 class NoOpWorkflowTelemetry:
+    async def handoff(
+        self,
+        *,
+        source_actor: str,
+        target_actor: str,
+        phase: str,
+    ) -> None:
+        return None
+
     async def model_started(self, *, actor: str, model: str) -> None:
         return None
 

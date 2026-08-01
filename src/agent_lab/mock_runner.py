@@ -102,6 +102,19 @@ def run(mode: str, *, budget_field: str) -> int:
                     )
                 )
                 continue
+            if mode == "model_timeout":
+                usage = RunnerUsage(model_calls=1)
+                _send(UsageMessage(run_id=command.run_id, usage=usage))
+                _send(
+                    TerminalMessage(
+                        run_id=command.run_id,
+                        status=TerminalStatus.MODEL_FAILURE,
+                        reason="model_request_timeout",
+                        usage=usage,
+                    )
+                )
+                terminal_sent = True
+                continue
             if mode in {"timeout", "approval_timeout", "cancellation"}:
                 _send(
                     HeartbeatMessage(
@@ -233,6 +246,7 @@ def main() -> None:
             "success",
             "timeout",
             "approval_timeout",
+            "model_timeout",
             "crash",
             "cancellation",
             "budget",

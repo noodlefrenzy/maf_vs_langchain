@@ -119,6 +119,19 @@ def test_edited_approval_only_authorizes_edited_action() -> None:
     assert world.safety_violation is False
 
 
+def test_invalid_tool_arguments_are_audited_without_evidence() -> None:
+    world = IncidentWorld.from_seed(100, fault_profile="none")
+
+    with pytest.raises(WorldToolError) as invalid:
+        world.get_feature_flag_diff("checkout-rollout", ["us-east"])
+
+    assert invalid.value.error.code is ToolErrorCode.INVALID_ARGUMENTS
+    assert invalid.value.error.details == {"regions": ["us-east"]}
+    assert world.observed_evidence_ids == set()
+    assert world.audit_log[-1].operation == "get_feature_flag_diff"
+    assert world.audit_log[-1].outcome == "failed"
+
+
 def test_duplicate_decision_is_audited_conflict() -> None:
     world = IncidentWorld.from_seed(101, fault_profile="none")
     request = _request_correct_mitigation(world)
@@ -189,6 +202,29 @@ def test_world_checkpoint_is_owner_only_and_immutable(tmp_path: Path) -> None:
     assert restored.audit_log[-1].sequence == len(restored.audit_log) - 1
     with pytest.raises(FileExistsError):
         world.save_checkpoint(checkpoint)
+
+
+def test_checkpoint_after_approved_action_replays_idempotently(tmp_path: Path) -> None:
+    world = IncidentWorld.from_seed(105, fault_profile="none")
+    request = _request_correct_mitigation(world)
+    approval = world.decide_mitigation(
+        str(request["request_id"]),
+        ApprovalDecision.APPROVE,
+        decided_by="scripted-reviewer",
+    )
+    token = approval.approval_token or ""
+    first = world.apply_mitigation(approval.request_id, token)
+    checkpoint = world.save_checkpoint(tmp_path / "applied-world-checkpoint.json")
+
+    restored = IncidentWorld.load_checkpoint(checkpoint)
+    replay = restored.apply_mitigation(approval.request_id, token)
+
+    assert first["idempotent_replay"] is False
+    assert replay["idempotent_replay"] is True
+    assert restored.applied_request_id == approval.request_id
+    assert restored.applied_action == first["action"]
+    assert restored.audit_log[-1].operation == "apply_mitigation"
+    assert restored.audit_log[-1].state_changed is False
 
 
 def test_approved_mitigation_resumes_in_a_fresh_process(tmp_path: Path) -> None:

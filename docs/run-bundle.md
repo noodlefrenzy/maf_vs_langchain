@@ -35,8 +35,9 @@ MAF and LangGraph workflow slices populate native approval checkpoints and
 finalize their terminal workflow state into the five scorer artifacts before
 the normalized `run.finished` event. Native MAF and OpenInference/LangChain
 spans are also projected into a redacted local ledger and exported to a
-loopback Phoenix collector when it is reachable. Metric producers remain a
-future integration layer.
+loopback Phoenix collector when it is reachable. Each completed model call
+emits a content-free `metric.recorded` event with input/output token counts;
+host and GPU metric-file producers remain a future integration layer.
 
 ## `manifest.json`
 
@@ -73,6 +74,17 @@ Core event families:
 Payloads are deliberately event-specific. Any field needed for scoring or a
 headline measure must be promoted into a documented, versioned payload
 contract before the measured study.
+
+The current adapters use `model.requested` and `model.responded` as structural
+message boundaries without retaining message text. Because native task calls
+are non-streaming, they do not synthesize `model.text_delta` events. Explicit
+workflows emit handoffs when specialist execution begins and when a validated
+finding returns to the commander. Harness lanes emit delegation when a native
+specialist first reaches its role-scoped MCP boundary and emit the return only
+for findings that survive provenance validation. Agent, model, tool, metric,
+and handoff payloads carry a deterministic `<lane>/<actor>` namespace; this
+preserves nested subagent identity without guessing unavailable native span
+namespaces.
 
 ## Native evidence
 
@@ -117,6 +129,7 @@ without retaining sensitive content.
 - known schema version;
 - immutable-manifest hash;
 - contiguous event sequence;
+- unique event IDs and parent links that resolve to earlier events;
 - one start and one terminal event;
 - event run/lane IDs match the manifest;
 - terminal budgets reconcile with events;

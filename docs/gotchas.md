@@ -353,3 +353,24 @@ make those callback spans the adapter's active context. Both lanes still share
 one verified trace ID per run, but MAF provides finer event-to-span drilldown.
 Do not post-hoc guess a LangGraph child span from timing or name alone; retain
 that correlation-granularity difference as measured evidence.
+
+### Portable handoffs must be grounded in observable boundaries
+
+MAF Workflow and LangGraph expose different native coordination objects, while
+the two harnesses hide still more of their delegation lifecycle inside runtime
+state. The normalized adapter therefore does not infer handoffs from span names
+or model prose. Explicit lanes record delegation at specialist entry and return
+after a validated finding; harness lanes record delegation on the specialist's
+first real role-scoped MCP call and return only after the final proposal passes
+role/evidence provenance checks. This preserves a comparable coordination
+event without pretending the native lifecycle shapes are identical.
+
+The adapter records the stable normalized namespace as `<lane>/<actor>` on
+agent, model, tool, metric, and handoff events. OpenInference did not expose a
+safe, stable nested namespace attribute in the observed projected spans, so the
+adapter does not fabricate deeper graph paths from span names.
+
+Model messages remain content-free structural request/response events. A
+completed call also records input/output token counts as `metric.recorded`, but
+non-streaming calls do not generate synthetic text deltas. Raw prompts,
+messages, tool arguments/results, and reasoning remain excluded.

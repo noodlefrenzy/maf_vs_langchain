@@ -105,8 +105,16 @@ class _TrackedRoleMCP(MCPStreamableHTTPTool):
         self.telemetry = telemetry
         self.called_tools: list[str] = []
         self.observed_evidence_ids: set[str] = set()
+        self.delegation_observed = False
 
     async def call_tool(self, tool_name: str, **kwargs: Any) -> Any:
+        if not self.delegation_observed:
+            await self.telemetry.handoff(
+                source_actor=AgentRole.INCIDENT_COMMANDER.value,
+                target_actor=self.actor,
+                phase="specialist_delegated",
+            )
+            self.delegation_observed = True
         await self.telemetry.tool_started(actor=self.actor, tool_name=tool_name)
         try:
             result = await super().call_tool(tool_name, **kwargs)
@@ -329,6 +337,12 @@ async def run_live_approved(
             )
             proposal = HarnessProposal.model_validate(response.value)
             _validate_role_provenance(proposal, roles)
+        for finding in proposal.findings:
+            await telemetry.handoff(
+                source_actor=finding.role.value,
+                target_actor=AgentRole.INCIDENT_COMMANDER.value,
+                phase="specialist_finding_returned",
+            )
         evidence = evaluate_harness_proposal(proposal)
         if not evidence.passed:
             raise ValueError(f"harness evidence gate failed: {evidence.gate_reasons}")

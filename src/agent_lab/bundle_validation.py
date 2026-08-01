@@ -367,6 +367,13 @@ def _validate_event_stream(
 
     seen_event_ids = set()
     for event in events:
+        if event.event_id in seen_event_ids:
+            _error(
+                findings,
+                "event_id_duplicate",
+                f"Sequence {event.sequence} repeats event_id {event.event_id}.",
+                "events.jsonl",
+            )
         if event.parent_event_id is not None and event.parent_event_id not in seen_event_ids:
             _error(
                 findings,

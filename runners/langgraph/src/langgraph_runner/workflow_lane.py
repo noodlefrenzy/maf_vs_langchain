@@ -418,6 +418,11 @@ class LangGraphRoleAgent:
         return self
 
     async def investigate(self, task: InvestigationTask) -> SpecialistFinding:
+        await self.telemetry.handoff(
+            source_actor=AgentRole.INCIDENT_COMMANDER.value,
+            target_actor=self.role.value,
+            phase="specialist_delegated",
+        )
         observations = []
         observed_evidence_ids: set[str] = set()
         called_tools: list[str] = []
@@ -479,6 +484,11 @@ class LangGraphRoleAgent:
             tool_calls=len(called_tools),
             input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
+        )
+        await self.telemetry.handoff(
+            source_actor=self.role.value,
+            target_actor=AgentRole.INCIDENT_COMMANDER.value,
+            phase="specialist_finding_returned",
         )
         return finding
 
@@ -978,7 +988,9 @@ async def _deterministic_probe() -> dict[str, Any]:
     return EvidencePacket.model_validate(state["packet"]).model_dump(mode="json")
 
 
-async def _deterministic_approved_probe() -> dict[str, Any]:
+async def _deterministic_approval_probe(
+    decision: ApprovalDecision,
+) -> dict[str, Any]:
     async def finding(role: AgentRole, evidence_id: str) -> SpecialistFinding:
         return SpecialistFinding(
             role=role,
@@ -1024,6 +1036,8 @@ async def _deterministic_approved_probe() -> dict[str, Any]:
         )
 
     async def execute(_request_id: str) -> tuple[MitigationResult, RecoveryCheckResult]:
+        if decision is ApprovalDecision.REJECT:
+            raise AssertionError("rejected approval must not reach mitigation")
         mitigation = MitigationResult(
             case_id="case-deterministic",
             request_id="mit-deterministic-01",
@@ -1074,14 +1088,14 @@ async def _deterministic_approved_probe() -> dict[str, Any]:
         )
         if "__interrupt__" not in initial:
             raise RuntimeError("deterministic LangGraph did not pause for approval")
+        response: dict[str, str] = {
+            "request_id": "mit-deterministic-01",
+            "decision": decision.value,
+        }
+        if decision is not ApprovalDecision.REJECT:
+            response["action_to_execute"] = "apply the reversible runbook action"
         resumed = await graph.ainvoke(
-            Command(
-                resume={
-                    "request_id": "mit-deterministic-01",
-                    "decision": ApprovalDecision.APPROVE.value,
-                    "action_to_execute": "apply the reversible runbook action",
-                }
-            ),
+            Command(resume=response),
             config,
         )
         return WorkflowExecutionResult.model_validate(resumed["execution"]).model_dump(mode="json")
@@ -1092,13 +1106,16 @@ def main() -> None:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--deterministic-probe", action="store_true")
     mode.add_argument("--deterministic-approved-probe", action="store_true")
+    mode.add_argument("--deterministic-rejected-probe", action="store_true")
     mode.add_argument("--live-investigation", action="store_true")
     mode.add_argument("--live-approved-run", action="store_true")
     args = parser.parse_args()
     if args.deterministic_probe:
         payload = asyncio.run(_deterministic_probe())
     elif args.deterministic_approved_probe:
-        payload = asyncio.run(_deterministic_approved_probe())
+        payload = asyncio.run(_deterministic_approval_probe(ApprovalDecision.APPROVE))
+    elif args.deterministic_rejected_probe:
+        payload = asyncio.run(_deterministic_approval_probe(ApprovalDecision.REJECT))
     elif args.live_approved_run:
         request_line = sys.stdin.buffer.readline()
         if not request_line:

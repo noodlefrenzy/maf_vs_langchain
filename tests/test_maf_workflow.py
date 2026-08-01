@@ -87,6 +87,34 @@ def test_native_maf_approval_resumes_through_recovery() -> None:
     assert payload["recovery"]["recovered"] is True
 
 
+def test_native_maf_rejection_stops_before_mitigation() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(REPOSITORY_ROOT / "runners/maf"),
+            "--no-sync",
+            "python",
+            "-m",
+            "maf_runner.workflow_lane",
+            "--deterministic-rejected-probe",
+        ],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["status"] == "approval_rejected"
+    assert payload["approval_decision"] == "reject"
+    assert payload["action_to_execute"] is None
+    assert payload["mitigation"] is None
+    assert payload["recovery"] is None
+
+
 @pytest.mark.skipif(
     os.getenv("AGENT_LAB_RUN_LIVE_MODEL_TESTS") != "1",
     reason="requires an explicit tunnel to the aligned lonestar model",

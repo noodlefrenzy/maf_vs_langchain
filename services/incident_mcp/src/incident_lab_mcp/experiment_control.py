@@ -20,6 +20,7 @@ from agent_lab.config import load_experiment, load_model_profile
 from agent_lab.contract_bundle import contract_bundle_hashes
 from agent_lab.contracts import ApprovalDecision, FrameworkLane, RunManifest, TerminalStatus
 from agent_lab.control_plane import ControlPlane, resolve_lane_order
+from agent_lab.matched_contracts import preflight_pair_contract
 from agent_lab.runner_host import NativeRunnerDescriptor
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 from incident_lab_mcp.http_auth import RunCredentialSigner, RunWorldRegistry
@@ -135,6 +136,7 @@ async def _run_experiment(
             )
             registry = RunWorldRegistry()
             pair_by_lane = {}
+            contract_preflights = {}
             for track, left_lane, right_lane in tracks:
                 receipt = registry.create_pair(
                     pair_id=(f"{experiment.experiment_id}:{track}:seed-{seed}:rep-{repetition}"),
@@ -149,6 +151,23 @@ async def _run_experiment(
                 )
                 pair_by_lane[left_lane] = (track, receipt.left)
                 pair_by_lane[right_lane] = (track, receipt.right)
+                contract_preflights[track] = preflight_pair_contract(
+                    track=track,
+                    left_lane=left_lane,
+                    right_lane=right_lane,
+                    descriptors=descriptors,
+                    expected_contract_hashes=hashes,
+                    experiment_id=experiment.experiment_id,
+                    scenario=experiment.scenario,
+                    scenario_seed=seed,
+                    repetition=repetition,
+                    model=model,
+                    budget=experiment.budget,
+                    fault_profile=experiment.fault_profile,
+                    source_commit=source_commit,
+                    source_tree_sha256=source_tree_sha256,
+                    world_manifest_sha256=receipt.left.world_manifest_sha256,
+                )
 
             listener = _listener()
             port = listener.getsockname()[1]
@@ -204,6 +223,11 @@ async def _run_experiment(
                         },
                     )
                     _bundle, paths = control_plane.allocate_run(manifest)
+                    preflight = contract_preflights[track]
+                    _write_json_exclusive(
+                        paths.bundle / "native" / "pair-contract-preflight.json",
+                        preflight,
+                    )
                     request = RunRequest(
                         manifest=manifest,
                         paths=paths,
@@ -261,6 +285,7 @@ async def _run_experiment(
                         "bundle": str(paths.bundle),
                         "world_checkpoint": str(checkpoint),
                         "world_manifest_sha256": receipt.world_manifest_sha256,
+                        "contract_preflight_sha256": preflight["snapshot_sha256"],
                     }
                     trace_link_path = paths.bundle / "native" / "trace-link.json"
                     if trace_link_path.is_file():
@@ -287,6 +312,7 @@ async def _run_experiment(
                     "repetition": repetition,
                     "order_seed": block_order_seed,
                     "lane_order": [lane.value for lane in order.lanes],
+                    "contract_preflights": contract_preflights,
                     "runs": block_runs,
                 }
                 if execution_mode == "native_workflow":

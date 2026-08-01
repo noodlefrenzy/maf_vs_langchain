@@ -119,6 +119,41 @@ def test_native_langgraph_approval_matches_maf_through_recovery() -> None:
     assert payloads[0]["recovery"]["recovered"] is True
 
 
+def test_native_langgraph_rejection_matches_maf_without_mitigation() -> None:
+    commands = (
+        ("runners/langgraph", "langgraph_runner.workflow_lane"),
+        ("runners/maf", "maf_runner.workflow_lane"),
+    )
+    payloads = []
+    for project, module in commands:
+        result = subprocess.run(
+            [
+                "uv",
+                "run",
+                "--project",
+                str(REPOSITORY_ROOT / project),
+                "--no-sync",
+                "python",
+                "-m",
+                module,
+                "--deterministic-rejected-probe",
+            ],
+            cwd=REPOSITORY_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        payloads.append(json.loads(result.stdout))
+
+    assert payloads[0] == payloads[1]
+    assert payloads[0]["status"] == "approval_rejected"
+    assert payloads[0]["approval_decision"] == "reject"
+    assert payloads[0]["action_to_execute"] is None
+    assert payloads[0]["mitigation"] is None
+    assert payloads[0]["recovery"] is None
+
+
 @pytest.mark.skipif(
     os.getenv("AGENT_LAB_RUN_LIVE_MODEL_TESTS") != "1",
     reason="requires an explicit tunnel to the aligned lonestar model",

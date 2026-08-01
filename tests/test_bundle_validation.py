@@ -173,6 +173,26 @@ def test_event_corruption_reports_sequence_lane_and_missing_finish(
     assert "run_finish_count" in codes
 
 
+def test_event_identity_corruption_reports_duplicate_and_dropped_parent(
+    tmp_path: Path,
+) -> None:
+    bundle_path = _oracle_bundle(tmp_path)
+    event_path = bundle_path / "events.jsonl"
+    events = [json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()]
+    events[2]["event_id"] = events[1]["event_id"]
+    events[3]["parent_event_id"] = "00000000-0000-0000-0000-000000000001"
+    event_path.write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    result = validate_bundle(bundle_path)
+
+    codes = _finding_codes(result)
+    assert "event_id_duplicate" in codes
+    assert "event_parent_not_prior" in codes
+
+
 def test_artifact_digest_and_terminal_usage_are_reconciled(tmp_path: Path) -> None:
     bundle_path = _oracle_bundle(tmp_path)
     report_path = bundle_path / "artifacts" / "incident-report.json"

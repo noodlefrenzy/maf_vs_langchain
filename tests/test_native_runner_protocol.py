@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_lab.contract_bundle import contract_bundle_hashes
 from agent_lab.contracts import (
     AgentRole,
     Budget,
@@ -14,6 +15,7 @@ from agent_lab.contracts import (
     TerminalStatus,
 )
 from agent_lab.control_plane import ControlPlane
+from agent_lab.matched_contracts import normalized_topology_for_lane
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -222,6 +224,11 @@ def test_native_runner_describes_supported_lanes(
 
     assert set(payload["supported_lanes"]) == expected_lanes
     assert set(payload["topology"]) == expected_lanes
+    assert set(payload["normalized_topology"]) == expected_lanes
+    assert payload["contract_hashes"] == contract_bundle_hashes()
+    assert payload["normalized_topology"][restart_lane] == normalized_topology_for_lane(
+        FrameworkLane(restart_lane)
+    )
     assert payload["checkpoint"][restart_lane]["resumable"] is True
     assert payload["checkpoint"][restart_lane]["restart_safe"] is True
     unavailable = expected_lanes - {restart_lane}

@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from agent_lab.contracts import (
     ApprovalRequest,
@@ -69,6 +69,7 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         self._agent_events: dict[str, list[NormalizedEvent]] = {}
         self._model_events: dict[str, NormalizedEvent] = {}
         self._tool_events: dict[tuple[str, str], list[NormalizedEvent]] = {}
+        self._last_failed_operation: TerminalStatus | None = None
 
     def start(self) -> None:
         self.emit(
@@ -77,19 +78,42 @@ class WorkflowProtocolSession(WorkflowTelemetry):
             payload={"execution_mode": "native_workflow"},
         )
 
+    async def handoff(
+        self,
+        *,
+        source_actor: str,
+        target_actor: str,
+        phase: str,
+    ) -> None:
+        self.emit(
+            EventKind.HANDOFF,
+            actor=source_actor,
+            payload={
+                "source_actor": source_actor,
+                "target_actor": target_actor,
+                "source_namespace": self._actor_namespace(source_actor),
+                "target_namespace": self._actor_namespace(target_actor),
+                "phase": phase,
+            },
+        )
+
     async def model_started(self, *, actor: str, model: str) -> None:
+        self._last_failed_operation = None
         self._advance_usage("model_calls", 1, "model_call_budget_exhausted")
         agent_event = self.emit(
             EventKind.AGENT_STARTED,
             actor=actor,
-            payload={"phase": "model_turn"},
+            payload={"phase": "model_turn", "namespace": self._actor_namespace(actor)},
         )
         self._agent_events.setdefault(actor, []).append(agent_event)
         event = self.emit(
             EventKind.MODEL_REQUESTED,
             actor=actor,
             parent_event_id=agent_event.event_id,
-            payload={"model": model},
+            payload={
+                "model": model,
+                "namespace": self._actor_namespace(actor),
+            },
         )
         self._model_events[actor] = event
 
@@ -109,6 +133,7 @@ class WorkflowProtocolSession(WorkflowTelemetry):
             parent_event_id=parent.event_id if parent is not None else None,
             payload={
                 "model": model,
+                "namespace": self._actor_namespace(actor),
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
             },
@@ -121,23 +146,41 @@ class WorkflowProtocolSession(WorkflowTelemetry):
             EventKind.AGENT_FINISHED,
             actor=actor,
             parent_event_id=(agent_parent.event_id if agent_parent is not None else None),
-            payload={"phase": "model_turn"},
+            payload={"phase": "model_turn", "namespace": self._actor_namespace(actor)},
+        )
+        self.emit(
+            EventKind.METRIC_RECORDED,
+            actor=actor,
+            payload={
+                "name": "model_token_usage",
+                "model": model,
+                "namespace": self._actor_namespace(actor),
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
         )
         if output_limit_exceeded:
             raise WorkflowBudgetExceeded("output_token_budget_exhausted")
 
     async def tool_started(self, *, actor: str, tool_name: str) -> None:
+        self._last_failed_operation = None
         self._advance_usage("tool_calls", 1, "tool_call_budget_exhausted")
         requested = self.emit(
             EventKind.TOOL_REQUESTED,
             actor=actor,
-            payload={"tool_name": tool_name},
+            payload={
+                "tool_name": tool_name,
+                "namespace": self._actor_namespace(actor),
+            },
         )
         self.emit(
             EventKind.TOOL_STARTED,
             actor=actor,
             parent_event_id=requested.event_id,
-            payload={"tool_name": tool_name},
+            payload={
+                "tool_name": tool_name,
+                "namespace": self._actor_namespace(actor),
+            },
         )
         self._tool_events.setdefault((actor, tool_name), []).append(requested)
 
@@ -156,8 +199,24 @@ class WorkflowProtocolSession(WorkflowTelemetry):
             EventKind.TOOL_FINISHED if succeeded else EventKind.TOOL_FAILED,
             actor=actor,
             parent_event_id=parent.event_id if parent is not None else None,
-            payload={"tool_name": tool_name},
+            payload={
+                "tool_name": tool_name,
+                "namespace": self._actor_namespace(actor),
+            },
         )
+        self._last_failed_operation = None if succeeded else TerminalStatus.TOOL_SERVICE_FAILURE
+
+    def classify_unhandled_failure(self) -> TerminalStatus:
+        """Classify an escaped exception using the last observable operation boundary."""
+
+        if self._tool_events or self._last_failed_operation is TerminalStatus.TOOL_SERVICE_FAILURE:
+            return TerminalStatus.TOOL_SERVICE_FAILURE
+        if self._model_events:
+            return TerminalStatus.MODEL_FAILURE
+        return TerminalStatus.RUNNER_FAILURE
+
+    def _actor_namespace(self, actor: str) -> str:
+        return f"{self.request.manifest.lane.value}/{actor}"
 
     async def request_approval(self, request: ApprovalRequest) -> dict[str, Any]:
         self._advance_usage(
@@ -342,8 +401,22 @@ class NativeRunnerDescriptor(BaseModel):
     name: str
     supported_lanes: tuple[FrameworkLane, ...]
     framework_versions: dict[str, str]
+    contract_hashes: dict[str, str]
     topology: dict[FrameworkLane, dict[str, object]]
+    normalized_topology: dict[FrameworkLane, dict[str, object]]
     checkpoint: dict[FrameworkLane, CheckpointCapability]
+
+    @model_validator(mode="after")
+    def validate_lane_metadata(self) -> NativeRunnerDescriptor:
+        supported = set(self.supported_lanes)
+        for label, lane_map in (
+            ("topology", self.topology),
+            ("normalized topology", self.normalized_topology),
+            ("checkpoint", self.checkpoint),
+        ):
+            if set(lane_map) != supported:
+                raise ValueError(f"{label} lanes must exactly match supported lanes")
+        return self
 
     def prepared_run(self, request: RunRequest) -> PreparedRun:
         lane = request.manifest.lane
@@ -437,8 +510,13 @@ async def run_workflow_protocol(
         session.fail(terminal_status, terminal_reason)
     except Exception as exc:
         traceback.print_exc(file=sys.stderr)
-        terminal_status = TerminalStatus.RUNNER_FAILURE
-        terminal_reason = f"native_workflow_failed:{type(exc).__name__}"
+        terminal_status = session.classify_unhandled_failure()
+        reason_prefix = {
+            TerminalStatus.MODEL_FAILURE: "native_model_failed",
+            TerminalStatus.TOOL_SERVICE_FAILURE: "native_tool_service_failed",
+            TerminalStatus.RUNNER_FAILURE: "native_workflow_failed",
+        }[terminal_status]
+        terminal_reason = f"{reason_prefix}:{type(exc).__name__}"
         session.fail(terminal_status, terminal_reason)
     session.terminal(terminal_status, terminal_reason)
     if tracing is not None:

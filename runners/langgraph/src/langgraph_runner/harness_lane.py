@@ -142,9 +142,17 @@ class _ToolTracker:
         self.telemetry = telemetry
         self.called_tools: list[str] = []
         self.observed_evidence_ids: set[str] = set()
+        self.delegation_observed = False
 
     def wrap(self, tool: BaseTool) -> BaseTool:
         async def invoke(**arguments: Any) -> Any:
+            if not self.delegation_observed:
+                await self.telemetry.handoff(
+                    source_actor=AgentRole.INCIDENT_COMMANDER.value,
+                    target_actor=self.actor,
+                    phase="specialist_delegated",
+                )
+                self.delegation_observed = True
             await self.telemetry.tool_started(actor=self.actor, tool_name=tool.name)
             try:
                 result = await tool.ainvoke(arguments)
@@ -363,6 +371,12 @@ async def run_live_approved(
     )
     proposal = HarnessProposal.model_validate(synthesis_state.get("structured_response"))
     _validate_role_provenance(proposal, trackers)
+    for finding in proposal.findings:
+        await telemetry.handoff(
+            source_actor=finding.role.value,
+            target_actor=AgentRole.INCIDENT_COMMANDER.value,
+            phase="specialist_finding_returned",
+        )
     evidence = evaluate_harness_proposal(proposal)
     if not evidence.passed:
         raise ValueError(f"harness evidence gate failed: {evidence.gate_reasons}")

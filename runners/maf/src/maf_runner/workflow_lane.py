@@ -509,6 +509,11 @@ class MafRoleAgent:
         await self._stack.__aexit__(*exc_info)
 
     async def investigate(self, task: InvestigationTask) -> SpecialistFinding:
+        await self.telemetry.handoff(
+            source_actor=AgentRole.INCIDENT_COMMANDER.value,
+            target_actor=self.role.value,
+            phase="specialist_delegated",
+        )
         observations = []
         observed_evidence_ids: set[str] = set()
         for tool_name, arguments in _observation_calls(self.role):
@@ -573,6 +578,11 @@ class MafRoleAgent:
             tool_calls=len(tool_names),
             input_tokens=int(usage.get("input_token_count", 0)),
             output_tokens=int(usage.get("output_token_count", 0)),
+        )
+        await self.telemetry.handoff(
+            source_actor=self.role.value,
+            target_actor=AgentRole.INCIDENT_COMMANDER.value,
+            phase="specialist_finding_returned",
         )
         return finding
 
@@ -1045,7 +1055,9 @@ async def _deterministic_probe() -> dict[str, Any]:
     return outputs[0].model_dump(mode="json")
 
 
-async def _deterministic_approved_probe() -> dict[str, Any]:
+async def _deterministic_approval_probe(
+    decision: ApprovalDecision,
+) -> dict[str, Any]:
     async def finding(role: AgentRole, evidence_id: str) -> SpecialistFinding:
         return SpecialistFinding(
             role=role,
@@ -1091,6 +1103,8 @@ async def _deterministic_approved_probe() -> dict[str, Any]:
         )
 
     async def execute(_request_id: str) -> tuple[MitigationResult, RecoveryCheckResult]:
+        if decision is ApprovalDecision.REJECT:
+            raise AssertionError("rejected approval must not reach mitigation")
         mitigation = MitigationResult(
             case_id="case-deterministic",
             request_id="mit-deterministic-01",
@@ -1137,16 +1151,16 @@ async def _deterministic_approved_probe() -> dict[str, Any]:
         if len(requests) != 1 or latest is None:
             raise RuntimeError("deterministic MAF workflow did not pause for approval")
         request_id = requests[0].request_id
+        response: dict[str, str] = {
+            "request_id": request_id,
+            "decision": decision.value,
+        }
+        if decision is not ApprovalDecision.REJECT:
+            response["action_to_execute"] = "apply the reversible runbook action"
         resumed = await workflow.run(
             checkpoint_id=latest.checkpoint_id,
             checkpoint_storage=storage,
-            responses={
-                request_id: {
-                    "request_id": request_id,
-                    "decision": ApprovalDecision.APPROVE.value,
-                    "action_to_execute": "apply the reversible runbook action",
-                }
-            },
+            responses={request_id: response},
         )
         outputs = [
             WorkflowExecutionResult.model_validate(output)
@@ -1154,7 +1168,7 @@ async def _deterministic_approved_probe() -> dict[str, Any]:
             if isinstance(output, dict) and "status" in output
         ]
         if len(outputs) != 1:
-            raise RuntimeError("deterministic MAF workflow did not complete after approval")
+            raise RuntimeError("deterministic MAF workflow did not terminate after approval")
         return outputs[0].model_dump(mode="json")
 
 
@@ -1163,13 +1177,16 @@ def main() -> None:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--deterministic-probe", action="store_true")
     mode.add_argument("--deterministic-approved-probe", action="store_true")
+    mode.add_argument("--deterministic-rejected-probe", action="store_true")
     mode.add_argument("--live-investigation", action="store_true")
     mode.add_argument("--live-approved-run", action="store_true")
     args = parser.parse_args()
     if args.deterministic_probe:
         payload = asyncio.run(_deterministic_probe())
     elif args.deterministic_approved_probe:
-        payload = asyncio.run(_deterministic_approved_probe())
+        payload = asyncio.run(_deterministic_approval_probe(ApprovalDecision.APPROVE))
+    elif args.deterministic_rejected_probe:
+        payload = asyncio.run(_deterministic_approval_probe(ApprovalDecision.REJECT))
     elif args.live_approved_run:
         request_line = sys.stdin.buffer.readline()
         if not request_line:
