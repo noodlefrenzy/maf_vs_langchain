@@ -19,6 +19,11 @@ jobs:
           python-version: "3.12"
       - name: Install locked core environment
         run: uv sync --locked
+      - name: Install locked subprocess test environments
+        run: |
+          uv sync --project runners/maf --locked
+          uv sync --project runners/langgraph --locked
+          uv sync --project services/incident_mcp --locked
       - name: Lint
         run: uv run ruff check .
       - name: Check formatting
