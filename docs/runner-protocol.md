@@ -118,5 +118,10 @@ timeout, approval timeout, explicit cancellation, graceful shutdown, and all
 four usage budgets. Native MAF and LangGraph processes also implement the
 boundary in an explicit `protocol_probe` mode. They report installed framework
 versions and planned topology, emit canonical run lifecycle events, and prove
-process compatibility without calling a model or MCP tool. Actual lane
-execution plugs into the same handlers in the lane implementation issues.
+process compatibility without calling a model or MCP tool. The explicit
+workflow lanes additionally run through the same boundary with `--run`, emit
+pre-dispatch model/tool/approval usage and normalized events, pause for a
+token-bound approval command, and persist an owner-only terminal workflow state
+under `state/`. Final scorer artifacts are the next integration layer; until
+those are present, these live compatibility executions are not complete
+benchmark bundles.

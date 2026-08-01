@@ -29,12 +29,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_lab.contracts import AgentRole, ApprovalDecision, ApprovalRequest, ModelProfile
 from agent_lab.prompt_bundle import render_role_prompt
+from agent_lab.runner_host import ApprovalProvider
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 from agent_lab.tool_catalog import (
     MitigationResult,
     RecoveryCheckResult,
     tool_definitions_for_role,
 )
+from agent_lab.workflow_telemetry import NOOP_WORKFLOW_TELEMETRY, WorkflowTelemetry
 
 SPECIALIST_ROLES = (
     AgentRole.TELEMETRY_INVESTIGATOR,
@@ -444,12 +446,19 @@ def build_approved_workflow(
 class MafRoleAgent:
     """One MAF agent bound to exactly one role endpoint and shared model profile."""
 
-    def __init__(self, role: AgentRole, endpoint: RoleEndpoint, profile: ModelProfile) -> None:
+    def __init__(
+        self,
+        role: AgentRole,
+        endpoint: RoleEndpoint,
+        profile: ModelProfile,
+        telemetry: WorkflowTelemetry = NOOP_WORKFLOW_TELEMETRY,
+    ) -> None:
         if endpoint.role is not role:
             raise ValueError("role endpoint does not match the specialist agent")
         self.role = role
         self.endpoint = endpoint
         self.profile = profile
+        self.telemetry = telemetry
         self.stats = RoleRunStats(model_calls=0, tool_calls=0, input_tokens=0, output_tokens=0)
         self._stack = AsyncExitStack()
         sdk = AsyncOpenAI(
@@ -503,7 +512,7 @@ class MafRoleAgent:
         observations = []
         observed_evidence_ids: set[str] = set()
         for tool_name, arguments in _observation_calls(self.role):
-            result = await self._mcp.call_tool(tool_name, **arguments)
+            result = await self._call_tool(tool_name, **arguments)
             rendered = _render_tool_result(result)
             observed_evidence_ids.update(_evidence_ids(rendered))
             observations.append({"tool": tool_name, "result": rendered})
@@ -517,6 +526,7 @@ class MafRoleAgent:
         )
         if task.feedback:
             prompt += "\nEvidence-gate feedback:\n- " + "\n- ".join(task.feedback)
+        await self.telemetry.model_started(actor=self.role.value, model=self.profile.name)
         response = await self.agent.run(
             prompt,
             options={
@@ -528,6 +538,13 @@ class MafRoleAgent:
                 "response_format": SpecialistFinding,
                 "tool_choice": "none",
             },
+        )
+        usage = response.usage_details or {}
+        await self.telemetry.model_finished(
+            actor=self.role.value,
+            model=self.profile.name,
+            input_tokens=int(usage.get("input_token_count", 0)),
+            output_tokens=int(usage.get("output_token_count", 0)),
         )
         if not isinstance(response.value, SpecialistFinding):
             raise TypeError(f"{self.role.value} did not return a SpecialistFinding")
@@ -549,7 +566,6 @@ class MafRoleAgent:
                 f"{self.role.value} cited evidence not returned by its MCP tools: "
                 f"cited={finding.evidence_ids}, observed={sorted(observed_evidence_ids)}"
             )
-        usage = response.usage_details or {}
         self.stats = RoleRunStats(
             model_calls=sum(
                 1 for message in response.messages if getattr(message, "role", None) == "assistant"
@@ -560,14 +576,38 @@ class MafRoleAgent:
         )
         return finding
 
+    async def _call_tool(self, tool_name: str, **arguments: Any) -> Any:
+        await self.telemetry.tool_started(actor=self.role.value, tool_name=tool_name)
+        try:
+            result = await self._mcp.call_tool(tool_name, **arguments)
+        except Exception:
+            await self.telemetry.tool_finished(
+                actor=self.role.value,
+                tool_name=tool_name,
+                succeeded=False,
+            )
+            raise
+        await self.telemetry.tool_finished(
+            actor=self.role.value,
+            tool_name=tool_name,
+            succeeded=True,
+        )
+        return result
+
 
 class MafCommanderAgent:
     """MAF incident commander that synthesizes specialist evidence without MCP mutation."""
 
-    def __init__(self, endpoint: RoleEndpoint, profile: ModelProfile) -> None:
+    def __init__(
+        self,
+        endpoint: RoleEndpoint,
+        profile: ModelProfile,
+        telemetry: WorkflowTelemetry = NOOP_WORKFLOW_TELEMETRY,
+    ) -> None:
         if endpoint.role is not AgentRole.INCIDENT_COMMANDER:
             raise ValueError("commander endpoint does not match the incident commander")
         self.profile = profile
+        self.telemetry = telemetry
         self.stats = RoleRunStats(model_calls=0, tool_calls=0, input_tokens=0, output_tokens=0)
         self._stack = AsyncExitStack()
         sdk = AsyncOpenAI(
@@ -625,6 +665,10 @@ class MafCommanderAgent:
             f"Specialist findings:\n"
             f"{json.dumps([item.model_dump(mode='json') for item in findings], sort_keys=True)}"
         )
+        await self.telemetry.model_started(
+            actor=AgentRole.INCIDENT_COMMANDER.value,
+            model=self.profile.name,
+        )
         response = await self.agent.run(
             prompt,
             options={
@@ -637,9 +681,15 @@ class MafCommanderAgent:
                 "tool_choice": "none",
             },
         )
+        usage = response.usage_details or {}
+        await self.telemetry.model_finished(
+            actor=AgentRole.INCIDENT_COMMANDER.value,
+            model=self.profile.name,
+            input_tokens=int(usage.get("input_token_count", 0)),
+            output_tokens=int(usage.get("output_token_count", 0)),
+        )
         if not isinstance(response.value, CommanderSynthesis):
             raise TypeError("incident commander did not return a CommanderSynthesis")
-        usage = response.usage_details or {}
         self.stats = RoleRunStats(
             model_calls=sum(
                 1 for message in response.messages if getattr(message, "role", None) == "assistant"
@@ -652,13 +702,13 @@ class MafCommanderAgent:
 
     async def prepare_mitigation(self, evidence: EvidencePacket) -> ApprovalRequest:
         synthesis = evidence.synthesis
-        await self._mcp.call_tool(
+        await self._call_tool(
             "submit_hypothesis",
             root_cause=synthesis.root_cause,
             evidence_ids=synthesis.evidence_ids,
             mitigation=synthesis.proposed_mitigation,
         )
-        result = await self._mcp.call_tool(
+        result = await self._call_tool(
             "request_mitigation",
             proposed_action=synthesis.proposed_mitigation,
             rationale=(
@@ -676,12 +726,12 @@ class MafCommanderAgent:
         request_id: str,
         approval_token: str,
     ) -> tuple[MitigationResult, RecoveryCheckResult]:
-        mitigation_result = await self._mcp.call_tool(
+        mitigation_result = await self._call_tool(
             "apply_mitigation",
             request_id=request_id,
             approval_token=approval_token,
         )
-        recovery_result = await self._mcp.call_tool(
+        recovery_result = await self._call_tool(
             "verify_recovery",
             services=["checkout-api"],
         )
@@ -696,6 +746,25 @@ class MafCommanderAgent:
 
     def _update_tool_stats(self) -> None:
         self.stats = self.stats.model_copy(update={"tool_calls": len(self._mcp.called_tools)})
+
+    async def _call_tool(self, tool_name: str, **arguments: Any) -> Any:
+        actor = AgentRole.INCIDENT_COMMANDER.value
+        await self.telemetry.tool_started(actor=actor, tool_name=tool_name)
+        try:
+            result = await self._mcp.call_tool(tool_name, **arguments)
+        except Exception:
+            await self.telemetry.tool_finished(
+                actor=actor,
+                tool_name=tool_name,
+                succeeded=False,
+            )
+            raise
+        await self.telemetry.tool_finished(
+            actor=actor,
+            tool_name=tool_name,
+            succeeded=True,
+        )
+        return result
 
 
 def _observation_calls(role: AgentRole) -> tuple[tuple[str, dict[str, Any]], ...]:
@@ -828,7 +897,11 @@ async def run_live_investigation(request: RunRequest) -> dict[str, Any]:
         }
 
 
-async def run_live_approved(request: RunRequest) -> dict[str, Any]:
+async def run_live_approved(
+    request: RunRequest,
+    approval_provider: ApprovalProvider | None = None,
+    telemetry: WorkflowTelemetry = NOOP_WORKFLOW_TELEMETRY,
+) -> dict[str, Any]:
     """Run through native approval, then apply mitigation and verify recovery."""
 
     required_roles = (*SPECIALIST_ROLES, AgentRole.INCIDENT_COMMANDER)
@@ -844,11 +917,18 @@ async def run_live_approved(request: RunRequest) -> dict[str, Any]:
         agents: dict[AgentRole, MafRoleAgent] = {}
         for role in SPECIALIST_ROLES:
             agents[role] = await stack.enter_async_context(
-                MafRoleAgent(role, request.role_endpoints[role], request.manifest.model)
+                MafRoleAgent(
+                    role,
+                    request.role_endpoints[role],
+                    request.manifest.model,
+                    telemetry,
+                )
             )
         commander_agent = await stack.enter_async_context(
             MafCommanderAgent(
-                request.role_endpoints[AgentRole.INCIDENT_COMMANDER], request.manifest.model
+                request.role_endpoints[AgentRole.INCIDENT_COMMANDER],
+                request.manifest.model,
+                telemetry,
             )
         )
 
@@ -874,16 +954,19 @@ async def run_live_approved(request: RunRequest) -> dict[str, Any]:
             raise RuntimeError("MAF workflow did not persist exactly one approval request")
         approval_event = requests[0]
         envelope = ApprovalEnvelope.model_validate(approval_event.data)
-        _emit_json_line(
-            {
-                "kind": "approval_requested",
-                "request": envelope.request.model_dump(mode="json"),
-            }
-        )
-        response_line = await asyncio.to_thread(sys.stdin.buffer.readline)
-        if not response_line:
-            raise RuntimeError("approval response stream closed before a decision")
-        response = ApprovalResponse.model_validate_json(response_line)
+        if approval_provider is None:
+            _emit_json_line(
+                {
+                    "kind": "approval_requested",
+                    "request": envelope.request.model_dump(mode="json"),
+                }
+            )
+            response_line = await asyncio.to_thread(sys.stdin.buffer.readline)
+            if not response_line:
+                raise RuntimeError("approval response stream closed before a decision")
+            response = ApprovalResponse.model_validate_json(response_line)
+        else:
+            response = ApprovalResponse.model_validate(await approval_provider(envelope.request))
         if response.request_id != envelope.request.request_id:
             raise ValueError("approval response request ID differs from the pending request")
         if response.decision in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:

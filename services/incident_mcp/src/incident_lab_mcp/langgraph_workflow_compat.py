@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import socket
 import tempfile
 from pathlib import Path
@@ -14,8 +13,16 @@ import httpx
 import uvicorn
 
 from agent_lab.contract_bundle import contract_bundle_hashes
-from agent_lab.contracts import ApprovalDecision, Budget, FrameworkLane, ModelProfile, RunManifest
-from agent_lab.runner_protocol import RoleEndpoint, RunPaths, RunRequest
+from agent_lab.contracts import (
+    ApprovalDecision,
+    Budget,
+    FrameworkLane,
+    ModelProfile,
+    RunManifest,
+    TerminalStatus,
+)
+from agent_lab.control_plane import ControlPlane
+from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 from incident_lab_mcp.http_auth import RunCredentialSigner, RunWorldRegistry
 from incident_lab_mcp.http_service import build_http_app, issue_endpoint_credentials
 from incident_lab_mcp.roles import ROLE_TO_AGENT_ROLE
@@ -70,10 +77,6 @@ async def run_live_langgraph_workflow(base_url: str, model: str) -> dict[str, ob
             if item["run_id"] == str(receipt.right.run_id)
         }
         with tempfile.TemporaryDirectory(prefix="agent-lab-langgraph-live-") as raw_run_root:
-            run_root = Path(raw_run_root).resolve() / str(receipt.right.run_id)
-            run_root.mkdir(mode=0o700)
-            for child in ("workspace", "checkpoints", "state", "traces"):
-                (run_root / child).mkdir(mode=0o700)
             hashes = contract_bundle_hashes()
             manifest = RunManifest(
                 run_id=receipt.right.run_id,
@@ -109,24 +112,19 @@ async def run_live_langgraph_workflow(base_url: str, model: str) -> dict[str, ob
                 tool_catalog_sha256=hashes["tool_catalog_sha256"],
                 world_manifest_sha256=receipt.right.world_manifest_sha256,
             )
+            control_plane = ControlPlane(Path(raw_run_root), graceful_shutdown_seconds=2)
+            _bundle, paths = control_plane.allocate_run(manifest)
             request = RunRequest(
                 manifest=manifest,
-                paths=RunPaths(
-                    run_root=run_root,
-                    bundle=run_root,
-                    workspace=run_root / "workspace",
-                    checkpoints=run_root / "checkpoints",
-                    state=run_root / "state",
-                    traces=run_root / "traces",
-                ),
+                paths=paths,
                 role_endpoints=role_endpoints,
                 public_ticket=str(
                     registry.get(receipt.right.run_id).world.incident.public_view()["brief"]
                 ),
                 order_seed=1729,
             )
-            payload = await _run_langgraph_approved_subprocess(request, registry)
-            checkpoint_path = run_root / "checkpoints" / "workflow.json"
+            payload = await _run_langgraph_protocol(control_plane, request, registry)
+            checkpoint_path = paths.checkpoints / "workflow.json"
             checkpoint_text = checkpoint_path.read_text(encoding="utf-8")
             if "approval_token" in checkpoint_text:
                 raise RuntimeError("LangGraph checkpoint persisted an approval token")
@@ -160,13 +158,22 @@ async def run_live_langgraph_workflow(base_url: str, model: str) -> dict[str, ob
         listener.close()
 
 
-async def _run_langgraph_approved_subprocess(
+async def _run_langgraph_protocol(
+    control_plane: ControlPlane,
     request: RunRequest,
     registry: RunWorldRegistry,
 ) -> dict[str, object]:
-    environment = dict(os.environ)
-    environment.pop("VIRTUAL_ENV", None)
-    process = await asyncio.create_subprocess_exec(
+    world = registry.get(request.manifest.run_id).world
+
+    async def approve(event):
+        return world.decide_mitigation(
+            str(event.payload["request_id"]),
+            ApprovalDecision.EDIT,
+            decided_by="langgraph-live-compat-reviewer",
+            edited_action=SEED_42_RECOVERY_ACTION,
+        )
+
+    command = [
         "uv",
         "run",
         "--project",
@@ -174,69 +181,30 @@ async def _run_langgraph_approved_subprocess(
         "--no-sync",
         "python",
         "-m",
-        "langgraph_runner.workflow_lane",
-        "--live-approved-run",
-        cwd=REPOSITORY_ROOT,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=environment,
-    )
-    if process.stdin is None or process.stdout is None or process.stderr is None:
-        raise RuntimeError("LangGraph approved subprocess pipes were not created")
-    process.stdin.write(request.model_dump_json().encode() + b"\n")
-    await process.stdin.drain()
-    approval_line = await asyncio.wait_for(
-        process.stdout.readline(),
-        timeout=request.manifest.budget.wall_clock_seconds,
-    )
-    if not approval_line:
-        _stdout, stderr = await process.communicate()
+        "langgraph_runner.protocol_runner",
+        "--run",
+    ]
+    result = await control_plane.execute(command, request, approval_handler=approve)
+    if result.terminal.status is not TerminalStatus.COMPLETED:
         raise RuntimeError(
-            f"LangGraph workflow exited before requesting approval with {process.returncode}: "
-            f"{stderr.decode(errors='replace')}"
+            f"LangGraph protocol workflow failed with {result.terminal.status.value}: "
+            f"{result.terminal.reason}; stderr={result.stderr_path.read_text()!r}"
         )
-    approval_event = json.loads(approval_line)
-    if approval_event.get("kind") != "approval_requested":
-        raise RuntimeError(
-            f"LangGraph workflow returned an unexpected approval event: {approval_event}"
-        )
-    request_id = str(approval_event["request"]["request_id"])
-    world = registry.get(request.manifest.run_id).world
-    approval = world.decide_mitigation(
-        request_id,
-        ApprovalDecision.EDIT,
-        decided_by="langgraph-live-compat-reviewer",
-        edited_action=SEED_42_RECOVERY_ACTION,
-    )
-    process.stdin.write(
-        (
-            json.dumps(
-                {
-                    "request_id": approval.request_id,
-                    "decision": approval.decision.value,
-                    "action_to_execute": approval.action_to_execute,
-                    "approval_token": approval.approval_token,
-                },
-                sort_keys=True,
-            )
-            + "\n"
-        ).encode()
-    )
-    await process.stdin.drain()
-    stdout, stderr = await asyncio.wait_for(
-        process.communicate(),
-        timeout=request.manifest.budget.wall_clock_seconds,
-    )
-    if process.returncode != 0:
-        raise RuntimeError(
-            f"LangGraph live approved workflow failed with {process.returncode}: "
-            f"{stderr.decode(errors='replace')}"
-        )
-    lines = stdout.splitlines()
-    if len(lines) != 1:
-        raise RuntimeError(f"LangGraph workflow emitted {len(lines)} terminal payloads")
-    return json.loads(lines[0])
+    payload = json.loads((request.paths.state / "workflow-execution.json").read_text())
+    events = [
+        json.loads(line)
+        for line in (request.paths.bundle / "events.jsonl").read_text().splitlines()
+    ]
+    return {
+        **payload,
+        "protocol_terminal_status": result.terminal.status.value,
+        "protocol_usage": {
+            "model_calls": result.terminal.used_model_calls,
+            "tool_calls": result.terminal.used_tool_calls,
+            "output_tokens": result.terminal.used_output_tokens,
+        },
+        "normalized_event_kinds": [event["kind"] for event in events],
+    }
 
 
 async def _verify_model(base_url: str, model: str) -> list[str]:

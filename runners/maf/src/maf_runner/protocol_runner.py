@@ -3,16 +3,32 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from importlib.metadata import version
 
 from agent_lab.contracts import FrameworkLane
 from agent_lab.runner_host import (
+    ApprovalProvider,
     NativeRunnerDescriptor,
     descriptor_payload,
     run_protocol_probe,
+    run_workflow_protocol,
 )
-from agent_lab.runner_protocol import CheckpointCapability
+from agent_lab.runner_protocol import CheckpointCapability, RunRequest
+from agent_lab.workflow_telemetry import WorkflowTelemetry
+
+
+async def _execute_workflow(
+    request: RunRequest,
+    approval_provider: ApprovalProvider,
+    telemetry: WorkflowTelemetry,
+) -> dict[str, object]:
+    if request.manifest.lane is not FrameworkLane.MAF_WORKFLOW:
+        raise ValueError("real execution is implemented only for maf_workflow")
+    from maf_runner.workflow_lane import run_live_approved
+
+    return await run_live_approved(request, approval_provider, telemetry)
 
 
 def descriptor() -> NativeRunnerDescriptor:
@@ -75,12 +91,15 @@ def main() -> None:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--describe", action="store_true")
     mode.add_argument("--protocol-probe", action="store_true")
+    mode.add_argument("--run", action="store_true")
     args = parser.parse_args()
 
     runner = descriptor()
     if args.describe:
         print(json.dumps(descriptor_payload(runner), sort_keys=True))
         return
+    if args.run:
+        raise SystemExit(asyncio.run(run_workflow_protocol(runner, _execute_workflow)))
     raise SystemExit(run_protocol_probe(runner))
 
 

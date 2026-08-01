@@ -161,6 +161,18 @@ def test_live_langgraph_workflow_uses_native_approval_and_recovers() -> None:
     assert payload["world_state_changed"] is True
     assert payload["checkpoint_contains_approval_token"] is False
     assert payload["compatibility_approval_policy"] == ("seed_42_edit_to_known_recovery_action")
+    assert payload["protocol_terminal_status"] == "completed"
+    assert payload["protocol_usage"]["model_calls"] == 4
+    assert payload["protocol_usage"]["tool_calls"] == 10
+    assert payload["protocol_usage"]["output_tokens"] > 0
+    assert payload["normalized_event_kinds"][0] == "run.started"
+    assert payload["normalized_event_kinds"][-1] == "run.finished"
+    assert payload["normalized_event_kinds"].count("model.requested") == 4
+    assert payload["normalized_event_kinds"].count("model.responded") == 4
+    assert payload["normalized_event_kinds"].count("tool.requested") == 10
+    assert payload["normalized_event_kinds"].count("approval.requested") == 1
+    assert payload["normalized_event_kinds"].count("approval.decided") == 1
+    assert payload["normalized_event_kinds"].count("checkpoint.saved") == 1
     assert sorted(payload["world_operations"]) == sorted(
         [
             "query_service_health",

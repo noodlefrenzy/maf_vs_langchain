@@ -76,3 +76,6 @@ quality cannot prevent the orchestration path from being exercised. Approval
 tokens remain in process memory and are excluded from checkpoints and output.
 This scripted policy inspects fixture truth, so its runs are benchmark-ineligible
 test infrastructure, not a substitute for the control-plane approval command.
+The runner itself uses `maf_runner.protocol_runner --run`; model/tool usage,
+approval, checkpoint, state, and terminal transitions therefore cross the same
+normalized lifecycle boundary used by the experiment control plane.

@@ -75,12 +75,12 @@ token.
 
 ## Cross-process compatibility harness
 
-The live approval controller and runner use a two-phase JSON-lines protocol:
-the runner emits one approval request, consumes one decision, and emits one
-terminal payload. If the runner exits before phase one, `stdout.readline()`
-returns EOF (`b""`), not a structured error. The controller must collect and
-surface child stderr before attempting `json.loads`; otherwise the useful
-framework traceback is replaced by an unrelated JSON decoding error.
+The first live approval harness used an ad hoc two-phase JSON-lines exchange.
+If the runner exited before phase one, `stdout.readline()` returned EOF
+(`b""`), not a structured error; attempting `json.loads` then hid the useful
+framework traceback behind an unrelated decoding error. That harness has been
+replaced by the normalized runner protocol and control plane, but all subprocess
+entry points should still surface child stderr when EOF arrives unexpectedly.
 
 ## Model output versus orchestration compatibility
 
@@ -115,3 +115,18 @@ record fields plus token over runner stdin.
 This command is deliberately ephemeral. Do not persist raw control-plane input
 or include the token in an `approval.decided` event. Mock-process tests scan the
 event and stderr outputs to keep that boundary honest.
+
+### Synchronous stdin and long native awaits
+
+The current real-workflow protocol session reads the next command while paused
+for approval and again after its terminal message. It does not keep a competing
+background `readline` alive during model or MCP awaits: cancelling
+`asyncio.to_thread(sys.stdin.buffer.readline)` does not stop the underlying
+thread and can make that thread consume a later approval command.
+
+Local usage checks therefore fail before an over-budget model, tool, or
+approval dispatch, while wall-clock cancellation during an in-flight native
+await still relies on the control plane's terminate/kill fallback. A future
+fully graceful cancellation path should use an actual asynchronous pipe reader
+or a dedicated single reader that feeds a command queue; do not add multiple
+stdin readers.

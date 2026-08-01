@@ -23,12 +23,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_lab.contracts import AgentRole, ApprovalDecision, ApprovalRequest, ModelProfile
 from agent_lab.prompt_bundle import render_role_prompt
+from agent_lab.runner_host import ApprovalProvider
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 from agent_lab.tool_catalog import (
     MitigationResult,
     RecoveryCheckResult,
     tool_definitions_for_role,
 )
+from agent_lab.workflow_telemetry import NOOP_WORKFLOW_TELEMETRY, WorkflowTelemetry
 from langgraph_runner.checkpoint_compat import _FileBackedSaver
 
 SPECIALIST_ROLES = (
@@ -358,12 +360,19 @@ def build_approved_graph(
 class LangGraphRoleAgent:
     """One LangChain agent bound to exactly one role endpoint and shared model profile."""
 
-    def __init__(self, role: AgentRole, endpoint: RoleEndpoint, profile: ModelProfile) -> None:
+    def __init__(
+        self,
+        role: AgentRole,
+        endpoint: RoleEndpoint,
+        profile: ModelProfile,
+        telemetry: WorkflowTelemetry = NOOP_WORKFLOW_TELEMETRY,
+    ) -> None:
         if endpoint.role is not role:
             raise ValueError("role endpoint does not match the specialist agent")
         self.role = role
         self.endpoint = endpoint
         self.profile = profile
+        self.telemetry = telemetry
         self.stats = RoleRunStats(model_calls=0, tool_calls=0, input_tokens=0, output_tokens=0)
         self._mcp = MultiServerMCPClient(
             {
@@ -413,7 +422,7 @@ class LangGraphRoleAgent:
         observed_evidence_ids: set[str] = set()
         called_tools: list[str] = []
         for tool_name, arguments in _observation_calls(self.role):
-            result = await self._tools[tool_name].ainvoke(arguments)
+            result = await self._call_tool(tool_name, arguments)
             called_tools.append(tool_name)
             rendered = _render_tool_result(result)
             observed_evidence_ids.update(_evidence_ids(rendered))
@@ -428,8 +437,16 @@ class LangGraphRoleAgent:
         )
         if task.feedback:
             prompt += "\nEvidence-gate feedback:\n- " + "\n- ".join(task.feedback)
+        await self.telemetry.model_started(actor=self.role.value, model=self.profile.name)
         response = await self._structured_client.ainvoke(
             [("system", render_role_prompt(self.role)), ("user", prompt)]
+        )
+        usage = _usage(response.get("raw") if isinstance(response, dict) else None)
+        await self.telemetry.model_finished(
+            actor=self.role.value,
+            model=self.profile.name,
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
         )
         if not isinstance(response, dict):
             raise TypeError(f"{self.role.value} returned an invalid structured response")
@@ -457,7 +474,6 @@ class LangGraphRoleAgent:
                 f"{self.role.value} cited evidence not returned by its MCP tools: "
                 f"cited={finding.evidence_ids}, observed={sorted(observed_evidence_ids)}"
             )
-        usage = _usage(response.get("raw"))
         self.stats = RoleRunStats(
             model_calls=1,
             tool_calls=len(called_tools),
@@ -466,14 +482,39 @@ class LangGraphRoleAgent:
         )
         return finding
 
+    async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        await self.telemetry.tool_started(actor=self.role.value, tool_name=name)
+        try:
+            result = await self._tools[name].ainvoke(arguments)
+        except Exception:
+            await self.telemetry.tool_finished(
+                actor=self.role.value,
+                tool_name=name,
+                succeeded=False,
+            )
+            raise
+        await self.telemetry.tool_finished(
+            actor=self.role.value,
+            tool_name=name,
+            succeeded=True,
+        )
+        return result
+
 
 class LangGraphCommanderAgent:
     """LangChain incident commander that synthesizes evidence without MCP mutation."""
 
-    def __init__(self, endpoint: RoleEndpoint, profile: ModelProfile) -> None:
+    def __init__(
+        self,
+        endpoint: RoleEndpoint,
+        profile: ModelProfile,
+        telemetry: WorkflowTelemetry = NOOP_WORKFLOW_TELEMETRY,
+    ) -> None:
         if endpoint.role is not AgentRole.INCIDENT_COMMANDER:
             raise ValueError("commander endpoint does not match the incident commander")
         self.stats = RoleRunStats(model_calls=0, tool_calls=0, input_tokens=0, output_tokens=0)
+        self.profile = profile
+        self.telemetry = telemetry
         self._mcp = MultiServerMCPClient(
             {
                 "incident": {
@@ -533,8 +574,19 @@ class LangGraphCommanderAgent:
             f"Specialist findings:\n"
             f"{json.dumps([item.model_dump(mode='json') for item in findings], sort_keys=True)}"
         )
+        await self.telemetry.model_started(
+            actor=AgentRole.INCIDENT_COMMANDER.value,
+            model=self.profile.name,
+        )
         response = await self._structured_client.ainvoke(
             [("system", render_role_prompt(AgentRole.INCIDENT_COMMANDER)), ("user", prompt)]
+        )
+        usage = _usage(response.get("raw") if isinstance(response, dict) else None)
+        await self.telemetry.model_finished(
+            actor=AgentRole.INCIDENT_COMMANDER.value,
+            model=self.profile.name,
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
         )
         if not isinstance(response, dict):
             raise TypeError("incident commander returned an invalid structured response")
@@ -545,7 +597,6 @@ class LangGraphCommanderAgent:
         synthesis = response.get("parsed")
         if not isinstance(synthesis, CommanderSynthesis):
             raise TypeError("incident commander did not return a CommanderSynthesis")
-        usage = _usage(response.get("raw"))
         self.stats = RoleRunStats(
             model_calls=1,
             tool_calls=0,
@@ -600,7 +651,22 @@ class LangGraphCommanderAgent:
         return mitigation, recovery
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        result = await self._tools[name].ainvoke(arguments)
+        actor = AgentRole.INCIDENT_COMMANDER.value
+        await self.telemetry.tool_started(actor=actor, tool_name=name)
+        try:
+            result = await self._tools[name].ainvoke(arguments)
+        except Exception:
+            await self.telemetry.tool_finished(
+                actor=actor,
+                tool_name=name,
+                succeeded=False,
+            )
+            raise
+        await self.telemetry.tool_finished(
+            actor=actor,
+            tool_name=name,
+            succeeded=True,
+        )
         self._called_tools.append(name)
         self.stats = self.stats.model_copy(update={"tool_calls": len(self._called_tools)})
         return result
@@ -758,7 +824,11 @@ async def run_live_investigation(request: RunRequest) -> dict[str, Any]:
     }
 
 
-async def run_live_approved(request: RunRequest) -> dict[str, Any]:
+async def run_live_approved(
+    request: RunRequest,
+    approval_provider: ApprovalProvider | None = None,
+    telemetry: WorkflowTelemetry = NOOP_WORKFLOW_TELEMETRY,
+) -> dict[str, Any]:
     """Run through native approval, then apply mitigation and verify recovery."""
 
     required_roles = (*SPECIALIST_ROLES, AgentRole.INCIDENT_COMMANDER)
@@ -767,12 +837,17 @@ async def run_live_approved(request: RunRequest) -> dict[str, Any]:
         raise ValueError(f"run request is missing workflow endpoints: {missing}")
     agents = {
         role: await LangGraphRoleAgent(
-            role, request.role_endpoints[role], request.manifest.model
+            role,
+            request.role_endpoints[role],
+            request.manifest.model,
+            telemetry,
         ).initialize()
         for role in SPECIALIST_ROLES
     }
     commander_agent = await LangGraphCommanderAgent(
-        request.role_endpoints[AgentRole.INCIDENT_COMMANDER], request.manifest.model
+        request.role_endpoints[AgentRole.INCIDENT_COMMANDER],
+        request.manifest.model,
+        telemetry,
     ).initialize()
     approval_tokens: dict[str, str] = {}
 
@@ -811,16 +886,19 @@ async def run_live_approved(request: RunRequest) -> dict[str, Any]:
         raise RuntimeError("LangGraph did not persist an approval interrupt")
     snapshot = graph.get_state(config)
     approval_request = ApprovalRequest.model_validate(snapshot.values["approval_request"])
-    _emit_json_line(
-        {
-            "kind": "approval_requested",
-            "request": approval_request.model_dump(mode="json"),
-        }
-    )
-    response_line = await asyncio.to_thread(sys.stdin.buffer.readline)
-    if not response_line:
-        raise RuntimeError("approval response stream closed before a decision")
-    response = ApprovalResponse.model_validate_json(response_line)
+    if approval_provider is None:
+        _emit_json_line(
+            {
+                "kind": "approval_requested",
+                "request": approval_request.model_dump(mode="json"),
+            }
+        )
+        response_line = await asyncio.to_thread(sys.stdin.buffer.readline)
+        if not response_line:
+            raise RuntimeError("approval response stream closed before a decision")
+        response = ApprovalResponse.model_validate_json(response_line)
+    else:
+        response = ApprovalResponse.model_validate(await approval_provider(approval_request))
     if response.request_id != approval_request.request_id:
         raise ValueError("approval response request ID differs from the pending request")
     if response.decision in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:

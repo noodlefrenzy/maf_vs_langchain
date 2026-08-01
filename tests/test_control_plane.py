@@ -214,6 +214,56 @@ def test_control_plane_rejects_mismatched_approval_record(tmp_path: Path) -> Non
     assert result.terminal.reason == "approval_handler_failed:ValueError"
 
 
+def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemeral(
+    tmp_path: Path,
+) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+    approval_token = "real-session-approval-secret"
+
+    async def approve(event):
+        return ApprovalRecord(
+            request_id=str(event.payload["request_id"]),
+            case_id="case-protocol-stub",
+            decision=ApprovalDecision.EDIT,
+            decided_by="protocol-session-test-reviewer",
+            decided_tick=5,
+            action_to_execute="rollback checkout-api and cap retries",
+            approval_token=approval_token,
+        )
+
+    result = asyncio.run(
+        control_plane.execute(
+            [sys.executable, "-m", "agent_lab.workflow_protocol_stub"],
+            request,
+            approval_handler=approve,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.COMPLETED
+    assert result.terminal.used_model_calls == 1
+    assert result.terminal.used_tool_calls == 1
+    assert result.terminal.used_output_tokens == 12
+    events_text = (result.paths.bundle / "events.jsonl").read_text()
+    assert approval_token not in events_text
+    assert [json.loads(line)["kind"] for line in events_text.splitlines()] == [
+        "run.started",
+        "tool.requested",
+        "tool.started",
+        "tool.finished",
+        "model.requested",
+        "model.responded",
+        "approval.requested",
+        "checkpoint.saved",
+        "approval.decided",
+        "state.updated",
+        "run.finished",
+    ]
+    state_path = result.paths.state / "workflow-execution.json"
+    assert state_path.stat().st_mode & 0o777 == 0o600
+    assert approval_token not in state_path.read_text()
+
+
 def test_mock_runner_crash_is_runner_failure(tmp_path: Path) -> None:
     control_plane = ControlPlane(tmp_path)
     request = _request(control_plane, _manifest())

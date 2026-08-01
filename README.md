@@ -66,9 +66,11 @@ deterministic lane ordering, outer lifecycle/budget enforcement, native
 MAF/LangGraph process handlers, a mock failure matrix, and matched native
 MAF/LangGraph explicit workflows through investigation, commander synthesis,
 evidence gating, native approval checkpoints, token-bound mitigation, and
-recovery verification. It does not yet claim a benchmark result. The next
-explicit-workflow milestone is integrating these live executions with the
-normalized runner protocol, final incident artifacts, and scored run bundles.
+recovery verification. Those live explicit workflows now execute through the
+normalized runner protocol with pre-dispatch usage, portable model/tool and
+approval events, control-plane decisions, and owner-only terminal state. It
+does not yet claim a benchmark result. The next explicit-workflow milestone is
+building final incident artifacts and scored run bundles from these executions.
 Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 
