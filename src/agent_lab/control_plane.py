@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import random
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_lab.contract_bundle import canonical_json
 from agent_lab.contracts import (
     ApprovalRecord,
     EventKind,
@@ -27,6 +29,8 @@ from agent_lab.runner_protocol import (
     CancelCommand,
     ErrorMessage,
     EventMessage,
+    FinalizationResult,
+    FinalizeCommand,
     HeartbeatMessage,
     PrepareCommand,
     PreparedMessage,
@@ -44,6 +48,7 @@ from agent_lab.runner_protocol import (
 )
 
 ApprovalHandler = Callable[[NormalizedEvent], Awaitable[ApprovalRecord]]
+CompletionHandler = Callable[[NormalizedEvent], Awaitable[FinalizationResult]]
 
 
 class LaneOrder(BaseModel):
@@ -137,6 +142,7 @@ class ControlPlane:
         *,
         cancel_event: asyncio.Event | None = None,
         approval_handler: ApprovalHandler | None = None,
+        completion_handler: CompletionHandler | None = None,
     ) -> RunnerProcessResult:
         """Run the JSON-lines lifecycle until one documented terminal state."""
 
@@ -205,6 +211,7 @@ class ControlPlane:
         terminal_reason = ""
         expected_event_sequence = 0
         awaiting_approval = False
+        finalization_sent = False
         deadline = started + request.manifest.budget.wall_clock_seconds
 
         await self._send(process, PrepareCommand(request=request))
@@ -332,10 +339,41 @@ class ControlPlane:
                                 break
                     elif event.kind is EventKind.APPROVAL_DECIDED:
                         awaiting_approval = False
+                    elif (
+                        event.kind is EventKind.STATE_UPDATED
+                        and event.payload.get("phase") == "workflow_terminal"
+                    ):
+                        if finalization_sent:
+                            terminal_status = TerminalStatus.RUNNER_FAILURE
+                            terminal_reason = "runner_requested_finalization_more_than_once"
+                            break
+                        try:
+                            finalization = (
+                                await completion_handler(event)
+                                if completion_handler is not None
+                                else FinalizationResult()
+                            )
+                            _validate_finalization(request.paths.bundle, finalization)
+                            await self._send(
+                                process,
+                                FinalizeCommand(
+                                    run_id=request.manifest.run_id,
+                                    finalization=finalization,
+                                ),
+                            )
+                            finalization_sent = True
+                        except Exception as exc:
+                            terminal_status = TerminalStatus.RUNNER_FAILURE
+                            terminal_reason = f"completion_handler_failed:{type(exc).__name__}"
+                            break
                 elif isinstance(message, TerminalMessage):
                     if prepared is None:
                         terminal_status = TerminalStatus.RUNNER_FAILURE
                         terminal_reason = "runner_terminal_before_prepare"
+                        break
+                    if completion_handler is not None and not finalization_sent:
+                        terminal_status = TerminalStatus.RUNNER_FAILURE
+                        terminal_reason = "runner_terminal_before_finalization"
                         break
                     violation = _usage_violation(usage, message.usage, request.manifest)
                     usage = message.usage
@@ -495,6 +533,18 @@ def _message_run_id(message) -> object | None:
     if isinstance(message, EventMessage):
         return message.event.run_id
     return None
+
+
+def _validate_finalization(bundle: Path, finalization: FinalizationResult) -> None:
+    bundle = bundle.resolve()
+    for artifact in finalization.artifacts:
+        destination = (bundle / artifact.path).resolve()
+        if bundle not in destination.parents or not destination.is_file():
+            raise ValueError(f"finalized artifact is missing or outside bundle: {artifact.path}")
+        value = json.loads(destination.read_text(encoding="utf-8"))
+        observed = hashlib.sha256(canonical_json(value)).hexdigest()
+        if observed != artifact.sha256:
+            raise ValueError(f"finalized artifact digest differs for {artifact.path}")
 
 
 def _safe_environment() -> dict[str, str]:

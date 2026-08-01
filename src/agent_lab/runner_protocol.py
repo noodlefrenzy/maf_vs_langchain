@@ -163,6 +163,34 @@ class ApprovalCommand(ProtocolModel):
         return self
 
 
+class FinalizedArtifact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(pattern=r"^artifacts/[A-Za-z0-9][A-Za-z0-9._-]*\.json$")
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class FinalizationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    artifacts: list[FinalizedArtifact] = Field(default_factory=list)
+    task_success: bool | None = None
+    total_score: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def require_unique_artifacts(self) -> FinalizationResult:
+        paths = [artifact.path for artifact in self.artifacts]
+        if len(paths) != len(set(paths)):
+            raise ValueError("finalized artifact paths must be unique")
+        return self
+
+
+class FinalizeCommand(ProtocolModel):
+    kind: Literal["finalize"] = "finalize"
+    run_id: UUID
+    finalization: FinalizationResult
+
+
 class CancelCommand(ProtocolModel):
     kind: Literal["cancel"] = "cancel"
     run_id: UUID
@@ -175,7 +203,12 @@ class ShutdownCommand(ProtocolModel):
 
 
 RunnerCommand = Annotated[
-    PrepareCommand | StartCommand | ApprovalCommand | CancelCommand | ShutdownCommand,
+    PrepareCommand
+    | StartCommand
+    | ApprovalCommand
+    | FinalizeCommand
+    | CancelCommand
+    | ShutdownCommand,
     Field(discriminator="kind"),
 ]
 

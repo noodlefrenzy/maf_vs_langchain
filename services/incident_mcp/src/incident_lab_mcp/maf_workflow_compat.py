@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 import uvicorn
 
+from agent_lab.bundle_validation import validate_bundle
 from agent_lab.contract_bundle import contract_bundle_hashes
 from agent_lab.contracts import (
     ApprovalDecision,
@@ -30,6 +31,7 @@ from incident_lab_mcp.workflow_compat_policy import (
     COMPATIBILITY_APPROVAL_POLICY,
     SEED_42_RECOVERY_ACTION,
 )
+from incident_lab_mcp.workflow_finalization import finalize_workflow_bundle
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
@@ -174,6 +176,9 @@ async def _run_maf_protocol(
             edited_action=SEED_42_RECOVERY_ACTION,
         )
 
+    async def complete(_event):
+        return await finalize_workflow_bundle(request, world)
+
     command = [
         "uv",
         "run",
@@ -185,7 +190,12 @@ async def _run_maf_protocol(
         "maf_runner.protocol_runner",
         "--run",
     ]
-    result = await control_plane.execute(command, request, approval_handler=approve)
+    result = await control_plane.execute(
+        command,
+        request,
+        approval_handler=approve,
+        completion_handler=complete,
+    )
     if result.terminal.status is not TerminalStatus.COMPLETED:
         raise RuntimeError(
             f"MAF protocol workflow failed with {result.terminal.status.value}: "
@@ -196,6 +206,13 @@ async def _run_maf_protocol(
         json.loads(line)
         for line in (request.paths.bundle / "events.jsonl").read_text().splitlines()
     ]
+    validation = validate_bundle(request.paths.bundle)
+    if not validation.valid:
+        raise RuntimeError(
+            "MAF finalized bundle failed validation: "
+            f"{[finding.code for finding in validation.findings]}"
+        )
+    scores = json.loads((request.paths.bundle / "scores.json").read_text())
     return {
         **payload,
         "protocol_terminal_status": result.terminal.status.value,
@@ -205,6 +222,9 @@ async def _run_maf_protocol(
             "output_tokens": result.terminal.used_output_tokens,
         },
         "normalized_event_kinds": [event["kind"] for event in events],
+        "bundle_valid": True,
+        "task_success": scores["task_success"],
+        "total_score": scores["total_score"],
     }
 
 

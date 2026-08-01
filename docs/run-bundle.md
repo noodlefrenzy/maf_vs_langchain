@@ -26,9 +26,11 @@ Each execution writes an immutable directory under `runs/<run-id>/`.
 ```
 
 The core writer creates this full directory shape and writes immutable
-manifests, events, JSON artifacts, scores, and terminal records. Checkpoint,
-native-trace, and metric producers will populate their directories in the
-framework vertical slices.
+manifests, events, JSON artifacts, scores, and terminal records. The explicit
+MAF and LangGraph workflow slices populate native approval checkpoints and
+finalize their terminal workflow state into the five scorer artifacts before
+the normalized `run.finished` event. Native-trace and metric producers remain
+future integration layers.
 
 ## `manifest.json`
 

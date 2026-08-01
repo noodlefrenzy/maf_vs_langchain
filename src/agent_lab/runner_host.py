@@ -26,6 +26,7 @@ from agent_lab.runner_protocol import (
     CheckpointCapability,
     ErrorMessage,
     EventMessage,
+    FinalizeCommand,
     HeartbeatMessage,
     PrepareCommand,
     PreparedMessage,
@@ -190,7 +191,7 @@ class WorkflowProtocolSession(WorkflowTelemetry):
             "approval_token": command.approval_token,
         }
 
-    def finish(self, result: dict[str, Any]) -> TerminalStatus:
+    async def finish(self, result: dict[str, Any]) -> TerminalStatus:
         execution = result.get("execution")
         if not isinstance(execution, dict):
             raise ValueError("workflow result is missing terminal execution state")
@@ -211,10 +212,42 @@ class WorkflowProtocolSession(WorkflowTelemetry):
                 "state_file": "state/workflow-execution.json",
             },
         )
+        _send(
+            HeartbeatMessage(
+                run_id=self.request.manifest.run_id,
+                phase="awaiting_finalization",
+            )
+        )
+        command = await _read_command()
+        if isinstance(command, CancelCommand):
+            raise asyncio.CancelledError(command.reason)
+        if isinstance(command, ShutdownCommand):
+            raise asyncio.CancelledError("control_plane_shutdown")
+        if not isinstance(command, FinalizeCommand):
+            raise ValueError(f"{command.kind} received while awaiting finalization")
+        if command.run_id != self.request.manifest.run_id:
+            raise ValueError("finalization run ID differs from prepared run")
+        for artifact in sorted(
+            command.finalization.artifacts,
+            key=lambda item: item.path,
+        ):
+            self.emit(
+                EventKind.ARTIFACT_WRITTEN,
+                actor=self.descriptor.name,
+                payload={"artifact": artifact.path, "sha256": artifact.sha256},
+            )
+        finished_payload: dict[str, Any] = {
+            "status": status.value,
+            "execution_mode": "native_workflow",
+        }
+        if command.finalization.task_success is not None:
+            finished_payload["task_success"] = command.finalization.task_success
+        if command.finalization.total_score is not None:
+            finished_payload["total_score"] = command.finalization.total_score
         self.emit(
             EventKind.RUN_FINISHED,
             actor=self.descriptor.name,
-            payload={"status": status.value, "execution_mode": "native_workflow"},
+            payload=finished_payload,
         )
         return status
 
@@ -351,7 +384,7 @@ async def run_workflow_protocol(
     session.start()
     try:
         result = await executor(request, session.request_approval, session)
-        terminal_status = session.finish(result)
+        terminal_status = await session.finish(result)
         terminal_reason = (
             "native_workflow_approval_rejected"
             if terminal_status is TerminalStatus.APPROVAL_REJECTED
@@ -530,7 +563,7 @@ def _event(
 
 
 def _command_run_id(
-    command: StartCommand | ApprovalCommand | CancelCommand,
+    command: StartCommand | ApprovalCommand | FinalizeCommand | CancelCommand,
 ):
     return command.run_id
 

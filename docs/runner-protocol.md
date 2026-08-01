@@ -122,6 +122,10 @@ process compatibility without calling a model or MCP tool. The explicit
 workflow lanes additionally run through the same boundary with `--run`, emit
 pre-dispatch model/tool/approval usage and normalized events, pause for a
 token-bound approval command, and persist an owner-only terminal workflow state
-under `state/`. Final scorer artifacts are the next integration layer; until
-those are present, these live compatibility executions are not complete
-benchmark bundles.
+under `state/`. For final scorer artifacts, the runner does not emit its
+terminal event until the service-side finalizer acknowledges that state. The
+finalizer writes and digest-checks the five frozen
+artifacts plus deterministic score, then the runner emits `artifact.written`,
+`run.finished`, and `terminal` in that order. Live compatibility executions now
+exercise this complete bundle path, though their fixture-aware edited approval
+still makes them benchmark-ineligible.

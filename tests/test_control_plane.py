@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_lab.contract_bundle import sha256_payload
 from agent_lab.contracts import (
     AgentRole,
     ApprovalDecision,
@@ -17,7 +18,10 @@ from agent_lab.contracts import (
     TerminalStatus,
 )
 from agent_lab.control_plane import ControlPlane, resolve_lane_order
+from agent_lab.run_bundle import RunBundle
 from agent_lab.runner_protocol import (
+    FinalizationResult,
+    FinalizedArtifact,
     PrepareCommand,
     RoleEndpoint,
     RunRequest,
@@ -232,11 +236,29 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
             approval_token=approval_token,
         )
 
+    async def complete(_event):
+        artifact = {"status": "hermetic-finalization-complete"}
+        RunBundle(request.paths.bundle, request.manifest).write_artifact(
+            "protocol-stub.json",
+            artifact,
+        )
+        return FinalizationResult(
+            artifacts=[
+                FinalizedArtifact(
+                    path="artifacts/protocol-stub.json",
+                    sha256=sha256_payload(artifact),
+                )
+            ],
+            task_success=True,
+            total_score=0.75,
+        )
+
     result = asyncio.run(
         control_plane.execute(
             [sys.executable, "-m", "agent_lab.workflow_protocol_stub"],
             request,
             approval_handler=approve,
+            completion_handler=complete,
         )
     )
 
@@ -257,11 +279,15 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
         "checkpoint.saved",
         "approval.decided",
         "state.updated",
+        "artifact.written",
         "run.finished",
     ]
     state_path = result.paths.state / "workflow-execution.json"
     assert state_path.stat().st_mode & 0o777 == 0o600
     assert approval_token not in state_path.read_text()
+    assert json.loads((result.paths.bundle / "artifacts/protocol-stub.json").read_text()) == {
+        "status": "hermetic-finalization-complete"
+    }
 
 
 def test_mock_runner_crash_is_runner_failure(tmp_path: Path) -> None:

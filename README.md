@@ -69,8 +69,10 @@ evidence gating, native approval checkpoints, token-bound mitigation, and
 recovery verification. Those live explicit workflows now execute through the
 normalized runner protocol with pre-dispatch usage, portable model/tool and
 approval events, control-plane decisions, and owner-only terminal state. It
-does not yet claim a benchmark result. The next explicit-workflow milestone is
-building final incident artifacts and scored run bundles from these executions.
+also finalizes those executions into the five frozen incident artifacts,
+deterministic scores, and individually validated bundles. It does not yet claim
+a benchmark result. The next explicit-workflow milestone is a persistent paired
+experiment command and pair-level validation over these live runners.
 Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 

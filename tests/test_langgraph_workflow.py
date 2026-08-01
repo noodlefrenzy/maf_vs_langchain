@@ -173,6 +173,10 @@ def test_live_langgraph_workflow_uses_native_approval_and_recovers() -> None:
     assert payload["normalized_event_kinds"].count("approval.requested") == 1
     assert payload["normalized_event_kinds"].count("approval.decided") == 1
     assert payload["normalized_event_kinds"].count("checkpoint.saved") == 1
+    assert payload["normalized_event_kinds"].count("artifact.written") == 5
+    assert payload["bundle_valid"] is True
+    assert isinstance(payload["task_success"], bool)
+    assert 0 <= payload["total_score"] <= 1
     assert sorted(payload["world_operations"]) == sorted(
         [
             "query_service_health",

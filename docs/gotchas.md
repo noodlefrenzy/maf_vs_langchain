@@ -130,3 +130,18 @@ await still relies on the control plane's terminate/kill fallback. A future
 fully graceful cancellation path should use an actual asynchronous pipe reader
 or a dedicated single reader that feeds a command queue; do not add multiple
 stdin readers.
+
+### Finalize before `run.finished`
+
+Completed bundles require service-owned audit and hidden terminal state, while
+`run.finished` must remain the last normalized event. Writing scorer artifacts
+after the runner exits would either place `artifact.written` events after the
+terminal event or leave files undeclared.
+
+The runner therefore writes an owner-only public workflow snapshot and emits a
+terminal-state event, but waits for a `finalize` command. Only then does the
+service-side finalizer join the snapshot with the terminal world audit, write
+and score the frozen artifacts, and return their canonical digests. The control
+plane verifies every file and digest before acknowledging. The runner emits the
+artifact events and only then finishes. Hidden state is inspected after native
+execution has stopped and is never returned to the model or workflow graph.
