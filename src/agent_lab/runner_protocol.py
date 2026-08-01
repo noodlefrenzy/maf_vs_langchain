@@ -20,6 +20,7 @@ from agent_lab.contracts import (
     AgentRole,
     ApprovalDecision,
     FrameworkLane,
+    NativeTracingProfile,
     NormalizedEvent,
     RunManifest,
     TerminalStatus,
@@ -84,6 +85,9 @@ class RunRequest(ProtocolModel):
     role_endpoints: dict[AgentRole, RoleEndpoint]
     public_ticket: str
     order_seed: int
+    tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
+    capture_sensitive: bool = False
+    capture_reasoning: Literal[False] = False
     attempt: int = Field(default=0, ge=0, le=1)
 
     @model_validator(mode="after")

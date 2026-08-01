@@ -97,6 +97,11 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
         assert checkpoint.is_file()
         assert stat.S_IMODE(checkpoint.stat().st_mode) == 0o600
         assert json.loads((bundle / "terminal.json").read_text())["status"] == "completed"
+        assert run["native_trace"]["span_count"] >= 1
+        assert run["native_trace"]["completeness_ratio"] == 1.0
+        assert run["native_trace"]["phoenix_trace_url"].startswith(
+            "http://127.0.0.1:6006/redirects/traces/"
+        )
         request = (bundle / "native" / "run-request.redacted.json").read_text()
         assert '"token": "[REDACTED]"' in request
         assert "v1." not in request

@@ -21,6 +21,7 @@ from agent_lab.contracts import (
     NormalizedEvent,
     TerminalStatus,
 )
+from agent_lab.native_tracing import FrameworkInstrumentor, NativeTracingSession
 from agent_lab.runner_protocol import (
     ApprovalCommand,
     CancelCommand,
@@ -64,6 +65,7 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         self.request = request
         self.sequence = 0
         self.usage = RunnerUsage()
+        self.events: list[NormalizedEvent] = []
         self._model_events: dict[str, NormalizedEvent] = {}
         self._tool_events: dict[tuple[str, str], list[NormalizedEvent]] = {}
 
@@ -271,6 +273,7 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         visibility: EventVisibility = EventVisibility.PUBLIC,
         parent_event_id=None,
     ) -> NormalizedEvent:
+        trace_id, span_id = _current_trace_context()
         event = NormalizedEvent(
             run_id=self.request.manifest.run_id,
             sequence=self.sequence,
@@ -278,10 +281,13 @@ class WorkflowProtocolSession(WorkflowTelemetry):
             kind=kind,
             actor=actor,
             parent_event_id=parent_event_id,
+            trace_id=trace_id,
+            span_id=span_id,
             visibility=visibility,
             payload=payload,
         )
         self.sequence += 1
+        self.events.append(event)
         _send(EventMessage(event=event))
         return event
 
@@ -345,6 +351,8 @@ class NativeRunnerDescriptor(BaseModel):
 async def run_workflow_protocol(
     descriptor: NativeRunnerDescriptor,
     executor: WorkflowProtocolExecutor,
+    *,
+    instrument_framework: FrameworkInstrumentor | None = None,
 ) -> int:
     """Serve one real native workflow through the shared lifecycle protocol."""
 
@@ -385,6 +393,13 @@ async def run_workflow_protocol(
         return 2
 
     session = WorkflowProtocolSession(descriptor, request)
+    tracing = (
+        NativeTracingSession(request, instrument_framework)
+        if instrument_framework is not None
+        else None
+    )
+    if tracing is not None:
+        tracing.start()
     session.start()
     try:
         result = await executor(request, session.request_approval, session)
@@ -408,16 +423,23 @@ async def run_workflow_protocol(
         terminal_reason = f"native_workflow_failed:{type(exc).__name__}"
         session.fail(terminal_status, terminal_reason)
     session.terminal(terminal_status, terminal_reason)
+    if tracing is not None:
+        tracing.finish(session.events)
     return await _await_shutdown(request)
 
 
-def run_protocol_probe(descriptor: NativeRunnerDescriptor) -> int:
+def run_protocol_probe(
+    descriptor: NativeRunnerDescriptor,
+    *,
+    instrument_framework: FrameworkInstrumentor | None = None,
+) -> int:
     """Serve the lifecycle protocol without invoking a model or incident tool."""
 
     request: RunRequest | None = None
     started = False
     terminal_sent = False
     usage = RunnerUsage()
+    tracing: NativeTracingSession | None = None
 
     for line in sys.stdin.buffer:
         try:
@@ -474,30 +496,33 @@ def run_protocol_probe(descriptor: NativeRunnerDescriptor) -> int:
                 )
                 continue
             started = True
+            if instrument_framework is not None:
+                tracing = NativeTracingSession(request, instrument_framework)
+                tracing.start()
+            events = [
+                _event(
+                    request,
+                    sequence=0,
+                    kind=EventKind.RUN_STARTED,
+                    actor=descriptor.name,
+                    payload={"execution_mode": "protocol_probe"},
+                ),
+                _event(
+                    request,
+                    sequence=1,
+                    kind=EventKind.RUN_FINISHED,
+                    actor=descriptor.name,
+                    payload={
+                        "status": TerminalStatus.COMPLETED.value,
+                        "execution_mode": "protocol_probe",
+                    },
+                ),
+            ]
             _send(
-                EventMessage(
-                    event=_event(
-                        request,
-                        sequence=0,
-                        kind=EventKind.RUN_STARTED,
-                        actor=descriptor.name,
-                        payload={"execution_mode": "protocol_probe"},
-                    )
-                )
+                EventMessage(event=events[0])
             )
             _send(
-                EventMessage(
-                    event=_event(
-                        request,
-                        sequence=1,
-                        kind=EventKind.RUN_FINISHED,
-                        actor=descriptor.name,
-                        payload={
-                            "status": TerminalStatus.COMPLETED.value,
-                            "execution_mode": "protocol_probe",
-                        },
-                    )
-                )
+                EventMessage(event=events[1])
             )
             _send(
                 TerminalMessage(
@@ -507,6 +532,8 @@ def run_protocol_probe(descriptor: NativeRunnerDescriptor) -> int:
                     usage=usage,
                 )
             )
+            if tracing is not None:
+                tracing.finish(events)
             terminal_sent = True
         elif isinstance(command, ApprovalCommand):
             _send(
@@ -557,12 +584,15 @@ def _event(
     actor: str,
     payload: Mapping[str, object],
 ) -> NormalizedEvent:
+    trace_id, span_id = _current_trace_context()
     return NormalizedEvent(
         run_id=request.manifest.run_id,
         sequence=sequence,
         lane=request.manifest.lane,
         kind=kind,
         actor=actor,
+        trace_id=trace_id,
+        span_id=span_id,
         payload=dict(payload),
     )
 
@@ -604,6 +634,19 @@ def _write_private_json(path: Path, payload: dict[str, Any]) -> None:
         json.dump(payload, handle, indent=2, sort_keys=True)
         handle.write("\n")
     path.chmod(0o600)
+
+
+def _current_trace_context() -> tuple[str | None, str | None]:
+    """Read the active OTel context lazily so the core package needs no SDK dependency."""
+
+    try:
+        from opentelemetry import trace
+    except ImportError:
+        return None, None
+    span_context = trace.get_current_span().get_span_context()
+    if not span_context.is_valid:
+        return None, None
+    return f"{span_context.trace_id:032x}", f"{span_context.span_id:016x}"
 
 
 def _send(message: BaseModel) -> None:

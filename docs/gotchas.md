@@ -247,3 +247,68 @@ and score the frozen artifacts, and return their canonical digests. The control
 plane verifies every file and digest before acknowledging. The runner emits the
 artifact events and only then finishes. Hidden state is inspected after native
 execution has stopped and is never returned to the model or workflow graph.
+
+## Native tracing and Phoenix
+
+### The OpenTelemetry tracer provider is process-global and effectively one-shot
+
+Observed with OpenTelemetry SDK 1.44.0.
+
+`set_tracer_provider()` establishes global process state and does not provide a
+normal replace/reset lifecycle. This is another reason the lane isolation in
+ADR 0007 is functional: each runner process installs exactly one provider for
+exactly one run, then shuts it down before exit. Tests or future worker pools
+must not try to execute multiple independently configured runs in one process.
+
+The provider must be installed before importing and constructing the native
+workflow. MAF retrieves its tracers through the global provider; OpenInference
+is also passed the same provider explicitly. A manual root span supplies stable
+run correlation while framework-native spans retain their own shapes.
+
+### MAF instrumentation is enabled by default and disabling it is sticky
+
+Observed with `agent-framework-core` 1.12.1.
+
+MAF's observability settings default to enabled even when no exporter has been
+configured. `disable_instrumentation()` sets a sticky process-local opt-out;
+reenabling later requires `enable_instrumentation(force=True)`. The runner calls
+the former for tracing-disabled overhead ablations and the latter for traced
+runs. It always passes the manifest's sensitive-capture policy explicitly so an
+ambient `ENABLE_SENSITIVE_DATA` value cannot broaden capture.
+
+MAF exposes one coarse `enable_sensitive_data` switch rather than independent
+prompt, response, and tool-payload controls. Measured profiles therefore keep
+it false. The local span ledger applies a second framework-neutral structural
+allowlist regardless of that native setting.
+
+### OpenInference needs an explicit content-hiding configuration
+
+Observed with `openinference-instrumentation-langchain` 0.1.68.
+
+Instrumenting LangChain with a tracer provider alone is not sufficient for the
+experiment's privacy contract. `TraceConfig` has separate switches for inputs,
+outputs, message text, images, prompts, choices, tools, invocation parameters,
+and embeddings. The runner sets them explicitly. Outputs and choices stay
+hidden even in a future sensitive-input development profile because raw
+provider reasoning is prohibited by the manifest schema.
+
+OpenInference patches LangChain's callback-manager initialization in process.
+The runner therefore instruments before importing a lane implementation and
+calls `uninstrument()` during trace finalization. Process isolation prevents
+those wrappers from leaking into the MAF lane.
+
+### An OTLP timeout alone is not the clean Phoenix-down path
+
+Observed with the OpenTelemetry OTLP/HTTP exporter 1.44.0.
+
+The HTTP exporter owns retry behavior in addition to its request timeout. To
+keep Phoenix auxiliary, the runner performs a bounded loopback TCP check before
+constructing the remote exporter. A closed tunnel therefore becomes
+`collector_status = "unavailable"` immediately, without an export retry path.
+If the port accepts connections but OTLP export still fails, the failure is
+bounded by the configured exporter timeout and recorded as `export_failed`.
+
+Neither state fails the agent run. A content-free local `spans.jsonl` ledger is
+written independently, and the bundle validator treats collector degradation
+as a warning while still failing closed on ledger, correlation, or
+completeness tampering.

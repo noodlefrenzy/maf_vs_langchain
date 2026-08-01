@@ -19,6 +19,41 @@ from agent_lab.runner_protocol import CheckpointCapability, RunRequest
 from agent_lab.workflow_telemetry import WorkflowTelemetry
 
 
+def _instrument_langchain(
+    tracer_provider: object | None,
+    enabled: bool,
+    capture_sensitive: bool,
+):
+    if not enabled:
+        return None
+
+    from openinference.instrumentation import TraceConfig
+    from openinference.instrumentation.langchain import LangChainInstrumentor
+
+    instrumentor = LangChainInstrumentor()
+    hide_sensitive = not capture_sensitive
+    instrumentor.instrument(
+        tracer_provider=tracer_provider,
+        config=TraceConfig(
+            hide_llm_invocation_parameters=hide_sensitive,
+            hide_llm_tools=hide_sensitive,
+            hide_inputs=hide_sensitive,
+            hide_outputs=True,
+            hide_input_messages=hide_sensitive,
+            hide_output_messages=True,
+            hide_input_images=hide_sensitive,
+            hide_input_text=hide_sensitive,
+            hide_output_text=True,
+            hide_embedding_vectors=True,
+            hide_embeddings_vectors=True,
+            hide_embeddings_text=hide_sensitive,
+            hide_prompts=hide_sensitive,
+            hide_choices=True,
+        ),
+    )
+    return instrumentor.uninstrument
+
+
 async def _execute_workflow(
     request: RunRequest,
     approval_provider: ApprovalProvider,
@@ -103,8 +138,16 @@ def main() -> None:
         print(json.dumps(descriptor_payload(runner), sort_keys=True))
         return
     if args.run:
-        raise SystemExit(asyncio.run(run_workflow_protocol(runner, _execute_workflow)))
-    raise SystemExit(run_protocol_probe(runner))
+        raise SystemExit(
+            asyncio.run(
+                run_workflow_protocol(
+                    runner,
+                    _execute_workflow,
+                    instrument_framework=_instrument_langchain,
+                )
+            )
+        )
+    raise SystemExit(run_protocol_probe(runner, instrument_framework=_instrument_langchain))
 
 
 if __name__ == "__main__":

@@ -213,6 +213,9 @@ async def _run_experiment(
                         ),
                         public_ticket=str(run.world.incident.public_view()["brief"]),
                         order_seed=block_order_seed,
+                        tracing=experiment.tracing,
+                        capture_sensitive=experiment.capture_sensitive,
+                        capture_reasoning=experiment.capture_reasoning,
                     )
                     command = [
                         "uv",
@@ -259,6 +262,15 @@ async def _run_experiment(
                         "world_checkpoint": str(checkpoint),
                         "world_manifest_sha256": receipt.world_manifest_sha256,
                     }
+                    trace_link_path = paths.bundle / "native" / "trace-link.json"
+                    if trace_link_path.is_file():
+                        trace_link = json.loads(trace_link_path.read_text(encoding="utf-8"))
+                        run_result["native_trace"] = {
+                            "collector_status": trace_link["collector_status"],
+                            "span_count": trace_link["span_count"],
+                            "completeness_ratio": trace_link["completeness"]["ratio"],
+                            "phoenix_trace_url": trace_link["phoenix_trace_url"],
+                        }
                     if execution_mode == "native_workflow":
                         validation = validate_bundle(paths.bundle, mark=True)
                         run_result["bundle_valid"] = validation.valid

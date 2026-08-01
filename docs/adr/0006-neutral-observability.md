@@ -1,6 +1,6 @@
 # ADR 0006: Use Phoenix plus a neutral paired observer
 
-Status: Proposed
+Status: Accepted
 
 Date: 2026-07-31
 
@@ -20,6 +20,12 @@ events for two-column live comparison and replay.
 
 Start with a browser UI backed by FastAPI/SSE; provide a terminal renderer over
 the same API later. Link each run to Phoenix for native drilldown.
+
+Every runner also writes a redacted structural span ledger and a trace-link
+sidecar into its run bundle. This makes completeness and correlation auditable
+without making Phoenix availability part of task execution. Collector export
+is attempted only after a bounded loopback reachability check, and capture of
+prompts, outputs, tool arguments, and results is disabled by default.
 
 ## Consequences
 

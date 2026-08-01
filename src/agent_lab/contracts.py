@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -173,6 +174,33 @@ class Budget(BaseModel):
     approval_requests: int = Field(ge=0)
 
 
+class NativeTracingProfile(BaseModel):
+    """Held-constant native tracing and local Phoenix export settings."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = True
+    collector_endpoint: str = "http://127.0.0.1:6006/v1/traces"
+    phoenix_base_url: str = "http://127.0.0.1:6006"
+    exporter_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
+
+    @model_validator(mode="after")
+    def validate_loopback_endpoints(self) -> NativeTracingProfile:
+        collector = urlsplit(self.collector_endpoint)
+        phoenix = urlsplit(self.phoenix_base_url)
+        allowed_hosts = {"127.0.0.1", "localhost", "::1"}
+        for label, parsed in (("collector", collector), ("Phoenix", phoenix)):
+            if parsed.scheme != "http" or parsed.hostname not in allowed_hosts:
+                raise ValueError(f"{label} endpoint must be an HTTP loopback URL")
+            if parsed.username or parsed.password or parsed.query or parsed.fragment:
+                raise ValueError(f"{label} endpoint cannot contain credentials, query, or fragment")
+        if collector.path.rstrip("/") != "/v1/traces":
+            raise ValueError("collector endpoint path must be /v1/traces")
+        if phoenix.path.rstrip("/"):
+            raise ValueError("Phoenix base URL cannot contain a path")
+        return self
+
+
 class ExperimentSpec(BaseModel):
     """Validated experiment configuration loaded from TOML."""
 
@@ -188,6 +216,7 @@ class ExperimentSpec(BaseModel):
     model_profile: str
     fault_profile: Literal["none", "standard", "adversarial"]
     budget: Budget
+    tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
     capture_sensitive: bool = False
     capture_reasoning: Literal[False] = False
 

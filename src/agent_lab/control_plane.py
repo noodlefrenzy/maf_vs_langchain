@@ -46,6 +46,7 @@ from agent_lab.runner_protocol import (
     encode_protocol_message,
     redacted_request_payload,
 )
+from agent_lab.trace_contracts import NativeTraceProfileRecord
 
 ApprovalHandler = Callable[[NormalizedEvent], Awaitable[ApprovalRecord]]
 CompletionHandler = Callable[[NormalizedEvent], Awaitable[FinalizationResult]]
@@ -156,6 +157,21 @@ class ControlPlane:
 
         started = time.monotonic()
         native_path = request.paths.bundle / "native"
+        trace_profile = NativeTraceProfileRecord(
+            run_id=request.manifest.run_id,
+            tracing=request.tracing,
+            capture_sensitive=request.capture_sensitive,
+            capture_reasoning=request.capture_reasoning,
+        )
+        trace_profile_bytes = (trace_profile.model_dump_json(indent=2) + "\n").encode(
+            "utf-8"
+        )
+        trace_profile_path = native_path / "tracing-profile.json"
+        with trace_profile_path.open("xb") as handle:
+            handle.write(trace_profile_bytes)
+        trace_profile_path.chmod(0o600)
+        with (native_path / "tracing-profile.sha256").open("x", encoding="utf-8") as handle:
+            handle.write(hashlib.sha256(trace_profile_bytes).hexdigest() + "\n")
         request_path = native_path / "run-request.redacted.json"
         request_path.write_text(
             json.dumps(redacted_request_payload(request), indent=2, sort_keys=True) + "\n",

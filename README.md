@@ -75,9 +75,12 @@ experiment with pair-level provenance validation. The opinionated track is also
 executable: MAF Harness background agents and declarative Deep Agents subagents
 perform native role-scoped delegation, pass a shared evidence gate, and enter
 the same approval, execution, finalization, scoring, and pair-validation path.
-Harness state is currently process-local and non-resumable. These smoke runs
-exercise the system but do not constitute a benchmark result. The next
-milestones are native tracing, baselines, and broader repeated experiment runs.
+Harness state is currently process-local and non-resumable. Both runner families
+now retain correlated, redacted native span ledgers, export best-effort to a
+pinned loopback Phoenix deployment, and record validated operation-level trace
+completeness without making collector availability run-critical. These smoke
+runs exercise the system but do not constitute a benchmark result. The next
+milestones are baselines and broader repeated experiment runs.
 Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 

@@ -19,6 +19,23 @@ from agent_lab.runner_protocol import CheckpointCapability, RunRequest
 from agent_lab.workflow_telemetry import WorkflowTelemetry
 
 
+def _instrument_maf(
+    _tracer_provider: object | None,
+    enabled: bool,
+    capture_sensitive: bool,
+):
+    from agent_framework.observability import disable_instrumentation, enable_instrumentation
+
+    if not enabled:
+        disable_instrumentation()
+        return None
+    enable_instrumentation(
+        enable_sensitive_data=capture_sensitive,
+        force=True,
+    )
+    return disable_instrumentation
+
+
 async def _execute_workflow(
     request: RunRequest,
     approval_provider: ApprovalProvider,
@@ -102,8 +119,16 @@ def main() -> None:
         print(json.dumps(descriptor_payload(runner), sort_keys=True))
         return
     if args.run:
-        raise SystemExit(asyncio.run(run_workflow_protocol(runner, _execute_workflow)))
-    raise SystemExit(run_protocol_probe(runner))
+        raise SystemExit(
+            asyncio.run(
+                run_workflow_protocol(
+                    runner,
+                    _execute_workflow,
+                    instrument_framework=_instrument_maf,
+                )
+            )
+        )
+    raise SystemExit(run_protocol_probe(runner, instrument_framework=_instrument_maf))
 
 
 if __name__ == "__main__":
