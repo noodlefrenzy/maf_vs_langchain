@@ -71,14 +71,14 @@ async def run_experiment_protocol_probe(
     )
 
 
-async def run_explicit_workflow_experiment(
+async def run_native_workflow_experiment(
     *,
     repository_root: Path,
     experiment_path: Path,
     runs_dir: Path,
     order_seed: int,
 ) -> dict[str, Any]:
-    """Run and score one persistent matched explicit-workflow experiment."""
+    """Run and score one persistent matched native-framework experiment."""
 
     return await _run_experiment(
         repository_root=repository_root,
@@ -105,10 +105,8 @@ async def _run_experiment(
     experiment = load_experiment(experiment_path)
     model = load_model_profile(_resolve(repository_root, Path(experiment.model_profile)))
     tracks = _selected_tracks(experiment.lanes)
-    if execution_mode == "native_workflow" and any(
-        track != "explicit_workflow" for track, _left, _right in tracks
-    ):
-        raise ValueError("native workflow execution currently supports only the explicit pair")
+    if execution_mode == "native_workflow" and len(tracks) != 1:
+        raise ValueError("native workflow execution requires exactly one matched track")
     descriptors = {
         lane: _describe_runner(repository_root, lane)
         for _track, left, right in tracks
@@ -280,14 +278,9 @@ async def _run_experiment(
                     "runs": block_runs,
                 }
                 if execution_mode == "native_workflow":
-                    left = next(
-                        item
-                        for item in block_runs
-                        if item["lane"] == FrameworkLane.MAF_WORKFLOW.value
-                    )
-                    right = next(
-                        item for item in block_runs if item["lane"] == FrameworkLane.LANGGRAPH.value
-                    )
+                    _track, left_lane, right_lane = tracks[0]
+                    left = next(item for item in block_runs if item["lane"] == left_lane.value)
+                    right = next(item for item in block_runs if item["lane"] == right_lane.value)
                     pair_validation = validate_pair(
                         Path(str(left["bundle"])),
                         Path(str(right["bundle"])),
@@ -495,7 +488,7 @@ def main() -> None:
     entrypoint = (
         run_experiment_protocol_probe
         if args.mode == "protocol_probe"
-        else run_explicit_workflow_experiment
+        else run_native_workflow_experiment
     )
     summary = asyncio.run(
         entrypoint(

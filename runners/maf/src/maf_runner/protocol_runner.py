@@ -24,9 +24,12 @@ async def _execute_workflow(
     approval_provider: ApprovalProvider,
     telemetry: WorkflowTelemetry,
 ) -> dict[str, object]:
-    if request.manifest.lane is not FrameworkLane.MAF_WORKFLOW:
-        raise ValueError("real execution is implemented only for maf_workflow")
-    from maf_runner.workflow_lane import run_live_approved
+    if request.manifest.lane is FrameworkLane.MAF_WORKFLOW:
+        from maf_runner.workflow_lane import run_live_approved
+    elif request.manifest.lane is FrameworkLane.MAF_HARNESS:
+        from maf_runner.harness_lane import run_live_approved
+    else:
+        raise ValueError(f"unsupported MAF lane {request.manifest.lane.value}")
 
     return await run_live_approved(request, approval_provider, telemetry)
 
@@ -80,7 +83,7 @@ def descriptor() -> NativeRunnerDescriptor:
             FrameworkLane.MAF_HARNESS: CheckpointCapability(
                 resumable=False,
                 restart_safe=False,
-                format="pending-maf-harness-implementation",
+                format="agent-framework-harness-process-local/v1",
             ),
         },
     )

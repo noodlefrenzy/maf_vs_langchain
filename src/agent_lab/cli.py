@@ -202,13 +202,13 @@ def run_experiment_probe(
 
 
 @experiment_app.command("run")
-def run_explicit_workflow_experiment(
+def run_native_workflow_experiment(
     experiment: Annotated[
         Path,
         typer.Option(
             "--experiment",
             "-e",
-            help="Explicit-workflow experiment profile to execute.",
+            help="Matched native-framework experiment profile to execute.",
         ),
     ] = Path("configs/experiments/explicit-smoke.toml"),
     runs_dir: Annotated[
@@ -224,7 +224,7 @@ def run_explicit_workflow_experiment(
         typer.Option(help="Repository root containing runner/service projects."),
     ] = _DEFAULT_REPOSITORY_ROOT,
 ) -> None:
-    """Run the matched explicit workflows and persist scored paired bundles."""
+    """Run one matched native-framework track and persist scored paired bundles."""
 
     uv = shutil.which("uv")
     if uv is None:

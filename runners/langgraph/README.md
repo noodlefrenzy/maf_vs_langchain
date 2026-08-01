@@ -22,8 +22,8 @@ the installed LangGraph/Deep Agents versions and planned lane topology, emits
 canonical start/finish events, and shuts down cleanly. It deliberately invokes
 no model or MCP tool. The explicit LangGraph substrate advertises restart-safe
 native checkpoints in an owner-only JSON envelope; Deep Agents checkpointing
-remains unavailable. The later LangGraph workflow phases and Deep Agents
-execution remain owned by their lane implementation issues.
+remains unavailable and is advertised as process-local. Both LangGraph and
+Deep Agents lanes now implement real model/MCP execution through `--run`.
 
 The checkpoint compatibility entry point builds a native `interrupt` approval
 graph, pauses it, and resumes its file-backed checkpoint in a fresh process:
@@ -78,3 +78,12 @@ test infrastructure, not a substitute for the control-plane approval command.
 The runner itself uses `langgraph_runner.protocol_runner --run`; model/tool
 usage, approval, checkpoint, state, and terminal transitions therefore cross
 the same normalized lifecycle boundary used by the experiment control plane.
+
+The executable `deep_agents` lane uses declarative role-scoped subagents, the
+native task and filesystem harness, and authenticated MCP tool wrappers. It
+disables the unmatched default general-purpose subagent, bounds only the native
+delegation invocation with LangChain's model-call middleware, and performs a
+provider-structured synthesis after at least two roles have made real MCP
+calls. Run the matched persistent smoke from the repository root with
+`agent-lab experiment run --experiment
+configs/experiments/harness-smoke.toml`.

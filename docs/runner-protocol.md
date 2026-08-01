@@ -96,8 +96,9 @@ uv run pytest tests/test_framework_restart.py
 ```
 
 Only `maf_workflow` and `langgraph` advertise this capability. The MAF Harness
-and Deep Agents lanes remain non-resumable until their lane-specific state
-implementations are built and tested.
+and Deep Agents lanes execute through the same protocol but advertise
+process-local, non-resumable state; their native harness sessions cannot be
+reconstructed after a runner restart.
 
 ## Outer limits and terminal states
 
@@ -118,8 +119,8 @@ timeout, approval timeout, explicit cancellation, graceful shutdown, and all
 four usage budgets. Native MAF and LangGraph processes also implement the
 boundary in an explicit `protocol_probe` mode. They report installed framework
 versions and planned topology, emit canonical run lifecycle events, and prove
-process compatibility without calling a model or MCP tool. The explicit
-workflow lanes additionally run through the same boundary with `--run`, emit
+process compatibility without calling a model or MCP tool. All four native
+lanes additionally run through the same boundary with `--run`, emit
 pre-dispatch model/tool/approval usage and normalized events, pause for a
 token-bound approval command, and persist an owner-only terminal workflow state
 under `state/`. For final scorer artifacts, the runner does not emit its
@@ -131,7 +132,8 @@ exercise this complete bundle path, though their fixture-aware edited approval
 still makes them benchmark-ineligible.
 
 `agent-lab experiment run` promotes the same path into persistent paired runs.
-It currently accepts only the `maf_workflow`/`langgraph` explicit pair, applies
-the declared framework-neutral scripted approval, validates each completed
-bundle, validates the pair, and records task success separately from
-operational completion.
+It accepts exactly one matched track per invocation: either
+`maf_workflow`/`langgraph` or `maf_harness`/`deep_agents`. It applies the
+declared framework-neutral scripted approval, validates each completed bundle,
+validates the pair, and records task success separately from operational
+completion.

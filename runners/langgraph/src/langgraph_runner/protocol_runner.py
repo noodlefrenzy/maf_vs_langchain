@@ -24,9 +24,12 @@ async def _execute_workflow(
     approval_provider: ApprovalProvider,
     telemetry: WorkflowTelemetry,
 ) -> dict[str, object]:
-    if request.manifest.lane is not FrameworkLane.LANGGRAPH:
-        raise ValueError("real execution is implemented only for langgraph")
-    from langgraph_runner.workflow_lane import run_live_approved
+    if request.manifest.lane is FrameworkLane.LANGGRAPH:
+        from langgraph_runner.workflow_lane import run_live_approved
+    elif request.manifest.lane is FrameworkLane.DEEP_AGENTS:
+        from langgraph_runner.harness_lane import run_live_approved
+    else:
+        raise ValueError(f"unsupported LangGraph-family lane {request.manifest.lane.value}")
 
     return await run_live_approved(request, approval_provider, telemetry)
 
@@ -81,7 +84,7 @@ def descriptor() -> NativeRunnerDescriptor:
             FrameworkLane.DEEP_AGENTS: CheckpointCapability(
                 resumable=False,
                 restart_safe=False,
-                format="pending-deep-agents-implementation",
+                format="deep-agents-process-local/v1",
             ),
         },
     )

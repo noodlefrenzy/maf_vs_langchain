@@ -71,9 +71,13 @@ normalized runner protocol with pre-dispatch usage, portable model/tool and
 approval events, control-plane decisions, and owner-only terminal state. It
 also finalizes those executions into the five frozen incident artifacts,
 deterministic scores, individually validated bundles, and a persistent paired
-experiment with pair-level provenance validation. It does not yet claim a
-benchmark result. The next workflow milestone is the matched opinionated
-MAF-Harness/Deep-Agents pair and native tracing.
+experiment with pair-level provenance validation. The opinionated track is also
+executable: MAF Harness background agents and declarative Deep Agents subagents
+perform native role-scoped delegation, pass a shared evidence gate, and enter
+the same approval, execution, finalization, scoring, and pair-validation path.
+Harness state is currently process-local and non-resumable. These smoke runs
+exercise the system but do not constitute a benchmark result. The next
+milestones are native tracing, baselines, and broader repeated experiment runs.
 Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 
@@ -108,5 +112,20 @@ policy without correcting the model's action, writes scored bundles, validates
 each bundle and the pair, and saves a summary index. Summary `status = "ok"`
 means execution and provenance succeeded; task success remains a separate
 per-run score field.
+
+Run the matched opinionated-harness smoke with:
+
+```bash
+uv run agent-lab experiment run \
+  --experiment configs/experiments/harness-smoke.toml \
+  --runs-dir runs \
+  --order-seed 1737
+```
+
+This uses native MAF Harness background agents and Deep Agents declarative
+subagents. The adapter verifies every accepted specialist against its actual
+role-scoped MCP calls and exact evidence IDs; see
+[`docs/gotchas.md`](docs/gotchas.md) for framework-specific stopping and
+structured-output behavior observed with the local model.
 
 No license is granted by this private repository unless one is added later.

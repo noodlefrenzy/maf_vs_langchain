@@ -371,7 +371,12 @@ class ControlPlane:
                         terminal_status = TerminalStatus.RUNNER_FAILURE
                         terminal_reason = "runner_terminal_before_prepare"
                         break
-                    if completion_handler is not None and not finalization_sent:
+                    if (
+                        completion_handler is not None
+                        and not finalization_sent
+                        and message.status
+                        in {TerminalStatus.COMPLETED, TerminalStatus.APPROVAL_REJECTED}
+                    ):
                         terminal_status = TerminalStatus.RUNNER_FAILURE
                         terminal_reason = "runner_terminal_before_finalization"
                         break

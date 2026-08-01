@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import sys
+import traceback
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -90,11 +91,7 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         input_tokens: int,
         output_tokens: int,
     ) -> None:
-        self._advance_usage(
-            "output_tokens",
-            output_tokens,
-            "output_token_budget_exhausted",
-        )
+        output_limit_exceeded = self._record_usage("output_tokens", output_tokens)
         parent = self._model_events.pop(actor, None)
         self.emit(
             EventKind.MODEL_RESPONDED,
@@ -106,6 +103,8 @@ class WorkflowProtocolSession(WorkflowTelemetry):
                 "output_tokens": output_tokens,
             },
         )
+        if output_limit_exceeded:
+            raise WorkflowBudgetExceeded("output_token_budget_exhausted")
 
     async def tool_started(self, *, actor: str, tool_name: str) -> None:
         self._advance_usage("tool_calls", 1, "tool_call_budget_exhausted")
@@ -300,10 +299,15 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         if increment < 0:
             raise ValueError("usage increments cannot be negative")
         observed = getattr(self.usage, field) + increment
-        self.usage = self.usage.model_copy(update={field: observed})
-        _send(UsageMessage(run_id=self.request.manifest.run_id, usage=self.usage))
         if observed > getattr(self.request.manifest.budget, field):
             raise WorkflowBudgetExceeded(reason)
+        self._record_usage(field, increment)
+
+    def _record_usage(self, field: str, increment: int) -> bool:
+        observed = getattr(self.usage, field) + increment
+        self.usage = self.usage.model_copy(update={field: observed})
+        _send(UsageMessage(run_id=self.request.manifest.run_id, usage=self.usage))
+        return observed > getattr(self.request.manifest.budget, field)
 
 
 class NativeRunnerDescriptor(BaseModel):
@@ -399,6 +403,7 @@ async def run_workflow_protocol(
         terminal_reason = str(exc) or "native_workflow_cancelled"
         session.fail(terminal_status, terminal_reason)
     except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
         terminal_status = TerminalStatus.RUNNER_FAILURE
         terminal_reason = f"native_workflow_failed:{type(exc).__name__}"
         session.fail(terminal_status, terminal_reason)

@@ -22,8 +22,9 @@ uv run --project runners/maf --no-sync \
 the installed MAF versions and planned lane topology, emits canonical
 start/finish events, and shuts down cleanly. It deliberately invokes no model
 or MCP tool. The explicit Workflow substrate advertises restart-safe
-`FileCheckpointStorage`; Harness checkpointing remains unavailable. The actual
-Workflow and Harness executions remain owned by their lane implementation issues.
+`FileCheckpointStorage`; Harness checkpointing remains unavailable and is
+advertised as process-local. Both Workflow and Harness lanes now implement real
+model/MCP execution through `--run`.
 
 The checkpoint compatibility entry point builds a native approval-request
 workflow, pauses it, and resumes its owner-only file checkpoint in a fresh
@@ -79,3 +80,12 @@ test infrastructure, not a substitute for the control-plane approval command.
 The runner itself uses `maf_runner.protocol_runner --run`; model/tool usage,
 approval, checkpoint, state, and terminal transitions therefore cross the same
 normalized lifecycle boundary used by the experiment control plane.
+
+The executable `maf_harness` lane uses Agent Framework Harness background
+agents, shared file memory/access, and role-authenticated MCP specialists. Its
+unstructured delegation phase must produce real MCP evidence from at least two
+roles before a tool-disabled structured commander turn is accepted. A bounded
+correction turn may repair the model's own invalid citation, but adapter code
+never rewrites evidence. Run the matched persistent smoke from the repository
+root with `agent-lab experiment run --experiment
+configs/experiments/harness-smoke.toml`.

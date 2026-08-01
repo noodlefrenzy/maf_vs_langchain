@@ -123,6 +123,101 @@ This command is deliberately ephemeral. Do not persist raw control-plane input
 or include the token in an `approval.decided` event. Mock-process tests scan the
 event and stderr outputs to keep that boundary honest.
 
+## Opinionated harness integration
+
+Importing MAF 1.12.1's public Harness file-store surface emits an
+`ExperimentalWarning` before any agent is created. Background agents and the
+file store are usable, but their process-local state is not a restart-safe
+checkpoint. The runner descriptor therefore advertises the MAF Harness lane as
+non-resumable even though the outer protocol can pause in memory for approval.
+
+MAF's coordinator also treated a top-level structured response schema as an
+immediate completion target: the aligned model returned specialist-shaped data
+without calling any `background_agents_*` tool. The role-provenance check caught
+this because no specialist MCP call existed. The adapter now keeps the first
+Harness turn unstructured so native delegation can occur, applies the shared
+minimum-two-specialist evidence gate as an in-session continuation when needed,
+then asks the same session for the structured proposal in a tool-disabled final
+turn. The model may summarize concrete MCP names using conceptual aliases such
+as `metrics_query`; exact tool-name prose is therefore retained as model output
+but not trusted. Actual per-role MCP calls and every cited evidence ID remain
+exactly verified. Do not remove that provenance check merely because the final
+object validates as JSON.
+
+In a later smoke run, two MAF specialists did make real MCP calls, but the
+coordinator rewrote an opaque `ev-...` identifier as a descriptive timestamp
+while producing the structured proposal. The adapter does not normalize or
+silently repair that output. Instead, its tool-disabled final turn includes the
+role-specific set of IDs actually observed by the protocol adapter and tells
+the coordinator to copy from that allowlist byte-for-byte; the subsequent
+provenance validator still fails closed if the model cites anything else.
+One run ignored the allowlist and invented a `change-...` identifier anyway.
+The MAF lane permits one tool-disabled correction turn containing the validator
+error and the same observed allowlist; a second mismatch remains a runner
+failure rather than being rewritten by adapter code.
+
+Deep Agents 0.7.1 automatically adds a `general-purpose` subagent unless a
+matching `HarnessProfile` disables it. That would create a fifth, unmatched
+role, so the experiment registers an OpenAI-family profile that disables the
+extra subagent and the unavailable `execute` tool while retaining native todo,
+filesystem, summarization, and specialist dispatch behavior.
+
+Using `response_format` on each declarative Deep Agents subagent caused the
+local OpenAI-compatible model to remain in an inner model/tool loop instead of
+returning to the coordinator; one smoke run reached the 36-call outer budget.
+The subagents now return a tightly specified natural JSON message, while only
+the coordinator owns the frozen structured proposal. The adapter still parses
+and verifies the coordinator proposal against actual role-scoped MCP results.
+
+Leaving the coordinator's structured-output strategy on automatic selection
+was also unstable with this local model. After every specialist had returned,
+one run made 19 short commander calls while repeatedly trying to finish the
+schema and exhausted the shared 36-call budget. The lane now selects
+LangChain's provider-native JSON-schema strategy explicitly; this endpoint
+supports that mechanism, and it avoids treating structured completion as a
+tool-retry loop.
+
+Provider-native structured output cannot be attached to the first Deep Agents
+turn either: doing so made the coordinator return a schema-valid proposal in
+one call without invoking any `task` subagent. As with MAF Harness, the lane is
+therefore two-phase. An unstructured Deep Agents graph performs native
+delegation and is continued until the observed two-specialist MCP gate is met;
+a second provider-structured graph receives that conversation and the exact
+role-specific evidence allowlist solely for synthesis. A proposal is never
+accepted based on schema validity alone.
+
+An unstructured Deep Agents coordinator can also continue redispatching tasks
+after enough specialist evidence exists. This is distinct from the
+structured-output retry loop: one run spent 22 commander calls in the
+delegation graph. The adapter attaches LangChain's native per-invocation model
+call limiter to that coordinator, ending a delegation invocation after six
+commander calls while retaining its task-result messages. The framework-neutral
+36-call outer budget still counts commander and specialist calls and remains
+the authoritative run limit.
+
+With those guards frozen, the order-seed-1737 paired smoke completed both
+lanes and produced inference-eligible bundles. Deep Agents scored `0.35` and
+MAF Harness scored `0.275`; both had `task_success = false` because their chosen
+mitigations did not recover the seeded incident. Earlier repetitions produced
+valid runner failures for invented citations and valid budget exhaustion for
+runaway coordinator turns. Treat those terminal states as experiment outcomes,
+not as reasons to relax provenance or silently raise a lane-specific outer
+budget.
+
+Deep Agents may truthfully include built-in workspace operations such as
+`grep` in a specialist's `tools_used`. These are native harness operations, not
+MCP evidence sources. Provenance validation therefore permits the known
+workspace-tool names but still requires at least one real role-scoped MCP call
+and requires every cited evidence ID to have appeared in that role's MCP
+result.
+
+LangChain's asynchronous callback manager logs and suppresses exceptions raised
+by callback hooks. A budget exception raised from `on_chat_model_start` was
+therefore printed to stderr while generation continued, producing a usage/event
+mismatch. Hard pre-dispatch budget enforcement now wraps the model's
+`_agenerate` call itself; callbacks remain unsuitable as a fail-closed control
+boundary.
+
 ### Synchronous stdin and long native awaits
 
 The current real-workflow protocol session reads the next command while paused

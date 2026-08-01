@@ -375,6 +375,25 @@ def test_mock_runner_usage_limits_fail_closed(
         assert result.terminal.used_output_tokens == used
 
 
+def test_budget_terminal_does_not_require_success_finalization(tmp_path: Path) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+
+    async def unexpected_completion(_event):
+        raise AssertionError("budget exhaustion must not request finalization")
+
+    result = asyncio.run(
+        control_plane.execute(
+            _command("budget", budget_field="model_calls"),
+            request,
+            completion_handler=unexpected_completion,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.BUDGET_EXHAUSTED
+    assert result.terminal.reason == "model_call_budget_exhausted"
+
+
 def test_lane_order_is_recorded_and_deterministic() -> None:
     lanes = [FrameworkLane.MAF_WORKFLOW, FrameworkLane.LANGGRAPH]
 
