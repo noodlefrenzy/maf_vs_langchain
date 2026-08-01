@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 
 from agent_framework import (
+    ChatContext,
+    ChatMiddleware,
+    ChatResponse,
     FileSystemAgentFileStore,
     MCPStreamableHTTPTool,
-    Message,
     create_harness_agent,
 )
 from agent_framework.openai import OpenAIChatCompletionClient
@@ -35,6 +37,48 @@ from agent_lab.workflow_telemetry import WorkflowTelemetry
 from maf_runner.workflow_lane import MafCommanderAgent, _evidence_ids, _render_tool_result
 
 
+class _ModelDispatchMiddleware(ChatMiddleware):
+    """Count each provider dispatch below MAF's function-invocation loop."""
+
+    def __init__(
+        self,
+        *,
+        actor: str,
+        profile: ModelProfile,
+        telemetry: WorkflowTelemetry,
+    ) -> None:
+        self.actor = actor
+        self.profile = profile
+        self.telemetry = telemetry
+        self.model_calls = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    async def process(
+        self,
+        context: ChatContext,
+        call_next: Callable[[], Awaitable[None]],
+    ) -> None:
+        if context.stream:
+            raise ValueError("the harness protocol adapter requires non-streaming model calls")
+        await self.telemetry.model_started(actor=self.actor, model=self.profile.name)
+        await call_next()
+        if not isinstance(context.result, ChatResponse):
+            raise TypeError("MAF chat middleware returned no non-streaming response")
+        usage = context.result.usage_details or {}
+        input_tokens = int(usage.get("input_token_count", 0))
+        output_tokens = int(usage.get("output_token_count", 0))
+        await self.telemetry.model_finished(
+            actor=self.actor,
+            model=self.profile.name,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+        self.model_calls += 1
+        self.input_tokens += input_tokens
+        self.output_tokens += output_tokens
+
+
 class _InstrumentedChatClient(OpenAIChatCompletionClient):
     def __init__(
         self,
@@ -43,6 +87,11 @@ class _InstrumentedChatClient(OpenAIChatCompletionClient):
         profile: ModelProfile,
         telemetry: WorkflowTelemetry,
     ) -> None:
+        dispatch = _ModelDispatchMiddleware(
+            actor=actor,
+            profile=profile,
+            telemetry=telemetry,
+        )
         sdk = AsyncOpenAI(
             api_key="agent-lab-local",
             base_url=profile.base_url,
@@ -58,38 +107,21 @@ class _InstrumentedChatClient(OpenAIChatCompletionClient):
                 "max_iterations": 12,
                 "max_function_calls": 6,
             },
+            middleware=[dispatch],
         )
-        self.actor = actor
-        self.profile = profile
-        self.telemetry = telemetry
-        self.model_calls = 0
-        self.input_tokens = 0
-        self.output_tokens = 0
+        self._dispatch = dispatch
 
-    async def get_response(
-        self,
-        messages: Sequence[Message],
-        *,
-        stream: bool = False,
-        **kwargs: Any,
-    ) -> Any:
-        if stream:
-            raise ValueError("the harness protocol adapter requires non-streaming model calls")
-        await self.telemetry.model_started(actor=self.actor, model=self.profile.name)
-        response = await super().get_response(messages, stream=False, **kwargs)
-        usage = response.usage_details or {}
-        input_tokens = int(usage.get("input_token_count", 0))
-        output_tokens = int(usage.get("output_token_count", 0))
-        await self.telemetry.model_finished(
-            actor=self.actor,
-            model=self.profile.name,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
-        self.model_calls += 1
-        self.input_tokens += input_tokens
-        self.output_tokens += output_tokens
-        return response
+    @property
+    def model_calls(self) -> int:
+        return self._dispatch.model_calls
+
+    @property
+    def input_tokens(self) -> int:
+        return self._dispatch.input_tokens
+
+    @property
+    def output_tokens(self) -> int:
+        return self._dispatch.output_tokens
 
 
 class _TrackedRoleMCP(MCPStreamableHTTPTool):

@@ -68,8 +68,11 @@ MAF/LangGraph explicit workflows through investigation, commander synthesis,
 evidence gating, native approval checkpoints, token-bound mitigation, and
 recovery verification. Those live explicit workflows now execute through the
 normalized runner protocol with pre-dispatch usage, portable model/tool and
-approval events, control-plane decisions, and owner-only terminal state. It
-also finalizes those executions into the five frozen incident artifacts,
+approval events, control-plane decisions, and owner-only terminal state. MAF
+Harness metering occurs below its internal function-invocation loop so every
+provider dispatch, including tool-loop iterations, consumes the shared outer
+budget. The control plane also finalizes those executions into the five frozen
+incident artifacts,
 deterministic scores, individually validated bundles, and a persistent paired
 experiment with pair-level provenance validation. The opinionated track is also
 executable: MAF Harness background agents and declarative Deep Agents subagents

@@ -321,6 +321,29 @@ written independently, and the bundle validator treats collector degradation
 as a warning while still failing closed on ledger, correlation, or
 completeness tampering.
 
+### MAF Harness model accounting belongs below the function-invocation loop
+
+Observed with `agent-framework-core` 1.12.1.
+
+`OpenAIChatCompletionClient.get_response()` is the public entry to a layered
+client. Its `FunctionInvocationLayer` may issue several provider requests while
+executing tools, then return one response whose usage is aggregated across the
+whole loop. Instrumenting that public method therefore counts agent invocations,
+not model dispatches. In the seed-42 stabilization smoke this produced only four
+to six normalized model calls for MAF Harness runs whose native ledgers contained
+25 to 34 LLM spans.
+
+The harness adapter installs a MAF `ChatMiddleware` instead. That layer executes
+below `FunctionInvocationLayer`, immediately around each provider request. It
+reserves the outer model-call budget before dispatch and records the individual
+response usage afterward. A hermetic two-request tool-loop probe also verifies
+that a one-call budget prevents the second wire request.
+
+Bundles captured before this correction remain valid task and provenance
+artifacts, and their native span ledgers preserve the underlying LLM operations.
+Their normalized MAF Harness model-call count and per-dispatch latency/usage
+events must not be used in system-measure comparisons.
+
 ### Native operation kinds do not line up one-for-one
 
 Observed in the seed-42 explicit pair with MAF 1.12.1, LangGraph 1.2.10, and
