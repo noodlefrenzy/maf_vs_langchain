@@ -102,3 +102,16 @@ That policy knowingly uses fixture truth and makes the run benchmark-ineligible.
 Real experiment runs must obey `docs/comparison-protocol.md`: use the declared
 framework-neutral approval policy and never inspect evaluator ground truth
 before execution terminates.
+
+## Approval protocol boundary
+
+The simulator, not the runner, creates approval tokens. A protocol message that
+contains only `approve` or `edit` is insufficient: the runner must receive the
+exact authorized action and its bound token before the command MCP tool can
+execute. The control plane therefore turns an approval-request event into an
+authoritative `ApprovalRecord`, verifies the request ID, and sends the public
+record fields plus token over runner stdin.
+
+This command is deliberately ephemeral. Do not persist raw control-plane input
+or include the token in an `approval.decided` event. Mock-process tests scan the
+event and stderr outputs to keep that boundary honest.

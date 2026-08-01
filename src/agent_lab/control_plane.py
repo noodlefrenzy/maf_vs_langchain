@@ -7,14 +7,23 @@ import json
 import os
 import random
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_lab.contracts import FrameworkLane, RunManifest, RunTerminal, TerminalStatus
+from agent_lab.contracts import (
+    ApprovalRecord,
+    EventKind,
+    FrameworkLane,
+    NormalizedEvent,
+    RunManifest,
+    RunTerminal,
+    TerminalStatus,
+)
 from agent_lab.run_bundle import RunBundle
 from agent_lab.runner_protocol import (
+    ApprovalCommand,
     CancelCommand,
     ErrorMessage,
     EventMessage,
@@ -33,6 +42,8 @@ from agent_lab.runner_protocol import (
     encode_protocol_message,
     redacted_request_payload,
 )
+
+ApprovalHandler = Callable[[NormalizedEvent], Awaitable[ApprovalRecord]]
 
 
 class LaneOrder(BaseModel):
@@ -125,6 +136,7 @@ class ControlPlane:
         request: RunRequest,
         *,
         cancel_event: asyncio.Event | None = None,
+        approval_handler: ApprovalHandler | None = None,
     ) -> RunnerProcessResult:
         """Run the JSON-lines lifecycle until one documented terminal state."""
 
@@ -289,9 +301,36 @@ class ControlPlane:
                     ) as handle:
                         handle.write(event.model_dump_json() + "\n")
                     expected_event_sequence += 1
-                    if event.kind.value == "approval.requested":
+                    if event.kind is EventKind.APPROVAL_REQUESTED:
                         awaiting_approval = True
-                    elif event.kind.value == "approval.decided":
+                        if approval_handler is not None:
+                            try:
+                                approval = await approval_handler(event)
+                                request_id = event.payload.get("request_id")
+                                if (
+                                    not isinstance(request_id, str)
+                                    or approval.request_id != request_id
+                                ):
+                                    raise ValueError(
+                                        "approval record differs from requested mitigation"
+                                    )
+                                await self._send(
+                                    process,
+                                    ApprovalCommand(
+                                        run_id=request.manifest.run_id,
+                                        request_id=approval.request_id,
+                                        decision=approval.decision,
+                                        decided_by=approval.decided_by,
+                                        decided_tick=approval.decided_tick,
+                                        action_to_execute=approval.action_to_execute,
+                                        approval_token=approval.approval_token,
+                                    ),
+                                )
+                            except Exception as exc:
+                                terminal_status = TerminalStatus.RUNNER_FAILURE
+                                terminal_reason = f"approval_handler_failed:{type(exc).__name__}"
+                                break
+                    elif event.kind is EventKind.APPROVAL_DECIDED:
                         awaiting_approval = False
                 elif isinstance(message, TerminalMessage):
                     if prepared is None:

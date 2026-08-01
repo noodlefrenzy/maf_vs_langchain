@@ -11,7 +11,7 @@ The control plane sends:
 1. `prepare`, containing the immutable run manifest, public ticket,
    role-scoped MCP endpoints, and runner-visible paths;
 2. `start`, after validating the runner's prepared provenance;
-3. zero or more `approval` decisions;
+3. zero or more token-bound `approval` decisions;
 4. `cancel` when an outer limit or operator cancellation fires;
 5. `shutdown` for graceful process teardown.
 
@@ -54,6 +54,12 @@ The typed request contains only the runner's role endpoints. Bearer tokens are
 sent through stdin and are redacted from the persisted request view. The world
 directory is neither included in the runner protocol nor exported in its
 environment.
+
+An approval command carries the authoritative public decision, authorized
+action, reviewer metadata, and the opaque token required by the command MCP
+tool. The token exists only on the control-plane-to-runner stdin stream and in
+process memory. It is excluded from normalized events, prepared metadata,
+checkpoints, artifacts, terminal records, and stderr.
 
 ## Paired protocol preflight
 

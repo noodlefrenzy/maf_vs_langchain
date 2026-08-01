@@ -8,6 +8,8 @@ import pytest
 
 from agent_lab.contracts import (
     AgentRole,
+    ApprovalDecision,
+    ApprovalRecord,
     Budget,
     FrameworkLane,
     ModelProfile,
@@ -137,6 +139,79 @@ def test_mock_runner_approval_timeout_has_distinct_terminal_state(tmp_path: Path
 
     assert result.terminal.status is TerminalStatus.APPROVAL_TIMEOUT
     assert result.terminal.reason == "approval_deadline_exhausted"
+
+
+def test_control_plane_delivers_token_bound_approval_without_persisting_secret(
+    tmp_path: Path,
+) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+    approval_token = "approval-secret-that-must-not-be-persisted"
+
+    async def approve(event):
+        assert event.payload["request_id"] == "mit-control-plane-01"
+        return ApprovalRecord(
+            request_id="mit-control-plane-01",
+            case_id="case-control-plane",
+            decision=ApprovalDecision.EDIT,
+            decided_by="control-plane-test-reviewer",
+            decided_tick=7,
+            action_to_execute="rollback checkout-api and cap retries",
+            approval_token=approval_token,
+        )
+
+    result = asyncio.run(
+        control_plane.execute(
+            _command("approval_success"),
+            request,
+            approval_handler=approve,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.COMPLETED
+    assert result.terminal.reason == "mock_approval_completed"
+    events_text = (result.paths.bundle / "events.jsonl").read_text()
+    assert approval_token not in events_text
+    events = [json.loads(line) for line in events_text.splitlines()]
+    assert [event["kind"] for event in events] == [
+        "run.started",
+        "approval.requested",
+        "approval.decided",
+        "run.finished",
+    ]
+    assert events[2]["payload"] == {
+        "action_to_execute": "rollback checkout-api and cap retries",
+        "decided_by": "control-plane-test-reviewer",
+        "decided_tick": 7,
+        "decision": "edit",
+        "request_id": "mit-control-plane-01",
+    }
+    assert approval_token not in result.stderr_path.read_text()
+
+
+def test_control_plane_rejects_mismatched_approval_record(tmp_path: Path) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+
+    async def mismatched_approval(_event):
+        return ApprovalRecord(
+            request_id="different-request",
+            case_id="case-control-plane",
+            decision=ApprovalDecision.REJECT,
+            decided_by="control-plane-test-reviewer",
+            decided_tick=7,
+        )
+
+    result = asyncio.run(
+        control_plane.execute(
+            _command("approval_success"),
+            request,
+            approval_handler=mismatched_approval,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.RUNNER_FAILURE
+    assert result.terminal.reason == "approval_handler_failed:ValueError"
 
 
 def test_mock_runner_crash_is_runner_failure(tmp_path: Path) -> None:

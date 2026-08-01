@@ -271,7 +271,7 @@ class ApprovalRecord(BaseModel):
     decided_by: str
     decided_tick: int = Field(ge=0)
     action_to_execute: str | None = None
-    approval_token: str | None = None
+    approval_token: str | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_decision_payload(self) -> ApprovalRecord:

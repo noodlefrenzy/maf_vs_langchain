@@ -148,14 +148,18 @@ class ApprovalCommand(ProtocolModel):
     run_id: UUID
     request_id: str
     decision: ApprovalDecision
-    edited_action: str | None = None
+    decided_by: str = Field(min_length=1)
+    decided_tick: int = Field(ge=0)
+    action_to_execute: str | None = None
+    approval_token: str | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
-    def validate_edit(self) -> ApprovalCommand:
-        if self.decision is ApprovalDecision.EDIT and not self.edited_action:
-            raise ValueError("edited approval requires edited_action")
-        if self.decision is not ApprovalDecision.EDIT and self.edited_action is not None:
-            raise ValueError("edited_action is valid only for an edit decision")
+    def validate_decision(self) -> ApprovalCommand:
+        if self.decision in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:
+            if not self.action_to_execute or not self.approval_token:
+                raise ValueError("approved or edited commands require an action and approval token")
+        elif self.action_to_execute is not None or self.approval_token is not None:
+            raise ValueError("rejected commands cannot authorize an action")
         return self
 
 
