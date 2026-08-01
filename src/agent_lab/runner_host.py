@@ -536,12 +536,8 @@ def run_protocol_probe(
                     },
                 ),
             ]
-            _send(
-                EventMessage(event=events[0])
-            )
-            _send(
-                EventMessage(event=events[1])
-            )
+            _send(EventMessage(event=events[0]))
+            _send(EventMessage(event=events[1]))
             _send(
                 TerminalMessage(
                     run_id=request.manifest.run_id,

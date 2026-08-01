@@ -75,22 +75,29 @@ def test_native_semantics_are_classified_without_content_fields() -> None:
     assert classify_native_span("chat", {"openinference.span.kind": "LLM"}) is (
         TraceOperation.MODEL
     )
-    assert classify_native_span("call", {"mcp.method.name": "tools/call"}) is (
-        TraceOperation.TOOL
-    )
+    assert classify_native_span("call", {"mcp.method.name": "tools/call"}) is (TraceOperation.TOOL)
     assert classify_native_span("approval interrupt", {}) is TraceOperation.APPROVAL
-    assert classify_native_span(
-        "telemetry_investigator",
-        {"openinference.span.kind": "CHAIN"},
-    ) is TraceOperation.AGENT
-    assert classify_native_span(
-        "RunnableSequence",
-        {"openinference.span.kind": "CHAIN"},
-    ) is TraceOperation.OTHER
-    assert classify_native_span(
-        "tools/list",
-        {"mcp.method.name": "tools/list"},
-    ) is TraceOperation.OTHER
+    assert (
+        classify_native_span(
+            "telemetry_investigator",
+            {"openinference.span.kind": "CHAIN"},
+        )
+        is TraceOperation.AGENT
+    )
+    assert (
+        classify_native_span(
+            "RunnableSequence",
+            {"openinference.span.kind": "CHAIN"},
+        )
+        is TraceOperation.OTHER
+    )
+    assert (
+        classify_native_span(
+            "tools/list",
+            {"mcp.method.name": "tools/list"},
+        )
+        is TraceOperation.OTHER
+    )
 
 
 def test_trace_completeness_retains_operation_level_gaps() -> None:
@@ -117,9 +124,7 @@ def test_trace_completeness_retains_operation_level_gaps() -> None:
 
 def test_full_native_trace_fixture_keeps_the_checkpoint_gap_visible() -> None:
     fixture = json.loads(
-        Path("tests/fixtures/native-trace-completeness-seed-42.json").read_text(
-            encoding="utf-8"
-        )
+        Path("tests/fixtures/native-trace-completeness-seed-42.json").read_text(encoding="utf-8")
     )
 
     assert fixture["expected_operations"] == {

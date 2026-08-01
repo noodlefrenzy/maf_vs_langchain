@@ -163,9 +163,7 @@ class ControlPlane:
             capture_sensitive=request.capture_sensitive,
             capture_reasoning=request.capture_reasoning,
         )
-        trace_profile_bytes = (trace_profile.model_dump_json(indent=2) + "\n").encode(
-            "utf-8"
-        )
+        trace_profile_bytes = (trace_profile.model_dump_json(indent=2) + "\n").encode("utf-8")
         trace_profile_path = native_path / "tracing-profile.json"
         with trace_profile_path.open("xb") as handle:
             handle.write(trace_profile_bytes)

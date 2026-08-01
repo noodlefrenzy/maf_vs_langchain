@@ -306,9 +306,7 @@ def test_native_trace_ledger_is_reconciled_and_tampering_fails_closed(
         collector_endpoint=tracing.collector_endpoint,
         collector_status=TraceCollectorStatus.UNAVAILABLE,
         phoenix_base_url=tracing.phoenix_base_url,
-        phoenix_trace_url=(
-            f"{tracing.phoenix_base_url}/redirects/traces/{span.trace_id}"
-        ),
+        phoenix_trace_url=(f"{tracing.phoenix_base_url}/redirects/traces/{span.trace_id}"),
         project_name="agent-lab-maf_workflow",
         primary_trace_id=span.trace_id,
         trace_ids=[span.trace_id],

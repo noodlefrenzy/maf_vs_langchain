@@ -88,9 +88,7 @@ class NativeTracingSession:
                     records = [session._project_span(span) for span in spans]
                     session._append_records(records)
                 except Exception as exc:  # pragma: no cover - OTel callback boundary
-                    session._diagnostics.append(
-                        f"local_span_export_failed:{type(exc).__name__}"
-                    )
+                    session._diagnostics.append(f"local_span_export_failed:{type(exc).__name__}")
                     return SpanExportResult.FAILURE
                 return SpanExportResult.SUCCESS
 
@@ -107,9 +105,7 @@ class NativeTracingSession:
                     result = self.delegate.export(spans)
                 except Exception as exc:  # pragma: no cover - network/exporter boundary
                     self.failed = True
-                    session._diagnostics.append(
-                        f"collector_export_failed:{type(exc).__name__}"
-                    )
+                    session._diagnostics.append(f"collector_export_failed:{type(exc).__name__}")
                     return SpanExportResult.FAILURE
                 if result is SpanExportResult.SUCCESS:
                     self.succeeded = True
@@ -122,9 +118,7 @@ class NativeTracingSession:
                     return bool(self.delegate.force_flush(timeout_millis))
                 except Exception as exc:  # pragma: no cover - exporter boundary
                     self.failed = True
-                    session._diagnostics.append(
-                        f"collector_flush_failed:{type(exc).__name__}"
-                    )
+                    session._diagnostics.append(f"collector_flush_failed:{type(exc).__name__}")
                     return False
 
             def shutdown(self) -> None:
@@ -132,9 +126,7 @@ class NativeTracingSession:
                     self.delegate.shutdown()
                 except Exception as exc:  # pragma: no cover - exporter boundary
                     self.failed = True
-                    session._diagnostics.append(
-                        f"collector_shutdown_failed:{type(exc).__name__}"
-                    )
+                    session._diagnostics.append(f"collector_shutdown_failed:{type(exc).__name__}")
 
         try:
             resource = Resource.create(
@@ -175,9 +167,7 @@ class NativeTracingSession:
                     self.capture_sensitive,
                 )
             except Exception as exc:  # pragma: no cover - third-party instrumentation boundary
-                self._diagnostics.append(
-                    f"framework_instrumentation_failed:{type(exc).__name__}"
-                )
+                self._diagnostics.append(f"framework_instrumentation_failed:{type(exc).__name__}")
             tracer = provider.get_tracer("agent_lab.native_tracing", SCHEMA_VERSION)
             self._root_span = tracer.start_span(
                 f"agent-lab.run {self.manifest.lane.value}",
@@ -287,9 +277,7 @@ class NativeTracingSession:
             enabled=enabled,
             capture_sensitive=self.capture_sensitive,
             capture_reasoning=self.capture_reasoning,
-            collector_endpoint=(
-                self.profile.collector_endpoint if enabled else None
-            ),
+            collector_endpoint=(self.profile.collector_endpoint if enabled else None),
             collector_status=collector_status,
             phoenix_base_url=phoenix_base,
             phoenix_trace_url=(
