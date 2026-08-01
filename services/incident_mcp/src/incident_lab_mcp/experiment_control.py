@@ -1,4 +1,4 @@
-"""Run paired native protocol probes against real isolated MCP world clones."""
+"""Run paired native experiments against real isolated MCP world clones."""
 
 from __future__ import annotations
 
@@ -11,19 +11,21 @@ import platform
 import socket
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import uvicorn
 
+from agent_lab.bundle_validation import validate_bundle, validate_pair
 from agent_lab.config import load_experiment, load_model_profile
 from agent_lab.contract_bundle import contract_bundle_hashes
-from agent_lab.contracts import FrameworkLane, RunManifest, TerminalStatus
+from agent_lab.contracts import ApprovalDecision, FrameworkLane, RunManifest, TerminalStatus
 from agent_lab.control_plane import ControlPlane, resolve_lane_order
 from agent_lab.runner_host import NativeRunnerDescriptor
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 from incident_lab_mcp.http_auth import RunCredentialSigner, RunWorldRegistry
 from incident_lab_mcp.http_service import build_http_app, issue_endpoint_credentials
 from incident_lab_mcp.roles import ROLE_TO_AGENT_ROLE
+from incident_lab_mcp.workflow_finalization import finalize_workflow_bundle
 
 _TRACK_PAIRS = (
     (
@@ -58,7 +60,44 @@ async def run_experiment_protocol_probe(
     runs_dir: Path,
     order_seed: int,
 ) -> dict[str, Any]:
-    """Resolve a profile and run each matched lane through its native process."""
+    """Resolve a profile and probe each matched lane without model or tool calls."""
+
+    return await _run_experiment(
+        repository_root=repository_root,
+        experiment_path=experiment_path,
+        runs_dir=runs_dir,
+        order_seed=order_seed,
+        execution_mode="protocol_probe",
+    )
+
+
+async def run_explicit_workflow_experiment(
+    *,
+    repository_root: Path,
+    experiment_path: Path,
+    runs_dir: Path,
+    order_seed: int,
+) -> dict[str, Any]:
+    """Run and score one persistent matched explicit-workflow experiment."""
+
+    return await _run_experiment(
+        repository_root=repository_root,
+        experiment_path=experiment_path,
+        runs_dir=runs_dir,
+        order_seed=order_seed,
+        execution_mode="native_workflow",
+    )
+
+
+async def _run_experiment(
+    *,
+    repository_root: Path,
+    experiment_path: Path,
+    runs_dir: Path,
+    order_seed: int,
+    execution_mode: Literal["protocol_probe", "native_workflow"],
+) -> dict[str, Any]:
+    """Resolve a profile and run each selected lane through its native process."""
 
     repository_root = repository_root.resolve()
     experiment_path = _resolve(repository_root, experiment_path)
@@ -66,6 +105,10 @@ async def run_experiment_protocol_probe(
     experiment = load_experiment(experiment_path)
     model = load_model_profile(_resolve(repository_root, Path(experiment.model_profile)))
     tracks = _selected_tracks(experiment.lanes)
+    if execution_mode == "native_workflow" and any(
+        track != "explicit_workflow" for track, _left, _right in tracks
+    ):
+        raise ValueError("native workflow execution currently supports only the explicit pair")
     descriptors = {
         lane: _describe_runner(repository_root, lane)
         for _track, left, right in tracks
@@ -75,9 +118,10 @@ async def run_experiment_protocol_probe(
     source_commit = _source_commit(repository_root)
     source_tree_sha256 = _source_tree_sha256(repository_root)
     runs_dir.mkdir(parents=True, exist_ok=True)
-    index_path = runs_dir / (f"protocol-probe-{experiment.experiment_id}-order-{order_seed}.json")
+    index_prefix = "protocol-probe" if execution_mode == "protocol_probe" else "native-workflow"
+    index_path = runs_dir / f"{index_prefix}-{experiment.experiment_id}-order-{order_seed}.json"
     if index_path.exists():
-        raise FileExistsError(f"protocol probe index already exists at {index_path}")
+        raise FileExistsError(f"experiment index already exists at {index_path}")
     control_plane = ControlPlane(runs_dir)
     results: list[dict[str, Any]] = []
     blocks: list[dict[str, Any]] = []
@@ -139,7 +183,7 @@ async def run_experiment_protocol_probe(
                     project, module = _RUNNER_PROJECT[lane]
                     manifest = RunManifest(
                         run_id=run.run_id,
-                        experiment_id=f"{experiment.experiment_id}_protocol_probe",
+                        experiment_id=f"{experiment.experiment_id}_{execution_mode}",
                         lane=lane,
                         scenario=experiment.scenario,
                         scenario_generator_version=run.world.incident.generator_version,
@@ -158,7 +202,7 @@ async def run_experiment_protocol_probe(
                             "hostname": platform.node(),
                             "platform": platform.platform(),
                             "python": platform.python_version(),
-                            "execution_mode": "protocol_probe",
+                            "execution_mode": execution_mode,
                         },
                     )
                     _bundle, paths = control_plane.allocate_run(manifest)
@@ -181,9 +225,28 @@ async def run_experiment_protocol_probe(
                         "python",
                         "-m",
                         module,
-                        "--protocol-probe",
+                        "--protocol-probe" if execution_mode == "protocol_probe" else "--run",
                     ]
-                    result = await control_plane.execute(command, request)
+                    if execution_mode == "native_workflow":
+
+                        async def approve(event, *, world=run.world):
+                            return world.decide_mitigation(
+                                str(event.payload["request_id"]),
+                                ApprovalDecision.APPROVE,
+                                decided_by="scripted-approval-policy-v1",
+                            )
+
+                        async def complete(_event, *, world=run.world, request=request):
+                            return await finalize_workflow_bundle(request, world)
+
+                        result = await control_plane.execute(
+                            command,
+                            request,
+                            approval_handler=approve,
+                            completion_handler=complete,
+                        )
+                    else:
+                        result = await control_plane.execute(command, request)
                     checkpoint = run.world.save_checkpoint(
                         paths.run_root / "world" / "world-checkpoint.json"
                     )
@@ -198,17 +261,44 @@ async def run_experiment_protocol_probe(
                         "world_checkpoint": str(checkpoint),
                         "world_manifest_sha256": receipt.world_manifest_sha256,
                     }
+                    if execution_mode == "native_workflow":
+                        validation = validate_bundle(paths.bundle, mark=True)
+                        run_result["bundle_valid"] = validation.valid
+                        run_result["inference_status"] = validation.inference_status
+                        scores_path = paths.bundle / "scores.json"
+                        if scores_path.is_file():
+                            score = json.loads(scores_path.read_text(encoding="utf-8"))
+                            run_result["task_success"] = score["task_success"]
+                            run_result["total_score"] = score["total_score"]
                     results.append(run_result)
                     block_runs.append(run_result)
-                blocks.append(
-                    {
-                        "seed": seed,
-                        "repetition": repetition,
-                        "order_seed": block_order_seed,
-                        "lane_order": [lane.value for lane in order.lanes],
-                        "runs": block_runs,
+                block = {
+                    "seed": seed,
+                    "repetition": repetition,
+                    "order_seed": block_order_seed,
+                    "lane_order": [lane.value for lane in order.lanes],
+                    "runs": block_runs,
+                }
+                if execution_mode == "native_workflow":
+                    left = next(
+                        item
+                        for item in block_runs
+                        if item["lane"] == FrameworkLane.MAF_WORKFLOW.value
+                    )
+                    right = next(
+                        item for item in block_runs if item["lane"] == FrameworkLane.LANGGRAPH.value
+                    )
+                    pair_validation = validate_pair(
+                        Path(str(left["bundle"])),
+                        Path(str(right["bundle"])),
+                        mark=True,
+                    )
+                    block["pair_validation"] = {
+                        "valid": pair_validation.valid,
+                        "inference_status": pair_validation.inference_status,
+                        "track": pair_validation.track,
                     }
-                )
+                blocks.append(block)
             finally:
                 server.should_exit = True
                 await server_task
@@ -216,12 +306,21 @@ async def run_experiment_protocol_probe(
 
     summary = {
         "schema_version": "0.1.0",
-        "execution_mode": "protocol_probe",
+        "execution_mode": execution_mode,
         "experiment_id": experiment.experiment_id,
         "order_seed": order_seed,
         "status": (
             "ok"
-            if all(item["status"] == TerminalStatus.COMPLETED.value for item in results)
+            if all(
+                item["status"] == TerminalStatus.COMPLETED.value
+                and (execution_mode == "protocol_probe" or item.get("bundle_valid") is True)
+                for item in results
+            )
+            and all(
+                execution_mode == "protocol_probe"
+                or block.get("pair_validation", {}).get("valid") is True
+                for block in blocks
+            )
             else "failed"
         ),
         "blocks": blocks,
@@ -241,7 +340,7 @@ def _selected_tracks(
         name, left, right = track
         present = {left, right} & lane_set
         if present and present != {left, right}:
-            raise ValueError(f"{name} protocol probe requires both {left.value} and {right.value}")
+            raise ValueError(f"{name} experiment requires both {left.value} and {right.value}")
         if present:
             selected.append(track)
     if not selected:
@@ -387,9 +486,19 @@ def main() -> None:
     )
     parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
     parser.add_argument("--order-seed", type=int, default=1729)
+    parser.add_argument(
+        "--mode",
+        choices=["protocol_probe", "native_workflow"],
+        default="protocol_probe",
+    )
     args = parser.parse_args()
+    entrypoint = (
+        run_experiment_protocol_probe
+        if args.mode == "protocol_probe"
+        else run_explicit_workflow_experiment
+    )
     summary = asyncio.run(
-        run_experiment_protocol_probe(
+        entrypoint(
             repository_root=args.repository_root,
             experiment_path=args.experiment,
             runs_dir=args.runs_dir,

@@ -70,9 +70,10 @@ recovery verification. Those live explicit workflows now execute through the
 normalized runner protocol with pre-dispatch usage, portable model/tool and
 approval events, control-plane decisions, and owner-only terminal state. It
 also finalizes those executions into the five frozen incident artifacts,
-deterministic scores, and individually validated bundles. It does not yet claim
-a benchmark result. The next explicit-workflow milestone is a persistent paired
-experiment command and pair-level validation over these live runners.
+deterministic scores, individually validated bundles, and a persistent paired
+experiment with pair-level provenance validation. It does not yet claim a
+benchmark result. The next workflow milestone is the matched opinionated
+MAF-Harness/Deep-Agents pair and native tracing.
 Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 
@@ -91,5 +92,21 @@ each native runner sequentially, enforces outer limits, and persists protected
 world checkpoints and terminal bundles. It is explicitly a protocol probe:
 no model or MCP tool is called, no score is produced, and its bundles are not
 benchmark evidence.
+
+Run the persistent paired explicit-workflow smoke against the configured local
+OpenAI-compatible endpoint with:
+
+```bash
+uv run agent-lab experiment run \
+  --experiment configs/experiments/explicit-smoke.toml \
+  --runs-dir runs \
+  --order-seed 1729
+```
+
+This invokes the model and MCP tools. It uses the declared scripted `approve`
+policy without correcting the model's action, writes scored bundles, validates
+each bundle and the pair, and saves a summary index. Summary `status = "ok"`
+means execution and provenance succeeded; task success remains a separate
+per-run score field.
 
 No license is granted by this private repository unless one is added later.

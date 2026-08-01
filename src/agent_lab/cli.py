@@ -201,6 +201,79 @@ def run_experiment_probe(
     console.print_json(data=payload)
 
 
+@experiment_app.command("run")
+def run_explicit_workflow_experiment(
+    experiment: Annotated[
+        Path,
+        typer.Option(
+            "--experiment",
+            "-e",
+            help="Explicit-workflow experiment profile to execute.",
+        ),
+    ] = Path("configs/experiments/explicit-smoke.toml"),
+    runs_dir: Annotated[
+        Path,
+        typer.Option(help="Destination for persistent scored run bundles."),
+    ] = Path("runs"),
+    order_seed: Annotated[
+        int,
+        typer.Option(help="Recorded seed for deterministic lane ordering."),
+    ] = 1729,
+    repository_root: Annotated[
+        Path,
+        typer.Option(help="Repository root containing runner/service projects."),
+    ] = _DEFAULT_REPOSITORY_ROOT,
+) -> None:
+    """Run the matched explicit workflows and persist scored paired bundles."""
+
+    uv = shutil.which("uv")
+    if uv is None:
+        console.print("[red]Cannot run experiment: uv is not on PATH.[/red]")
+        raise typer.Exit(code=1)
+    root = repository_root.resolve()
+    command = [
+        uv,
+        "run",
+        "--project",
+        str(root / "services/incident_mcp"),
+        "--no-sync",
+        "python",
+        "-m",
+        "incident_lab_mcp.experiment_control",
+        "--repository-root",
+        str(root),
+        "--experiment",
+        str(experiment),
+        "--runs-dir",
+        str(runs_dir),
+        "--order-seed",
+        str(order_seed),
+        "--mode",
+        "native_workflow",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        if result.stderr:
+            console.print(result.stderr.rstrip())
+        if result.stdout:
+            console.print(result.stdout.rstrip())
+        raise typer.Exit(code=result.returncode)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        console.print("[red]Experiment run returned invalid JSON.[/red]")
+        if result.stderr:
+            console.print(result.stderr.rstrip())
+        raise typer.Exit(code=1) from exc
+    console.print_json(data=payload)
+
+
 @app.command()
 def doctor() -> None:
     """Report local prerequisites without mutating the machine."""

@@ -124,8 +124,14 @@ pre-dispatch model/tool/approval usage and normalized events, pause for a
 token-bound approval command, and persist an owner-only terminal workflow state
 under `state/`. For final scorer artifacts, the runner does not emit its
 terminal event until the service-side finalizer acknowledges that state. The
-finalizer writes and digest-checks the five frozen
-artifacts plus deterministic score, then the runner emits `artifact.written`,
+finalizer writes and digest-checks the five frozen artifacts plus deterministic
+score, then the runner emits `artifact.written`,
 `run.finished`, and `terminal` in that order. Live compatibility executions now
 exercise this complete bundle path, though their fixture-aware edited approval
 still makes them benchmark-ineligible.
+
+`agent-lab experiment run` promotes the same path into persistent paired runs.
+It currently accepts only the `maf_workflow`/`langgraph` explicit pair, applies
+the declared framework-neutral scripted approval, validates each completed
+bundle, validates the pair, and records task success separately from
+operational completion.

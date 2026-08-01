@@ -1,7 +1,10 @@
 import json
+import os
 import stat
 import subprocess
 from pathlib import Path
+
+import pytest
 
 from agent_lab.bundle_validation import validate_bundle
 
@@ -116,3 +119,80 @@ def test_protocol_probe_refuses_to_overwrite_index(tmp_path: Path) -> None:
     second = _run_probe(experiment, runs_dir, order_seed=991)
     assert second.returncode != 0
     assert "already exists" in second.stderr
+
+
+def test_native_workflow_mode_rejects_unimplemented_harness_tracks(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(REPOSITORY_ROOT / "services/incident_mcp"),
+            "--no-sync",
+            "python",
+            "-m",
+            "incident_lab_mcp.experiment_control",
+            "--repository-root",
+            str(REPOSITORY_ROOT),
+            "--experiment",
+            str(REPOSITORY_ROOT / "configs/experiments/smoke.toml"),
+            "--runs-dir",
+            str(tmp_path / "runs"),
+            "--mode",
+            "native_workflow",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert "supports only the explicit pair" in result.stderr
+
+
+@pytest.mark.skipif(
+    os.getenv("AGENT_LAB_RUN_LIVE_MODEL_TESTS") != "1",
+    reason="requires an explicit tunnel to the aligned lonestar model",
+)
+def test_live_native_workflow_experiment_writes_valid_scored_pair(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(REPOSITORY_ROOT / "services/incident_mcp"),
+            "--no-sync",
+            "python",
+            "-m",
+            "incident_lab_mcp.experiment_control",
+            "--repository-root",
+            str(REPOSITORY_ROOT),
+            "--experiment",
+            str(REPOSITORY_ROOT / "configs/experiments/explicit-smoke.toml"),
+            "--runs-dir",
+            str(tmp_path / "runs"),
+            "--order-seed",
+            "1729",
+            "--mode",
+            "native_workflow",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+
+    assert result.returncode == 0, result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["status"] == "ok"
+    assert summary["execution_mode"] == "native_workflow"
+    assert summary["blocks"][0]["pair_validation"] == {
+        "inference_status": "eligible",
+        "track": "explicit_workflow",
+        "valid": True,
+    }
+    assert {item["lane"] for item in summary["runs"]} == {
+        "maf_workflow",
+        "langgraph",
+    }
+    assert all(item["bundle_valid"] for item in summary["runs"])
+    assert all(Path(item["bundle"]).joinpath("scores.json").is_file() for item in summary["runs"])

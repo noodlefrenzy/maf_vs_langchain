@@ -103,6 +103,13 @@ Real experiment runs must obey `docs/comparison-protocol.md`: use the declared
 framework-neutral approval policy and never inspect evaluator ground truth
 before execution terminates.
 
+The persistent `experiment run` path does exactly that: it approves the model's
+proposal without editing it. In the first seed-42 paired smoke, both frameworks
+earned `0.60`: full diagnosis, evidence provenance, approval/safety, and artifact
+credit, but no containment or recovery credit. Both bundles and the pair were
+provenance-valid. An operational summary status of `ok` must not be confused
+with `task_success`.
+
 ## Approval protocol boundary
 
 The simulator, not the runner, creates approval tokens. A protocol message that
