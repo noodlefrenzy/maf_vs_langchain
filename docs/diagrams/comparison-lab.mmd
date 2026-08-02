@@ -1,0 +1,24 @@
+flowchart LR
+  CP[Experiment control plane]
+  MAF[MAF runner]
+  LANG[Lang runner]
+  WA[(World clone A)]
+  WB[(World clone B)]
+  LLM[One local OpenAI-compatible model]
+  EVT[(Normalized events + immutable bundles)]
+  PHX[(Phoenix native traces)]
+  SCORE[Deterministic evaluator]
+
+  CP --> MAF
+  CP --> LANG
+  MAF <-->|role-scoped MCP| WA
+  LANG <-->|role-scoped MCP| WB
+  MAF <-->|Chat Completions| LLM
+  LANG <-->|Chat Completions| LLM
+  MAF --> EVT
+  LANG --> EVT
+  MAF -->|OTLP| PHX
+  LANG -->|OTLP| PHX
+  WA --> SCORE
+  WB --> SCORE
+  EVT --> SCORE

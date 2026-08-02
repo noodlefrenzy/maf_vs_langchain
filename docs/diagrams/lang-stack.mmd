@@ -1,0 +1,19 @@
+flowchart TB
+  MODEL[LangChain chat model]
+  LC[LangChain agent/tool layer]
+  LG[LangGraph runtime]
+  DA[Deep Agents]
+  SUB[Subagents + todos + files + summarization]
+  GRAPH[Nodes + edges + state + interrupt]
+  MCP[langchain-mcp-adapters]
+  OI[OpenInference + OTel]
+
+  MODEL --> LC
+  LC --> LG
+  LG --> DA
+  DA --> SUB
+  LG --> GRAPH
+  SUB --> MCP
+  GRAPH --> MCP
+  LC --> OI
+  LG --> OI

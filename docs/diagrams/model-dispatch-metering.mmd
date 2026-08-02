@@ -1,0 +1,11 @@
+flowchart LR
+  A[Old meter around get_response] --> L[FunctionInvocationLayer]
+  L --> P1[Provider request 1]
+  L --> TOOL[Tool execution]
+  TOOL --> P2[Provider request 2]
+  P2 --> PN[...more provider requests]
+  PN --> A
+
+  M[New ChatMiddleware meter] -. wraps each dispatch .-> P1
+  M -.-> P2
+  M -.-> PN

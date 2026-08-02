@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 470" fill="#172033" role="img" aria-labelledby="title desc">
+  <title id="title">Matched explicit incident response workflow</title>
+  <desc id="desc">A ticket fans out to three specialists, joins into commander synthesis, passes an evidence gate and approval, then mitigation, recovery verification, and an incident record.</desc>
+  <defs>
+    <linearGradient id="stageBg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f8fbfe"/><stop offset="1" stop-color="#eef4f9"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#19324a" flood-opacity="0.13"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10Z" fill="#65798c"/>
+    </marker>
+    <marker id="arrowOrange" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#d56a3c"/>
+    </marker>
+    <style>
+      .label { font-family: "Segoe UI", Arial, sans-serif; }
+      .title { font-size: 18px; font-weight: 700; }
+      .small { font-size: 13px; fill: #637285; }
+      .micro { font-size: 11px; font-weight: 700; letter-spacing: .6px; }
+      .card { fill: #fff; stroke: #c9d7e4; stroke-width: 1.5; filter: url(#shadow); }
+      .edge { fill: none; stroke: #65798c; stroke-width: 2.2; marker-end: url(#arrow); }
+      .retry { fill: none; stroke: #d56a3c; stroke-width: 2.2; stroke-dasharray: 7 5; marker-end: url(#arrowOrange); }
+    </style>
+  </defs>
+
+  <rect x="17" y="32" width="1246" height="402" rx="28" fill="url(#stageBg)" stroke="#d4e0eb"/>
+  <text x="42" y="62" class="label micro" fill="#607083">DETERMINISTIC OUTER TOPOLOGY · NATIVE STATE + CHECKPOINTS</text>
+
+  <rect x="38" y="183" width="120" height="76" rx="16" class="card"/>
+  <circle cx="68" cy="221" r="17" fill="#173f64"/>
+  <path d="M61 216h14v11H61zM63 213h10" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/>
+  <text x="94" y="217" class="label title">Ticket</text>
+  <text x="94" y="238" class="label small">public brief</text>
+
+  <path d="M158 221H199" class="edge"/>
+  <circle cx="219" cy="221" r="21" fill="#fff" stroke="#93a9bc" stroke-width="2"/>
+  <path d="M211 221h16M219 213v16" stroke="#60788e" stroke-width="2" stroke-linecap="round"/>
+  <text x="219" y="261" text-anchor="middle" class="label micro">FAN-OUT</text>
+
+  <path d="M240 221C260 221 254 119 279 119" class="edge"/>
+  <path d="M240 221H279" class="edge"/>
+  <path d="M240 221C260 221 254 323 279 323" class="edge"/>
+
+  <rect x="282" y="82" width="164" height="74" rx="15" fill="#e8f3fb" stroke="#6ea5cc" stroke-width="1.5" filter="url(#shadow)"/>
+  <circle cx="310" cy="119" r="16" fill="#1267a5"/>
+  <path d="M302 125l5-9 5 5 7-12" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="336" y="116" class="label title">Telemetry</text>
+  <text x="336" y="136" class="label small">metrics · logs · traces</text>
+
+  <rect x="282" y="184" width="164" height="74" rx="15" fill="#edf8f4" stroke="#6ab397" stroke-width="1.5" filter="url(#shadow)"/>
+  <circle cx="310" cy="221" r="16" fill="#15916f"/>
+  <path d="M302 215h16M302 221h11M302 227h14" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
+  <text x="336" y="218" class="label title">Changes</text>
+  <text x="336" y="238" class="label small">deploys · config · diffs</text>
+
+  <rect x="282" y="286" width="164" height="74" rx="15" fill="#fff5ee" stroke="#d89a73" stroke-width="1.5" filter="url(#shadow)"/>
+  <circle cx="310" cy="323" r="16" fill="#d56a3c"/>
+  <path d="M303 323l5 5 10-12" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+  <text x="336" y="320" class="label title">Reliability</text>
+  <text x="336" y="340" class="label small">policy · safe reversibility</text>
+
+  <path d="M446 119C476 119 470 221 494 221" class="edge"/>
+  <path d="M446 221H494" class="edge"/>
+  <path d="M446 323C476 323 470 221 494 221" class="edge"/>
+  <circle cx="515" cy="221" r="21" fill="#fff" stroke="#93a9bc" stroke-width="2"/>
+  <path d="M507 216l8 5 8-5M507 226l8-5 8 5" fill="none" stroke="#60788e" stroke-width="1.8"/>
+  <text x="515" y="261" text-anchor="middle" class="label micro">JOIN</text>
+
+  <path d="M536 221H560" class="edge"/>
+  <rect x="563" y="176" width="172" height="90" rx="17" fill="#fff" stroke="#7896b1" stroke-width="1.7" filter="url(#shadow)"/>
+  <rect x="579" y="191" width="36" height="36" rx="10" fill="#173f64"/>
+  <path d="M587 217c2-8 18-8 20 0M597 198a6 6 0 1 0 0 12 6 6 0 0 0 0-12" fill="none" stroke="#fff" stroke-width="1.7"/>
+  <text x="625" y="207" class="label title">Commander</text>
+  <text x="625" y="228" class="label small">synthesize evidence</text>
+  <text x="625" y="247" class="label small">propose least-risk action</text>
+
+  <path d="M735 221H764" class="edge"/>
+  <path d="M807 176L850 221L807 266L764 221Z" fill="#fff8ed" stroke="#d7a457" stroke-width="1.8" filter="url(#shadow)"/>
+  <text x="807" y="216" text-anchor="middle" class="label title">Evidence</text>
+  <text x="807" y="236" text-anchor="middle" class="label small">gate</text>
+
+  <path d="M850 221H878" class="edge"/>
+  <text x="864" y="207" text-anchor="middle" class="label micro" fill="#15916f">PASS</text>
+  <path d="M921 181L961 221L921 261L881 221Z" fill="#eef6ff" stroke="#5d91bd" stroke-width="1.8" filter="url(#shadow)"/>
+  <text x="921" y="217" text-anchor="middle" class="label title">Human</text>
+  <text x="921" y="237" text-anchor="middle" class="label small">approval</text>
+
+  <path d="M961 221H984" class="edge"/>
+  <rect x="987" y="181" width="126" height="80" rx="16" fill="#edf8f4" stroke="#6ab397" stroke-width="1.5" filter="url(#shadow)"/>
+  <circle cx="1017" cy="221" r="16" fill="#15916f"/>
+  <path d="M1009 221l5 5 11-13" fill="none" stroke="#fff" stroke-width="2"/>
+  <text x="1043" y="218" class="label title">Mitigate</text>
+  <text x="1043" y="239" class="label small">approved only</text>
+
+  <path d="M1113 221H1133" class="edge"/>
+  <rect x="1136" y="145" width="105" height="74" rx="15" class="card"/>
+  <text x="1188" y="174" text-anchor="middle" class="label title">Verify</text>
+  <text x="1188" y="196" text-anchor="middle" class="label small">recovery</text>
+  <path d="M1188 219V266" class="edge"/>
+  <rect x="1136" y="269" width="105" height="74" rx="15" class="card"/>
+  <text x="1188" y="298" text-anchor="middle" class="label title">Record</text>
+  <text x="1188" y="320" text-anchor="middle" class="label small">artifact</text>
+
+  <path d="M807 176C807 43 255 43 219 196" class="retry"/>
+  <rect x="492" y="35" width="145" height="25" rx="12.5" fill="#fff1e9" stroke="#e0a27e"/>
+  <text x="564" y="52" text-anchor="middle" class="label micro" fill="#b4522e">INSUFFICIENT → RETRY</text>
+</svg>
