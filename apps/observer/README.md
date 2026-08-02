@@ -1,6 +1,10 @@
 # Paired observer
 
-Planned neutral live and replay UI.
+Planned neutral live and replay UI. Completed bundles already expose the stable
+drilldown input in `native/trace-link.json`: `phoenix_trace_url` is the primary
+native trace link, while `completeness.operations` supplies the neutral coverage
+matrix. The observer should render a degraded local-only state when
+`collector_status` is `unavailable` or `export_failed`.
 
 The observer consumes only normalized events. It must not import either agent
 framework, call the model, or access hidden world state.

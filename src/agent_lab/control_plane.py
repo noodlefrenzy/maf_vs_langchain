@@ -3,21 +3,34 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import random
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_lab.contracts import FrameworkLane, RunManifest, RunTerminal, TerminalStatus
+from agent_lab.contract_bundle import canonical_json
+from agent_lab.contracts import (
+    ApprovalRecord,
+    EventKind,
+    FrameworkLane,
+    NormalizedEvent,
+    RunManifest,
+    RunTerminal,
+    TerminalStatus,
+)
 from agent_lab.run_bundle import RunBundle
 from agent_lab.runner_protocol import (
+    ApprovalCommand,
     CancelCommand,
     ErrorMessage,
     EventMessage,
+    FinalizationResult,
+    FinalizeCommand,
     HeartbeatMessage,
     PrepareCommand,
     PreparedMessage,
@@ -33,6 +46,10 @@ from agent_lab.runner_protocol import (
     encode_protocol_message,
     redacted_request_payload,
 )
+from agent_lab.trace_contracts import NativeTraceProfileRecord
+
+ApprovalHandler = Callable[[NormalizedEvent], Awaitable[ApprovalRecord]]
+CompletionHandler = Callable[[NormalizedEvent], Awaitable[FinalizationResult]]
 
 
 class LaneOrder(BaseModel):
@@ -125,6 +142,8 @@ class ControlPlane:
         request: RunRequest,
         *,
         cancel_event: asyncio.Event | None = None,
+        approval_handler: ApprovalHandler | None = None,
+        completion_handler: CompletionHandler | None = None,
     ) -> RunnerProcessResult:
         """Run the JSON-lines lifecycle until one documented terminal state."""
 
@@ -138,6 +157,19 @@ class ControlPlane:
 
         started = time.monotonic()
         native_path = request.paths.bundle / "native"
+        trace_profile = NativeTraceProfileRecord(
+            run_id=request.manifest.run_id,
+            tracing=request.tracing,
+            capture_sensitive=request.capture_sensitive,
+            capture_reasoning=request.capture_reasoning,
+        )
+        trace_profile_bytes = (trace_profile.model_dump_json(indent=2) + "\n").encode("utf-8")
+        trace_profile_path = native_path / "tracing-profile.json"
+        with trace_profile_path.open("xb") as handle:
+            handle.write(trace_profile_bytes)
+        trace_profile_path.chmod(0o600)
+        with (native_path / "tracing-profile.sha256").open("x", encoding="utf-8") as handle:
+            handle.write(hashlib.sha256(trace_profile_bytes).hexdigest() + "\n")
         request_path = native_path / "run-request.redacted.json"
         request_path.write_text(
             json.dumps(redacted_request_payload(request), indent=2, sort_keys=True) + "\n",
@@ -193,6 +225,7 @@ class ControlPlane:
         terminal_reason = ""
         expected_event_sequence = 0
         awaiting_approval = False
+        finalization_sent = False
         deadline = started + request.manifest.budget.wall_clock_seconds
 
         await self._send(process, PrepareCommand(request=request))
@@ -289,14 +322,77 @@ class ControlPlane:
                     ) as handle:
                         handle.write(event.model_dump_json() + "\n")
                     expected_event_sequence += 1
-                    if event.kind.value == "approval.requested":
+                    if event.kind is EventKind.APPROVAL_REQUESTED:
                         awaiting_approval = True
-                    elif event.kind.value == "approval.decided":
+                        if approval_handler is not None:
+                            try:
+                                approval = await approval_handler(event)
+                                request_id = event.payload.get("request_id")
+                                if (
+                                    not isinstance(request_id, str)
+                                    or approval.request_id != request_id
+                                ):
+                                    raise ValueError(
+                                        "approval record differs from requested mitigation"
+                                    )
+                                await self._send(
+                                    process,
+                                    ApprovalCommand(
+                                        run_id=request.manifest.run_id,
+                                        request_id=approval.request_id,
+                                        decision=approval.decision,
+                                        decided_by=approval.decided_by,
+                                        decided_tick=approval.decided_tick,
+                                        action_to_execute=approval.action_to_execute,
+                                        approval_token=approval.approval_token,
+                                    ),
+                                )
+                            except Exception as exc:
+                                terminal_status = TerminalStatus.RUNNER_FAILURE
+                                terminal_reason = f"approval_handler_failed:{type(exc).__name__}"
+                                break
+                    elif event.kind is EventKind.APPROVAL_DECIDED:
                         awaiting_approval = False
+                    elif (
+                        event.kind is EventKind.STATE_UPDATED
+                        and event.payload.get("phase") == "workflow_terminal"
+                    ):
+                        if finalization_sent:
+                            terminal_status = TerminalStatus.RUNNER_FAILURE
+                            terminal_reason = "runner_requested_finalization_more_than_once"
+                            break
+                        try:
+                            finalization = (
+                                await completion_handler(event)
+                                if completion_handler is not None
+                                else FinalizationResult()
+                            )
+                            _validate_finalization(request.paths.bundle, finalization)
+                            await self._send(
+                                process,
+                                FinalizeCommand(
+                                    run_id=request.manifest.run_id,
+                                    finalization=finalization,
+                                ),
+                            )
+                            finalization_sent = True
+                        except Exception as exc:
+                            terminal_status = TerminalStatus.RUNNER_FAILURE
+                            terminal_reason = f"completion_handler_failed:{type(exc).__name__}"
+                            break
                 elif isinstance(message, TerminalMessage):
                     if prepared is None:
                         terminal_status = TerminalStatus.RUNNER_FAILURE
                         terminal_reason = "runner_terminal_before_prepare"
+                        break
+                    if (
+                        completion_handler is not None
+                        and not finalization_sent
+                        and message.status
+                        in {TerminalStatus.COMPLETED, TerminalStatus.APPROVAL_REJECTED}
+                    ):
+                        terminal_status = TerminalStatus.RUNNER_FAILURE
+                        terminal_reason = "runner_terminal_before_finalization"
                         break
                     violation = _usage_violation(usage, message.usage, request.manifest)
                     usage = message.usage
@@ -456,6 +552,18 @@ def _message_run_id(message) -> object | None:
     if isinstance(message, EventMessage):
         return message.event.run_id
     return None
+
+
+def _validate_finalization(bundle: Path, finalization: FinalizationResult) -> None:
+    bundle = bundle.resolve()
+    for artifact in finalization.artifacts:
+        destination = (bundle / artifact.path).resolve()
+        if bundle not in destination.parents or not destination.is_file():
+            raise ValueError(f"finalized artifact is missing or outside bundle: {artifact.path}")
+        value = json.loads(destination.read_text(encoding="utf-8"))
+        observed = hashlib.sha256(canonical_json(value)).hexdigest()
+        if observed != artifact.sha256:
+            raise ValueError(f"finalized artifact digest differs for {artifact.path}")
 
 
 def _safe_environment() -> dict[str, str]:

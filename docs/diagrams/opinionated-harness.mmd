@@ -1,0 +1,14 @@
+flowchart TB
+  U[Incident objective] --> C[Native coordinator + harness]
+  C -->|chooses delegation| T[Telemetry specialist]
+  C -->|chooses delegation| D[Change specialist]
+  C -->|chooses delegation| R[Reliability specialist]
+  T --> C
+  D --> C
+  R --> C
+  C --> G{External evidence gate}
+  G --> A{Approval}
+  A --> M[Mitigation + recovery]
+
+  H[Native planning · context · files · compaction] -.-> C
+  B[External budgets · provenance · completion schema] -.-> G

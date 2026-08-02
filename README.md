@@ -25,7 +25,9 @@ mitigation. Each paired run gets an isolated copy of the same world.
 4. Read the [research summary](docs/research/framework-landscape.md) and
    [task selection](docs/research/task-options.md).
 5. Review the decisions in [docs/adr](docs/adr/README.md).
-6. Record the review in
+6. Check the framework-specific [implementation gotchas](docs/gotchas.md)
+   before changing an adapter.
+7. Record the review in
    [issue #10](https://github.com/noodlefrenzy/maf_vs_langchain/issues/10)
    and follow implementation on the
    [project board](https://github.com/users/noodlefrenzy/projects/21).
@@ -61,10 +63,29 @@ deterministic scorer, a scripted-oracle end-to-end run-bundle path, and the
 authenticated Streamable HTTP service for isolated paired world clones. The
 control plane now supplies a typed runner protocol, isolated run paths,
 deterministic lane ordering, outer lifecycle/budget enforcement, native
-MAF/LangGraph process handlers, and a mock failure matrix. It does not yet
-claim a benchmark result. The next implementation milestones are the matched
-explicit-workflow adapters. Run bundles can already be checked with
-`agent-lab bundle validate` and `agent-lab bundle validate-pair`.
+MAF/LangGraph process handlers, a mock failure matrix, and matched native
+MAF/LangGraph explicit workflows through investigation, commander synthesis,
+evidence gating, native approval checkpoints, token-bound mitigation, and
+recovery verification. Those live explicit workflows now execute through the
+normalized runner protocol with pre-dispatch usage, portable model/tool and
+approval events, control-plane decisions, and owner-only terminal state. MAF
+Harness metering occurs below its internal function-invocation loop so every
+provider dispatch, including tool-loop iterations, consumes the shared outer
+budget. The control plane also finalizes those executions into the five frozen
+incident artifacts,
+deterministic scores, individually validated bundles, and a persistent paired
+experiment with pair-level provenance validation. The opinionated track is also
+executable: MAF Harness background agents and declarative Deep Agents subagents
+perform native role-scoped delegation, pass a shared evidence gate, and enter
+the same approval, execution, finalization, scoring, and pair-validation path.
+Harness state is currently process-local and non-resumable. Both runner families
+now retain correlated, redacted native span ledgers, export best-effort to a
+pinned loopback Phoenix deployment, and record validated operation-level trace
+completeness without making collector availability run-critical. These smoke
+runs exercise the system but do not constitute a benchmark result. The next
+milestones are baselines and broader repeated experiment runs.
+Run bundles can already be checked with `agent-lab bundle validate` and
+`agent-lab bundle validate-pair`.
 
 Exercise the full four-lane process boundary without loading a model:
 
@@ -81,5 +102,36 @@ each native runner sequentially, enforces outer limits, and persists protected
 world checkpoints and terminal bundles. It is explicitly a protocol probe:
 no model or MCP tool is called, no score is produced, and its bundles are not
 benchmark evidence.
+
+Run the persistent paired explicit-workflow smoke against the configured local
+OpenAI-compatible endpoint with:
+
+```bash
+uv run agent-lab experiment run \
+  --experiment configs/experiments/explicit-smoke.toml \
+  --runs-dir runs \
+  --order-seed 1729
+```
+
+This invokes the model and MCP tools. It uses the declared scripted `approve`
+policy without correcting the model's action, writes scored bundles, validates
+each bundle and the pair, and saves a summary index. Summary `status = "ok"`
+means execution and provenance succeeded; task success remains a separate
+per-run score field.
+
+Run the matched opinionated-harness smoke with:
+
+```bash
+uv run agent-lab experiment run \
+  --experiment configs/experiments/harness-smoke.toml \
+  --runs-dir runs \
+  --order-seed 1737
+```
+
+This uses native MAF Harness background agents and Deep Agents declarative
+subagents. The adapter verifies every accepted specialist against its actual
+role-scoped MCP calls and exact evidence IDs; see
+[`docs/gotchas.md`](docs/gotchas.md) for framework-specific stopping and
+structured-output behavior observed with the local model.
 
 No license is granted by this private repository unless one is added later.

@@ -4,15 +4,18 @@ from pathlib import Path
 
 import pytest
 
+from agent_lab.contract_bundle import contract_bundle_hashes
 from agent_lab.contracts import (
     AgentRole,
     Budget,
     FrameworkLane,
     ModelProfile,
+    NativeTracingProfile,
     RunManifest,
     TerminalStatus,
 )
 from agent_lab.control_plane import ControlPlane
+from agent_lab.matched_contracts import normalized_topology_for_lane
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +95,9 @@ def test_native_runner_protocol_probe(
         },
         public_ticket="Protocol probe only; do not invoke a model or tool.",
         order_seed=31,
+        tracing=NativeTracingProfile(
+            collector_endpoint="http://127.0.0.1:1/v1/traces",
+        ),
     )
     command = [
         "uv",
@@ -118,10 +124,58 @@ def test_native_runner_protocol_probe(
     ]
     assert [event["kind"] for event in events] == ["run.started", "run.finished"]
     assert events[-1]["payload"]["status"] == "completed"
+    assert all(event["trace_id"] and event["span_id"] for event in events)
+    trace_link = json.loads(
+        (result.paths.bundle / "native" / "trace-link.json").read_text(encoding="utf-8")
+    )
+    assert trace_link["collector_status"] == "unavailable"
+    assert trace_link["span_count"] >= 1
+    assert trace_link["completeness"]["ratio"] == 1.0
+    assert (result.paths.traces / "spans.jsonl").is_file()
     assert (
         "native-probe-secret"
         not in (result.paths.bundle / "native" / "run-request.redacted.json").read_text()
     )
+
+
+def test_native_runner_protocol_probe_can_disable_tracing(tmp_path: Path) -> None:
+    control_plane = ControlPlane(tmp_path)
+    manifest = _manifest(FrameworkLane.MAF_WORKFLOW)
+    _bundle, paths = control_plane.allocate_run(manifest)
+    request = RunRequest(
+        manifest=manifest,
+        paths=paths,
+        role_endpoints={},
+        public_ticket="Tracing-disabled protocol probe.",
+        order_seed=9,
+        tracing=NativeTracingProfile(enabled=False),
+    )
+    command = [
+        "uv",
+        "run",
+        "--project",
+        str(REPOSITORY_ROOT / "runners/maf"),
+        "--no-sync",
+        "python",
+        "-m",
+        "maf_runner.protocol_runner",
+        "--protocol-probe",
+    ]
+
+    result = asyncio.run(control_plane.execute(command, request))
+
+    assert result.terminal.status is TerminalStatus.COMPLETED
+    trace_link = json.loads(
+        (result.paths.bundle / "native" / "trace-link.json").read_text(encoding="utf-8")
+    )
+    assert trace_link["enabled"] is False
+    assert trace_link["collector_status"] == "disabled"
+    assert trace_link["span_count"] == 0
+    assert not (result.paths.traces / "spans.jsonl").exists()
+    events = [
+        json.loads(line) for line in (result.paths.bundle / "events.jsonl").read_text().splitlines()
+    ]
+    assert all(event["trace_id"] is None and event["span_id"] is None for event in events)
 
 
 @pytest.mark.parametrize(
@@ -170,6 +224,11 @@ def test_native_runner_describes_supported_lanes(
 
     assert set(payload["supported_lanes"]) == expected_lanes
     assert set(payload["topology"]) == expected_lanes
+    assert set(payload["normalized_topology"]) == expected_lanes
+    assert payload["contract_hashes"] == contract_bundle_hashes()
+    assert payload["normalized_topology"][restart_lane] == normalized_topology_for_lane(
+        FrameworkLane(restart_lane)
+    )
     assert payload["checkpoint"][restart_lane]["resumable"] is True
     assert payload["checkpoint"][restart_lane]["restart_safe"] is True
     unavailable = expected_lanes - {restart_lane}

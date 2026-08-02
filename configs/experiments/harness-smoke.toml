@@ -1,0 +1,24 @@
+schema_version = "0.1.0"
+experiment_id = "opinionated_harness_smoke"
+scenario = "incident_response"
+lanes = ["maf_harness", "deep_agents"]
+seeds = [42]
+repetitions = 1
+order = "alternating"
+model_profile = "configs/models/qwen3_next_80b_lonestar_llamacpp.toml"
+fault_profile = "none"
+capture_sensitive = false
+capture_reasoning = false
+
+[tracing]
+enabled = true
+collector_endpoint = "http://127.0.0.1:6006/v1/traces"
+phoenix_base_url = "http://127.0.0.1:6006"
+exporter_timeout_seconds = 1.0
+
+[budget]
+wall_clock_seconds = 900
+model_calls = 36
+tool_calls = 72
+output_tokens = 32000
+approval_requests = 1

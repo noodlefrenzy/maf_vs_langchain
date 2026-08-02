@@ -1,0 +1,21 @@
+flowchart TB
+  OAI[OpenAI chat client]
+  AG[MAF Agent]
+  HW[MAF Harness]
+  WF[MAF Workflow]
+  BA[Background agents]
+  EX[Typed executors + edges]
+  CK[(File checkpoint storage)]
+  MCP[Role-scoped MCP tools]
+  OTEL[Native OpenTelemetry]
+
+  OAI --> AG
+  AG --> HW
+  AG --> WF
+  HW --> BA
+  WF --> EX
+  WF --> CK
+  BA --> MCP
+  EX --> MCP
+  AG --> OTEL
+  WF --> OTEL

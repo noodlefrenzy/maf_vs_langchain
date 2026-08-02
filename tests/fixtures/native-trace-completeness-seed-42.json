@@ -1,0 +1,68 @@
+{
+  "schema_version": "0.1.0",
+  "fixture_kind": "full_native_explicit_workflow_trace",
+  "recorded_at": "2026-08-01",
+  "provenance": {
+    "source_commit": "601c70a6ea0f821b09a7779ba7fe8f50b0440430",
+    "source_tree_sha256": "7f4c219a6b86bb9dad4f37168792f11dc3422513acb5d49a3ab1ae0ef9ae9bf9",
+    "order_seed": 20260802,
+    "scenario_seed": 42,
+    "model": "unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF:UD-Q4_K_XL",
+    "phoenix_version": "19.10.0",
+    "phoenix_image_sha256": "3092f5543a3ddd35db7390cf971027c33be6be1f171274d57f3c8658c2193d67"
+  },
+  "expected_operations": {
+    "run": 1,
+    "agent": 4,
+    "model": 4,
+    "tool": 10,
+    "approval": 1,
+    "checkpoint": 1
+  },
+  "lanes": {
+    "maf_workflow": {
+      "framework_version": "agent-framework-core 1.12.1",
+      "collector_status": "exported",
+      "normalized_event_count": 57,
+      "correlated_event_count": 57,
+      "distinct_correlated_span_ids": 7,
+      "native_span_count": 57,
+      "observed_operations": {
+        "run": 1,
+        "agent": 4,
+        "model": 4,
+        "tool": 10,
+        "approval": 2,
+        "checkpoint": 0
+      },
+      "covered_operations": 20,
+      "expected_operation_count": 21,
+      "completeness_ratio": 0.9523809523809523,
+      "task_success": false,
+      "total_score": 0.6
+    },
+    "langgraph": {
+      "framework_version": "langgraph 1.2.10 + openinference-langchain 0.1.68",
+      "collector_status": "exported",
+      "normalized_event_count": 57,
+      "correlated_event_count": 57,
+      "distinct_correlated_span_ids": 1,
+      "native_span_count": 64,
+      "observed_operations": {
+        "run": 1,
+        "agent": 6,
+        "model": 4,
+        "tool": 10,
+        "approval": 3,
+        "checkpoint": 0
+      },
+      "covered_operations": 20,
+      "expected_operation_count": 21,
+      "completeness_ratio": 0.9523809523809523,
+      "task_success": false,
+      "total_score": 0.6
+    }
+  },
+  "known_native_gap": "Neither framework emitted a native checkpoint span.",
+  "local_ledger_sensitive_pattern_matches": 0
+}

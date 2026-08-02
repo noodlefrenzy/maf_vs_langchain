@@ -13,11 +13,21 @@ from agent_lab.contracts import (
     EventKind,
     FrameworkLane,
     ModelProfile,
+    NativeTracingProfile,
+    NormalizedEvent,
     RunManifest,
     RunTerminal,
     TerminalStatus,
 )
 from agent_lab.run_bundle import RunBundle
+from agent_lab.trace_contracts import (
+    NativeSpanRecord,
+    NativeTraceLink,
+    NativeTraceProfileRecord,
+    TraceCollectorStatus,
+    TraceOperation,
+    compute_trace_completeness,
+)
 
 
 def _oracle_bundle(tmp_path: Path) -> Path:
@@ -94,6 +104,23 @@ def _rewrite_manifest(bundle_path: Path, body: dict[str, object]) -> None:
     )
 
 
+def _write_trace_profile(
+    bundle_path: Path,
+    manifest: RunManifest,
+    tracing: NativeTracingProfile,
+) -> None:
+    profile = NativeTraceProfileRecord(
+        run_id=manifest.run_id,
+        tracing=tracing,
+    )
+    profile_bytes = (profile.model_dump_json(indent=2) + "\n").encode()
+    (bundle_path / "native" / "tracing-profile.json").write_bytes(profile_bytes)
+    (bundle_path / "native" / "tracing-profile.sha256").write_text(
+        hashlib.sha256(profile_bytes).hexdigest() + "\n",
+        encoding="utf-8",
+    )
+
+
 def _finding_codes(result) -> set[str]:
     return {finding.code for finding in result.findings}
 
@@ -144,6 +171,26 @@ def test_event_corruption_reports_sequence_lane_and_missing_finish(
     assert "event_sequence_noncontiguous" in codes
     assert "event_lane_mismatch" in codes
     assert "run_finish_count" in codes
+
+
+def test_event_identity_corruption_reports_duplicate_and_dropped_parent(
+    tmp_path: Path,
+) -> None:
+    bundle_path = _oracle_bundle(tmp_path)
+    event_path = bundle_path / "events.jsonl"
+    events = [json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()]
+    events[2]["event_id"] = events[1]["event_id"]
+    events[3]["parent_event_id"] = "00000000-0000-0000-0000-000000000001"
+    event_path.write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    result = validate_bundle(bundle_path)
+
+    codes = _finding_codes(result)
+    assert "event_id_duplicate" in codes
+    assert "event_parent_not_prior" in codes
 
 
 def test_artifact_digest_and_terminal_usage_are_reconciled(tmp_path: Path) -> None:
@@ -217,6 +264,95 @@ def test_pair_fails_closed_on_held_constant_drift(tmp_path: Path) -> None:
 
     assert result.valid is False
     assert "pair_provenance_drift" in _finding_codes(result)
+
+
+def test_pair_fails_closed_on_tracing_profile_drift(tmp_path: Path) -> None:
+    left = _cancelled_bundle(tmp_path / "left", FrameworkLane.MAF_WORKFLOW)
+    right = _cancelled_bundle(tmp_path / "right", FrameworkLane.LANGGRAPH)
+    left_manifest = RunManifest.model_validate_json(
+        (left / "manifest.json").read_text(encoding="utf-8")
+    )
+    right_manifest = RunManifest.model_validate_json(
+        (right / "manifest.json").read_text(encoding="utf-8")
+    )
+    _write_trace_profile(left, left_manifest, NativeTracingProfile())
+    _write_trace_profile(
+        right,
+        right_manifest,
+        NativeTracingProfile(exporter_timeout_seconds=2),
+    )
+
+    result = validate_pair(left, right)
+
+    assert result.valid is False
+    assert "pair_provenance_drift" in _finding_codes(result)
+
+
+def test_native_trace_ledger_is_reconciled_and_tampering_fails_closed(
+    tmp_path: Path,
+) -> None:
+    bundle_path = _cancelled_bundle(tmp_path, FrameworkLane.MAF_WORKFLOW)
+    manifest = RunManifest.model_validate_json(
+        (bundle_path / "manifest.json").read_text(encoding="utf-8")
+    )
+    events = [
+        NormalizedEvent.model_validate_json(line)
+        for line in (bundle_path / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    span = NativeSpanRecord(
+        run_id=manifest.run_id,
+        lane=manifest.lane,
+        trace_id="1" * 32,
+        span_id="2" * 16,
+        name="agent-lab.run",
+        span_kind="internal",
+        status_code="unset",
+        started_unix_nano=1,
+        ended_unix_nano=2,
+        instrumentation_scope="test",
+        operation=TraceOperation.RUN,
+    )
+    ledger_path = bundle_path / "native" / "traces" / "spans.jsonl"
+    ledger_path.parent.mkdir()
+    ledger_bytes = (span.model_dump_json() + "\n").encode()
+    ledger_path.write_bytes(ledger_bytes)
+    tracing = NativeTracingProfile()
+    _write_trace_profile(bundle_path, manifest, tracing)
+    link = NativeTraceLink(
+        run_id=manifest.run_id,
+        lane=manifest.lane,
+        enabled=True,
+        capture_sensitive=False,
+        collector_endpoint=tracing.collector_endpoint,
+        collector_status=TraceCollectorStatus.UNAVAILABLE,
+        phoenix_base_url=tracing.phoenix_base_url,
+        phoenix_trace_url=(f"{tracing.phoenix_base_url}/redirects/traces/{span.trace_id}"),
+        project_name="agent-lab-maf_workflow",
+        primary_trace_id=span.trace_id,
+        trace_ids=[span.trace_id],
+        span_ledger_path="native/traces/spans.jsonl",
+        span_ledger_sha256=hashlib.sha256(ledger_bytes).hexdigest(),
+        span_count=1,
+        completeness=compute_trace_completeness(events, [span]),
+    )
+    (bundle_path / "native" / "trace-link.json").write_text(
+        link.model_dump_json(indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    valid = validate_bundle(bundle_path)
+
+    assert valid.valid is True
+    assert "native_trace_collector_degraded" in _finding_codes(valid)
+
+    ledger_path.write_text(
+        span.model_copy(update={"name": "tampered"}).model_dump_json() + "\n",
+        encoding="utf-8",
+    )
+    invalid = validate_bundle(bundle_path)
+
+    assert invalid.valid is False
+    assert "native_span_ledger_digest_mismatch" in _finding_codes(invalid)
 
 
 def test_cli_provides_json_and_nonzero_invalid_result(tmp_path: Path) -> None:

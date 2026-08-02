@@ -11,7 +11,7 @@ The control plane sends:
 1. `prepare`, containing the immutable run manifest, public ticket,
    role-scoped MCP endpoints, and runner-visible paths;
 2. `start`, after validating the runner's prepared provenance;
-3. zero or more `approval` decisions;
+3. zero or more token-bound `approval` decisions;
 4. `cancel` when an outer limit or operator cancellation fires;
 5. `shutdown` for graceful process teardown.
 
@@ -55,6 +55,12 @@ sent through stdin and are redacted from the persisted request view. The world
 directory is neither included in the runner protocol nor exported in its
 environment.
 
+An approval command carries the authoritative public decision, authorized
+action, reviewer metadata, and the opaque token required by the command MCP
+tool. The token exists only on the control-plane-to-runner stdin stream and in
+process memory. It is excluded from normalized events, prepared metadata,
+checkpoints, artifacts, terminal records, and stderr.
+
 ## Paired protocol preflight
 
 Run the checked-in smoke profile through all native process boundaries with:
@@ -90,8 +96,15 @@ uv run pytest tests/test_framework_restart.py
 ```
 
 Only `maf_workflow` and `langgraph` advertise this capability. The MAF Harness
-and Deep Agents lanes remain non-resumable until their lane-specific state
-implementations are built and tested.
+and Deep Agents lanes execute through the same protocol but advertise
+process-local, non-resumable state; their native harness sessions cannot be
+reconstructed after a runner restart.
+
+Runner description metadata also reports the frozen contract hashes loaded in
+the isolated environment and a framework-neutral normalized topology for each
+lane. Experiment startup compares those values across the matched pair before
+allocating execution to either framework; native topology and checkpoint format
+remain lane-specific metadata.
 
 ## Outer limits and terminal states
 
@@ -107,10 +120,33 @@ and a process exit without a terminal message become a persisted
 first use protocol commands, then process termination, and finally a kill only
 after the configured grace period.
 
+An exception escaping while a normalized model request is in flight becomes
+`model_failure`. An exception following a normalized failed tool boundary (or
+while that tool is still in flight) becomes `tool_service_failure`. The error
+and terminal events retain only the bounded exception class and classification,
+while detailed framework tracebacks stay in the runner-local stderr artifact.
+
 The mock-runner matrix covers success, startup/launch failure, crash, wall
-timeout, approval timeout, explicit cancellation, graceful shutdown, and all
-four usage budgets. Native MAF and LangGraph processes also implement the
-boundary in an explicit `protocol_probe` mode. They report installed framework
+timeout, approval timeout, model-request timeout classification, explicit
+cancellation, graceful shutdown, and all four usage budgets. Native MAF and
+LangGraph processes also implement the boundary in an explicit `protocol_probe`
+mode. They report installed framework
 versions and planned topology, emit canonical run lifecycle events, and prove
-process compatibility without calling a model or MCP tool. Actual lane
-execution plugs into the same handlers in the lane implementation issues.
+process compatibility without calling a model or MCP tool. All four native
+lanes additionally run through the same boundary with `--run`, emit
+pre-dispatch model/tool/approval usage and normalized events, pause for a
+token-bound approval command, and persist an owner-only terminal workflow state
+under `state/`. For final scorer artifacts, the runner does not emit its
+terminal event until the service-side finalizer acknowledges that state. The
+finalizer writes and digest-checks the five frozen artifacts plus deterministic
+score, then the runner emits `artifact.written`,
+`run.finished`, and `terminal` in that order. Live compatibility executions now
+exercise this complete bundle path, though their fixture-aware edited approval
+still makes them benchmark-ineligible.
+
+`agent-lab experiment run` promotes the same path into persistent paired runs.
+It accepts exactly one matched track per invocation: either
+`maf_workflow`/`langgraph` or `maf_harness`/`deep_agents`. It applies the
+declared framework-neutral scripted approval, validates each completed bundle,
+validates the pair, and records task success separately from operational
+completion.

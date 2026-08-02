@@ -1,0 +1,15 @@
+flowchart LR
+  T[Ticket] --> F{Parallel fan-out}
+  F --> TI[Telemetry]
+  F --> CI[Changes]
+  F --> RR[Reliability]
+  TI --> J[Join]
+  CI --> J
+  RR --> J
+  J --> IC[Commander synthesis]
+  IC --> G{Evidence gate}
+  G -->|insufficient| F
+  G -->|sufficient| A{Approval}
+  A --> M[Mitigation]
+  M --> V[Recovery check]
+  V --> R[Incident record]

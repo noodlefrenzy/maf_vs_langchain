@@ -6,8 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from agent_lab.contract_bundle import sha256_payload
 from agent_lab.contracts import (
     AgentRole,
+    ApprovalDecision,
+    ApprovalRecord,
     Budget,
     FrameworkLane,
     ModelProfile,
@@ -15,7 +18,10 @@ from agent_lab.contracts import (
     TerminalStatus,
 )
 from agent_lab.control_plane import ControlPlane, resolve_lane_order
+from agent_lab.run_bundle import RunBundle
 from agent_lab.runner_protocol import (
+    FinalizationResult,
+    FinalizedArtifact,
     PrepareCommand,
     RoleEndpoint,
     RunRequest,
@@ -139,6 +145,309 @@ def test_mock_runner_approval_timeout_has_distinct_terminal_state(tmp_path: Path
     assert result.terminal.reason == "approval_deadline_exhausted"
 
 
+def test_mock_runner_model_timeout_is_model_failure(tmp_path: Path) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+
+    result = asyncio.run(control_plane.execute(_command("model_timeout"), request))
+
+    assert result.terminal.status is TerminalStatus.MODEL_FAILURE
+    assert result.terminal.reason == "model_request_timeout"
+    assert result.terminal.used_model_calls == 1
+    assert result.graceful_shutdown is True
+
+
+def test_control_plane_delivers_token_bound_approval_without_persisting_secret(
+    tmp_path: Path,
+) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+    approval_token = "approval-secret-that-must-not-be-persisted"
+
+    async def approve(event):
+        assert event.payload["request_id"] == "mit-control-plane-01"
+        return ApprovalRecord(
+            request_id="mit-control-plane-01",
+            case_id="case-control-plane",
+            decision=ApprovalDecision.EDIT,
+            decided_by="control-plane-test-reviewer",
+            decided_tick=7,
+            action_to_execute="rollback checkout-api and cap retries",
+            approval_token=approval_token,
+        )
+
+    result = asyncio.run(
+        control_plane.execute(
+            _command("approval_success"),
+            request,
+            approval_handler=approve,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.COMPLETED
+    assert result.terminal.reason == "mock_approval_completed"
+    events_text = (result.paths.bundle / "events.jsonl").read_text()
+    assert approval_token not in events_text
+    events = [json.loads(line) for line in events_text.splitlines()]
+    assert [event["kind"] for event in events] == [
+        "run.started",
+        "approval.requested",
+        "approval.decided",
+        "run.finished",
+    ]
+    assert events[2]["payload"] == {
+        "action_to_execute": "rollback checkout-api and cap retries",
+        "decided_by": "control-plane-test-reviewer",
+        "decided_tick": 7,
+        "decision": "edit",
+        "request_id": "mit-control-plane-01",
+    }
+    assert approval_token not in result.stderr_path.read_text()
+
+
+def test_control_plane_rejects_mismatched_approval_record(tmp_path: Path) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+
+    async def mismatched_approval(_event):
+        return ApprovalRecord(
+            request_id="different-request",
+            case_id="case-control-plane",
+            decision=ApprovalDecision.REJECT,
+            decided_by="control-plane-test-reviewer",
+            decided_tick=7,
+        )
+
+    result = asyncio.run(
+        control_plane.execute(
+            _command("approval_success"),
+            request,
+            approval_handler=mismatched_approval,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.RUNNER_FAILURE
+    assert result.terminal.reason == "approval_handler_failed:ValueError"
+
+
+def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemeral(
+    tmp_path: Path,
+) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+    approval_token = "real-session-approval-secret"
+
+    async def approve(event):
+        return ApprovalRecord(
+            request_id=str(event.payload["request_id"]),
+            case_id="case-protocol-stub",
+            decision=ApprovalDecision.EDIT,
+            decided_by="protocol-session-test-reviewer",
+            decided_tick=5,
+            action_to_execute="rollback checkout-api and cap retries",
+            approval_token=approval_token,
+        )
+
+    async def complete(_event):
+        artifact = {"status": "hermetic-finalization-complete"}
+        RunBundle(request.paths.bundle, request.manifest).write_artifact(
+            "protocol-stub.json",
+            artifact,
+        )
+        return FinalizationResult(
+            artifacts=[
+                FinalizedArtifact(
+                    path="artifacts/protocol-stub.json",
+                    sha256=sha256_payload(artifact),
+                )
+            ],
+            task_success=True,
+            total_score=0.75,
+        )
+
+    result = asyncio.run(
+        control_plane.execute(
+            [sys.executable, "-m", "agent_lab.workflow_protocol_stub"],
+            request,
+            approval_handler=approve,
+            completion_handler=complete,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.COMPLETED
+    assert result.terminal.used_model_calls == 1
+    assert result.terminal.used_tool_calls == 1
+    assert result.terminal.used_output_tokens == 12
+    events_text = (result.paths.bundle / "events.jsonl").read_text()
+    assert approval_token not in events_text
+    events = [json.loads(line) for line in events_text.splitlines()]
+    assert [event["kind"] for event in events] == [
+        "run.started",
+        "agent.handoff",
+        "tool.requested",
+        "tool.started",
+        "tool.finished",
+        "agent.started",
+        "model.requested",
+        "model.responded",
+        "agent.finished",
+        "metric.recorded",
+        "agent.handoff",
+        "approval.requested",
+        "checkpoint.saved",
+        "approval.decided",
+        "state.updated",
+        "artifact.written",
+        "run.finished",
+    ]
+    handoffs = [event for event in events if event["kind"] == "agent.handoff"]
+    assert [event["payload"] for event in handoffs] == [
+        {
+            "phase": "specialist_delegated",
+            "source_actor": "incident_commander",
+            "source_namespace": "maf_workflow/incident_commander",
+            "target_actor": "telemetry_investigator",
+            "target_namespace": "maf_workflow/telemetry_investigator",
+        },
+        {
+            "phase": "specialist_finding_returned",
+            "source_actor": "telemetry_investigator",
+            "source_namespace": "maf_workflow/telemetry_investigator",
+            "target_actor": "incident_commander",
+            "target_namespace": "maf_workflow/incident_commander",
+        },
+    ]
+    metric = next(event for event in events if event["kind"] == "metric.recorded")
+    assert metric["payload"] == {
+        "name": "model_token_usage",
+        "model": "local-test",
+        "namespace": "maf_workflow/telemetry_investigator",
+        "input_tokens": 24,
+        "output_tokens": 12,
+    }
+    for event in events:
+        if (
+            event["kind"].startswith(("agent.", "model.", "tool."))
+            and event["kind"] != "agent.handoff"
+        ):
+            assert event["payload"]["namespace"] == ("maf_workflow/telemetry_investigator")
+    agent_started = next(event for event in events if event["kind"] == "agent.started")
+    model_requested = next(event for event in events if event["kind"] == "model.requested")
+    model_responded = next(event for event in events if event["kind"] == "model.responded")
+    agent_finished = next(event for event in events if event["kind"] == "agent.finished")
+    assert model_requested["parent_event_id"] == agent_started["event_id"]
+    assert model_responded["parent_event_id"] == model_requested["event_id"]
+    assert agent_finished["parent_event_id"] == agent_started["event_id"]
+    state_path = result.paths.state / "workflow-execution.json"
+    assert state_path.stat().st_mode & 0o777 == 0o600
+    assert approval_token not in state_path.read_text()
+    assert json.loads((result.paths.bundle / "artifacts/protocol-stub.json").read_text()) == {
+        "status": "hermetic-finalization-complete"
+    }
+
+
+@pytest.mark.parametrize(
+    ("failure_mode", "status", "reason", "event_kinds"),
+    [
+        (
+            "model_timeout",
+            TerminalStatus.MODEL_FAILURE,
+            "native_model_failed:TimeoutError",
+            ["run.started", "agent.started", "model.requested", "error", "run.finished"],
+        ),
+        (
+            "tool_service",
+            TerminalStatus.TOOL_SERVICE_FAILURE,
+            "native_tool_service_failed:ConnectionError",
+            [
+                "run.started",
+                "tool.requested",
+                "tool.started",
+                "tool.failed",
+                "error",
+                "run.finished",
+            ],
+        ),
+    ],
+)
+def test_real_workflow_protocol_classifies_operation_failures(
+    tmp_path: Path,
+    failure_mode: str,
+    status: TerminalStatus,
+    reason: str,
+    event_kinds: list[str],
+) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+
+    result = asyncio.run(
+        control_plane.execute(
+            [
+                sys.executable,
+                "-m",
+                "agent_lab.workflow_protocol_stub",
+                "--scenario",
+                failure_mode,
+            ],
+            request,
+        )
+    )
+
+    assert result.terminal.status is status
+    assert result.terminal.reason == reason
+    assert result.graceful_shutdown is True
+    events = [
+        json.loads(line) for line in (result.paths.bundle / "events.jsonl").read_text().splitlines()
+    ]
+    assert [event["kind"] for event in events] == event_kinds
+    assert events[-2]["payload"] == {"reason": reason}
+    assert events[-1]["payload"]["status"] == status.value
+
+
+def test_real_workflow_protocol_preserves_interleaved_actor_parentage(
+    tmp_path: Path,
+) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+
+    result = asyncio.run(
+        control_plane.execute(
+            [
+                sys.executable,
+                "-m",
+                "agent_lab.workflow_protocol_stub",
+                "--scenario",
+                "parallel_interleave",
+            ],
+            request,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.COMPLETED
+    assert result.terminal.used_model_calls == 2
+    assert result.terminal.used_output_tokens == 12
+    events = [
+        json.loads(line) for line in (result.paths.bundle / "events.jsonl").read_text().splitlines()
+    ]
+    requested_by_actor = {
+        event["actor"]: event for event in events if event["kind"] == "model.requested"
+    }
+    responded = [event for event in events if event["kind"] == "model.responded"]
+    assert [event["actor"] for event in responded] == [
+        "telemetry_investigator",
+        "change_investigator",
+    ]
+    for event in responded:
+        request_event = requested_by_actor[event["actor"]]
+        assert event["parent_event_id"] == request_event["event_id"]
+        assert event["payload"]["namespace"] == f"maf_workflow/{event['actor']}"
+    agent_started_by_actor = {
+        event["actor"]: event for event in events if event["kind"] == "agent.started"
+    }
+    for event in (item for item in events if item["kind"] == "agent.finished"):
+        assert event["parent_event_id"] == agent_started_by_actor[event["actor"]]["event_id"]
+
+
 def test_mock_runner_crash_is_runner_failure(tmp_path: Path) -> None:
     control_plane = ControlPlane(tmp_path)
     request = _request(control_plane, _manifest())
@@ -222,6 +531,25 @@ def test_mock_runner_usage_limits_fail_closed(
         assert result.terminal.used_tool_calls == used
     elif field == "output_tokens":
         assert result.terminal.used_output_tokens == used
+
+
+def test_budget_terminal_does_not_require_success_finalization(tmp_path: Path) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+
+    async def unexpected_completion(_event):
+        raise AssertionError("budget exhaustion must not request finalization")
+
+    result = asyncio.run(
+        control_plane.execute(
+            _command("budget", budget_field="model_calls"),
+            request,
+            completion_handler=unexpected_completion,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.BUDGET_EXHAUSTED
+    assert result.terminal.reason == "model_call_budget_exhausted"
 
 
 def test_lane_order_is_recorded_and_deterministic() -> None:

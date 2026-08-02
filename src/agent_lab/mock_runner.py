@@ -6,11 +6,13 @@ import argparse
 import hashlib
 import sys
 
-from agent_lab.contracts import TerminalStatus
+from agent_lab.contracts import EventKind, NormalizedEvent, TerminalStatus
 from agent_lab.runner_protocol import (
+    ApprovalCommand,
     CancelCommand,
     CheckpointCapability,
     ErrorMessage,
+    EventMessage,
     HeartbeatMessage,
     PrepareCommand,
     PreparedMessage,
@@ -31,9 +33,27 @@ def _send(message) -> None:
     sys.stdout.buffer.flush()
 
 
+def _mock_event(
+    request: RunRequest,
+    *,
+    sequence: int,
+    kind: EventKind,
+    payload: dict[str, object],
+) -> NormalizedEvent:
+    return NormalizedEvent(
+        run_id=request.manifest.run_id,
+        sequence=sequence,
+        lane=request.manifest.lane,
+        kind=kind,
+        actor="mock-runner",
+        payload=payload,
+    )
+
+
 def run(mode: str, *, budget_field: str) -> int:
     request: RunRequest | None = None
     terminal_sent = False
+    usage = RunnerUsage()
     for line in sys.stdin.buffer:
         try:
             command = decode_runner_command(line)
@@ -82,11 +102,57 @@ def run(mode: str, *, budget_field: str) -> int:
                     )
                 )
                 continue
+            if mode == "model_timeout":
+                usage = RunnerUsage(model_calls=1)
+                _send(UsageMessage(run_id=command.run_id, usage=usage))
+                _send(
+                    TerminalMessage(
+                        run_id=command.run_id,
+                        status=TerminalStatus.MODEL_FAILURE,
+                        reason="model_request_timeout",
+                        usage=usage,
+                    )
+                )
+                terminal_sent = True
+                continue
             if mode in {"timeout", "approval_timeout", "cancellation"}:
                 _send(
                     HeartbeatMessage(
                         run_id=command.run_id,
                         phase=("awaiting_approval" if mode == "approval_timeout" else "running"),
+                    )
+                )
+                continue
+            if mode == "approval_success":
+                usage = RunnerUsage(approval_requests=1)
+                _send(UsageMessage(run_id=command.run_id, usage=usage))
+                _send(
+                    EventMessage(
+                        event=_mock_event(
+                            request,
+                            sequence=0,
+                            kind=EventKind.RUN_STARTED,
+                            payload={"execution_mode": "approval_success"},
+                        )
+                    )
+                )
+                _send(
+                    EventMessage(
+                        event=_mock_event(
+                            request,
+                            sequence=1,
+                            kind=EventKind.APPROVAL_REQUESTED,
+                            payload={
+                                "request_id": "mit-control-plane-01",
+                                "proposed_action": "rollback checkout-api",
+                            },
+                        )
+                    )
+                )
+                _send(
+                    HeartbeatMessage(
+                        run_id=command.run_id,
+                        phase="awaiting_approval",
                     )
                 )
                 continue
@@ -102,6 +168,56 @@ def run(mode: str, *, budget_field: str) -> int:
                     run_id=command.run_id,
                     status=TerminalStatus.COMPLETED,
                     reason="mock_runner_completed",
+                    usage=usage,
+                )
+            )
+            terminal_sent = True
+        elif isinstance(command, ApprovalCommand):
+            if request is None:
+                _send(ErrorMessage(run_id=command.run_id, error="approval before prepare"))
+                return 2
+            if mode != "approval_success":
+                _send(
+                    HeartbeatMessage(
+                        run_id=command.run_id,
+                        phase="unexpected_approval",
+                    )
+                )
+                continue
+            _send(
+                EventMessage(
+                    event=_mock_event(
+                        request,
+                        sequence=2,
+                        kind=EventKind.APPROVAL_DECIDED,
+                        payload={
+                            "request_id": command.request_id,
+                            "decision": command.decision.value,
+                            "action_to_execute": command.action_to_execute,
+                            "decided_by": command.decided_by,
+                            "decided_tick": command.decided_tick,
+                        },
+                    )
+                )
+            )
+            _send(
+                EventMessage(
+                    event=_mock_event(
+                        request,
+                        sequence=3,
+                        kind=EventKind.RUN_FINISHED,
+                        payload={
+                            "status": TerminalStatus.COMPLETED.value,
+                            "execution_mode": "approval_success",
+                        },
+                    )
+                )
+            )
+            _send(
+                TerminalMessage(
+                    run_id=command.run_id,
+                    status=TerminalStatus.COMPLETED,
+                    reason="mock_approval_completed",
                     usage=usage,
                 )
             )
@@ -130,9 +246,11 @@ def main() -> None:
             "success",
             "timeout",
             "approval_timeout",
+            "model_timeout",
             "crash",
             "cancellation",
             "budget",
+            "approval_success",
         ],
         default="success",
     )

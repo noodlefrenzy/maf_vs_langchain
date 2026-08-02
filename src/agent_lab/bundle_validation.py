@@ -28,6 +28,13 @@ from agent_lab.contracts import (
 )
 from agent_lab.evaluator import DeterministicScore
 from agent_lab.scenario import IncidentCase
+from agent_lab.trace_contracts import (
+    NativeSpanRecord,
+    NativeTraceLink,
+    NativeTraceProfileRecord,
+    TraceCollectorStatus,
+    compute_trace_completeness,
+)
 
 
 class FindingLevel(StrEnum):
@@ -86,6 +93,8 @@ def validate_bundle(path: Path, *, mark: bool = False) -> BundleValidationResult
     _validate_artifacts(path, events, terminal, findings)
     if manifest is not None and terminal is not None:
         _validate_scorer_inputs(path, manifest, terminal, findings)
+    if manifest is not None:
+        _validate_native_trace(path, manifest, events, findings)
 
     valid = not any(finding.level is FindingLevel.ERROR for finding in findings)
     result = BundleValidationResult(
@@ -121,6 +130,11 @@ def validate_pair(
     track: Literal["explicit_workflow", "opinionated_harness"] | None = None
     if left_manifest is not None and right_manifest is not None:
         track = _validate_pair_manifests(left_manifest, right_manifest, findings)
+        _validate_pair_trace_profiles(
+            Path(left.bundle_path),
+            Path(right.bundle_path),
+            findings,
+        )
 
     valid = not any(finding.level is FindingLevel.ERROR for finding in findings)
     result = PairValidationResult(
@@ -353,6 +367,13 @@ def _validate_event_stream(
 
     seen_event_ids = set()
     for event in events:
+        if event.event_id in seen_event_ids:
+            _error(
+                findings,
+                "event_id_duplicate",
+                f"Sequence {event.sequence} repeats event_id {event.event_id}.",
+                "events.jsonl",
+            )
         if event.parent_event_id is not None and event.parent_event_id not in seen_event_ids:
             _error(
                 findings,
@@ -647,6 +668,244 @@ def _validate_scorer_inputs(
             )
 
 
+def _validate_native_trace(
+    path: Path,
+    manifest: RunManifest,
+    events: list[NormalizedEvent],
+    findings: list[ValidationFinding],
+) -> None:
+    trace_profile = _load_native_trace_profile(path, manifest, findings)
+    link_path = path / "native" / "trace-link.json"
+    if not link_path.is_file():
+        _warning(
+            findings,
+            "native_trace_missing",
+            "No native trace-link sidecar is present; trace coverage is unavailable.",
+            "native/trace-link.json",
+        )
+        return
+    try:
+        link = NativeTraceLink.model_validate_json(link_path.read_text(encoding="utf-8"))
+    except (OSError, ValidationError, ValueError) as exc:
+        _error(
+            findings,
+            "native_trace_link_invalid",
+            str(exc),
+            "native/trace-link.json",
+        )
+        return
+
+    if trace_profile is None:
+        _error(
+            findings,
+            "native_trace_profile_missing",
+            "A trace-link requires its immutable tracing-profile sidecar.",
+            "native/tracing-profile.json",
+        )
+        return
+    expected_profile = trace_profile.tracing
+    identity_checks = {
+        "run_id": (link.run_id, manifest.run_id),
+        "lane": (link.lane, manifest.lane),
+        "enabled": (link.enabled, expected_profile.enabled),
+        "capture_sensitive": (
+            link.capture_sensitive,
+            trace_profile.capture_sensitive,
+        ),
+        "capture_reasoning": (
+            link.capture_reasoning,
+            trace_profile.capture_reasoning,
+        ),
+        "collector_endpoint": (
+            link.collector_endpoint,
+            expected_profile.collector_endpoint if expected_profile.enabled else None,
+        ),
+        "phoenix_base_url": (
+            link.phoenix_base_url,
+            expected_profile.phoenix_base_url if expected_profile.enabled else None,
+        ),
+        "project_name": (
+            link.project_name,
+            f"agent-lab-{manifest.lane.value}" if expected_profile.enabled else None,
+        ),
+    }
+    for field_name, (observed, expected) in identity_checks.items():
+        if observed != expected:
+            _error(
+                findings,
+                "native_trace_profile_mismatch",
+                f"Trace-link {field_name} is {observed!r}; tracing profile records {expected!r}.",
+                "native/trace-link.json",
+            )
+
+    spans: list[NativeSpanRecord] = []
+    expected_ledger_path = "native/traces/spans.jsonl"
+    if link.span_ledger_path is not None:
+        if link.span_ledger_path != expected_ledger_path:
+            _error(
+                findings,
+                "native_span_ledger_path_invalid",
+                f"Span ledger must be {expected_ledger_path}.",
+                "native/trace-link.json",
+            )
+        else:
+            ledger_path = path / expected_ledger_path
+            try:
+                ledger_bytes = ledger_path.read_bytes()
+                observed_digest = hashlib.sha256(ledger_bytes).hexdigest()
+                if observed_digest != link.span_ledger_sha256:
+                    _error(
+                        findings,
+                        "native_span_ledger_digest_mismatch",
+                        f"Expected {link.span_ledger_sha256}, observed {observed_digest}.",
+                        expected_ledger_path,
+                    )
+                for line_number, line in enumerate(ledger_bytes.splitlines(), start=1):
+                    if not line.strip():
+                        raise ValueError(f"blank line at {line_number}")
+                    spans.append(NativeSpanRecord.model_validate_json(line))
+            except (OSError, ValidationError, ValueError) as exc:
+                _error(
+                    findings,
+                    "native_span_ledger_invalid",
+                    str(exc),
+                    expected_ledger_path,
+                )
+    if len(spans) != link.span_count:
+        _error(
+            findings,
+            "native_span_count_mismatch",
+            f"Trace-link records {link.span_count} spans; ledger contains {len(spans)}.",
+            "native/trace-link.json",
+        )
+    for span in spans:
+        if span.run_id != manifest.run_id or span.lane is not manifest.lane:
+            _error(
+                findings,
+                "native_span_identity_mismatch",
+                f"Span {span.span_id} has a different run or lane identity.",
+                expected_ledger_path,
+            )
+    observed_trace_ids = sorted({span.trace_id for span in spans})
+    if observed_trace_ids != sorted(link.trace_ids):
+        _error(
+            findings,
+            "native_trace_ids_mismatch",
+            f"Trace-link IDs {link.trace_ids} differ from ledger IDs {observed_trace_ids}.",
+            "native/trace-link.json",
+        )
+    span_contexts = {(span.trace_id, span.span_id) for span in spans}
+    if len(span_contexts) != len(spans):
+        _error(
+            findings,
+            "native_span_duplicate",
+            "Native span ledger repeats a trace/span identity.",
+            expected_ledger_path,
+        )
+    if link.primary_trace_id is not None and link.phoenix_base_url is not None:
+        expected_trace_url = (
+            f"{link.phoenix_base_url.rstrip('/')}/redirects/traces/{link.primary_trace_id}"
+        )
+        if link.phoenix_trace_url != expected_trace_url:
+            _error(
+                findings,
+                "native_trace_url_mismatch",
+                f"Expected Phoenix deep link {expected_trace_url!r}.",
+                "native/trace-link.json",
+            )
+
+    for event in events:
+        if (event.trace_id is None) != (event.span_id is None):
+            _error(
+                findings,
+                "event_trace_context_incomplete",
+                f"Sequence {event.sequence} has only part of a trace context.",
+                "events.jsonl",
+            )
+        elif event.trace_id is not None and (event.trace_id, event.span_id) not in span_contexts:
+            _error(
+                findings,
+                "event_trace_context_missing",
+                f"Sequence {event.sequence} references a span absent from the native ledger.",
+                "events.jsonl",
+            )
+
+    recomputed = compute_trace_completeness(events, spans)
+    if recomputed != link.completeness:
+        _error(
+            findings,
+            "native_trace_completeness_mismatch",
+            "Recorded trace completeness does not match normalized events and native spans.",
+            "native/trace-link.json",
+        )
+    if link.collector_status in {
+        TraceCollectorStatus.UNAVAILABLE,
+        TraceCollectorStatus.EXPORT_FAILED,
+    }:
+        _warning(
+            findings,
+            "native_trace_collector_degraded",
+            f"Phoenix collector status is {link.collector_status.value}; local evidence remains.",
+            "native/trace-link.json",
+        )
+    for diagnostic in link.diagnostics:
+        _warning(
+            findings,
+            "native_trace_diagnostic",
+            diagnostic,
+            "native/trace-link.json",
+        )
+
+
+def _load_native_trace_profile(
+    path: Path,
+    manifest: RunManifest,
+    findings: list[ValidationFinding],
+) -> NativeTraceProfileRecord | None:
+    profile_path = path / "native" / "tracing-profile.json"
+    digest_path = path / "native" / "tracing-profile.sha256"
+    if not profile_path.exists() and not digest_path.exists():
+        return None
+    if not profile_path.is_file() or not digest_path.is_file():
+        _error(
+            findings,
+            "native_trace_profile_incomplete",
+            "Tracing profile and digest must both be present.",
+            "native/tracing-profile.json",
+        )
+        return None
+    try:
+        profile_bytes = profile_path.read_bytes()
+        expected_digest = digest_path.read_text(encoding="utf-8").strip()
+        observed_digest = hashlib.sha256(profile_bytes).hexdigest()
+        if re.fullmatch(r"[a-f0-9]{64}", expected_digest) is None:
+            raise ValueError("tracing-profile.sha256 is not a lowercase SHA-256 digest")
+        if expected_digest != observed_digest:
+            _error(
+                findings,
+                "native_trace_profile_digest_mismatch",
+                f"Expected {expected_digest}, observed {observed_digest}.",
+                "native/tracing-profile.json",
+            )
+        profile = NativeTraceProfileRecord.model_validate_json(profile_bytes)
+    except (OSError, ValidationError, ValueError) as exc:
+        _error(
+            findings,
+            "native_trace_profile_invalid",
+            str(exc),
+            "native/tracing-profile.json",
+        )
+        return None
+    if profile.run_id != manifest.run_id:
+        _error(
+            findings,
+            "native_trace_profile_run_mismatch",
+            f"Tracing profile run_id {profile.run_id} differs from manifest {manifest.run_id}.",
+            "native/tracing-profile.json",
+        )
+    return profile
+
+
 def _validate_pair_manifests(
     left: RunManifest,
     right: RunManifest,
@@ -715,6 +974,43 @@ def _validate_pair_manifests(
     return track
 
 
+def _validate_pair_trace_profiles(
+    left_path: Path,
+    right_path: Path,
+    findings: list[ValidationFinding],
+) -> None:
+    left = _parse_trace_profile_file(left_path)
+    right = _parse_trace_profile_file(right_path)
+    if left is None and right is None:
+        return
+    if left is None or right is None:
+        _error(
+            findings,
+            "pair_trace_profile_missing",
+            "Both paired bundles must record the tracing profile when either one does.",
+            "native/tracing-profile.json",
+        )
+        return
+    left_payload = left.model_dump(mode="json", exclude={"run_id"})
+    right_payload = right.model_dump(mode="json", exclude={"run_id"})
+    if canonical_json(left_payload) != canonical_json(right_payload):
+        _error(
+            findings,
+            "pair_provenance_drift",
+            "Held-constant field tracing_profile differs within the pair.",
+            "native/tracing-profile.json",
+        )
+
+
+def _parse_trace_profile_file(path: Path) -> NativeTraceProfileRecord | None:
+    try:
+        return NativeTraceProfileRecord.model_validate_json(
+            (path / "native" / "tracing-profile.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValidationError, ValueError):
+        return None
+
+
 def _pair_track(
     left: FrameworkLane,
     right: FrameworkLane,
@@ -776,6 +1072,22 @@ def _error(
     findings.append(
         ValidationFinding(
             level=FindingLevel.ERROR,
+            code=code,
+            message=message,
+            location=location,
+        )
+    )
+
+
+def _warning(
+    findings: list[ValidationFinding],
+    code: str,
+    message: str,
+    location: str | None = None,
+) -> None:
+    findings.append(
+        ValidationFinding(
+            level=FindingLevel.WARNING,
             code=code,
             message=message,
             location=location,

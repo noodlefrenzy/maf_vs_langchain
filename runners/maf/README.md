@@ -22,8 +22,9 @@ uv run --project runners/maf --no-sync \
 the installed MAF versions and planned lane topology, emits canonical
 start/finish events, and shuts down cleanly. It deliberately invokes no model
 or MCP tool. The explicit Workflow substrate advertises restart-safe
-`FileCheckpointStorage`; Harness checkpointing remains unavailable. The actual
-Workflow and Harness executions remain owned by their lane implementation issues.
+`FileCheckpointStorage`; Harness checkpointing remains unavailable and is
+advertised as process-local. Both Workflow and Harness lanes now implement real
+model/MCP execution through `--run`.
 
 The checkpoint compatibility entry point builds a native approval-request
 workflow, pauses it, and resumes its owner-only file checkpoint in a fresh
@@ -54,9 +55,12 @@ wire evidence, and pass/fail comparison.
 
 The first executable `maf_workflow` slice uses a native `WorkflowBuilder`
 fan-out from one dispatcher to telemetry, change, and reliability agents, then
-a synchronized fan-in to a deterministic evidence gate. Each agent receives
-only its role-authenticated MCP endpoint and the shared model profile. Run the
-live slice against the aligned lonestar model through the direct SSH tunnel:
+a synchronized fan-in to a model-backed incident commander and deterministic
+evidence gate. The gate rejects unknown citations, fewer than two cited
+specialist roles, or a commander judgment that evidence is insufficient. Each
+agent receives only its role-authenticated MCP endpoint and the shared model
+profile. Run the live slice against the aligned lonestar model through the
+direct SSH tunnel:
 
 ```bash
 uv run --project services/incident_mcp --no-sync python -m \
@@ -65,6 +69,23 @@ uv run --project services/incident_mcp --no-sync python -m \
   --model unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF:UD-Q4_K_XL
 ```
 
-This phase is read-only: it must pass the evidence gate without creating an
-approval request or changing the incident world. Commander synthesis,
-approval, mitigation, and recovery are the next workflow nodes.
+The compatibility controller records an explicit edited approval after the
+native workflow pauses, then resumes the checkpoint, applies the exact
+token-bound action, and verifies recovery. For this seed-42 smoke probe only,
+the reviewer edits the model proposal to the known recovery fixture so model
+quality cannot prevent the orchestration path from being exercised. Approval
+tokens remain in process memory and are excluded from checkpoints and output.
+This scripted policy inspects fixture truth, so its runs are benchmark-ineligible
+test infrastructure, not a substitute for the control-plane approval command.
+The runner itself uses `maf_runner.protocol_runner --run`; model/tool usage,
+approval, checkpoint, state, and terminal transitions therefore cross the same
+normalized lifecycle boundary used by the experiment control plane.
+
+The executable `maf_harness` lane uses Agent Framework Harness background
+agents, shared file memory/access, and role-authenticated MCP specialists. Its
+unstructured delegation phase must produce real MCP evidence from at least two
+roles before a tool-disabled structured commander turn is accepted. A bounded
+correction turn may repair the model's own invalid citation, but adapter code
+never rewrites evidence. Run the matched persistent smoke from the repository
+root with `agent-lab experiment run --experiment
+configs/experiments/harness-smoke.toml`.

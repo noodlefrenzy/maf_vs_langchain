@@ -1,11 +1,10 @@
-"""Run the MAF native investigation graph against a live model and isolated world."""
+"""Run the MAF workflow through approved recovery against an isolated world."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
-import os
 import socket
 import tempfile
 from pathlib import Path
@@ -13,18 +12,32 @@ from pathlib import Path
 import httpx
 import uvicorn
 
+from agent_lab.bundle_validation import validate_bundle
 from agent_lab.contract_bundle import contract_bundle_hashes
-from agent_lab.contracts import Budget, FrameworkLane, ModelProfile, RunManifest
-from agent_lab.runner_protocol import RoleEndpoint, RunPaths, RunRequest
+from agent_lab.contracts import (
+    ApprovalDecision,
+    Budget,
+    FrameworkLane,
+    ModelProfile,
+    RunManifest,
+    TerminalStatus,
+)
+from agent_lab.control_plane import ControlPlane
+from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 from incident_lab_mcp.http_auth import RunCredentialSigner, RunWorldRegistry
 from incident_lab_mcp.http_service import build_http_app, issue_endpoint_credentials
 from incident_lab_mcp.roles import ROLE_TO_AGENT_ROLE
+from incident_lab_mcp.workflow_compat_policy import (
+    COMPATIBILITY_APPROVAL_POLICY,
+    SEED_42_RECOVERY_ACTION,
+)
+from incident_lab_mcp.workflow_finalization import finalize_workflow_bundle
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 
-async def run_live_maf_investigation(base_url: str, model: str) -> dict[str, object]:
-    """Exercise role-scoped MAF agents through the native fan-out/join workflow."""
+async def run_live_maf_workflow(base_url: str, model: str) -> dict[str, object]:
+    """Exercise the native MAF workflow through approved recovery."""
 
     advertised_models = await _verify_model(base_url, model)
     registry = RunWorldRegistry()
@@ -66,10 +79,6 @@ async def run_live_maf_investigation(base_url: str, model: str) -> dict[str, obj
             if item["run_id"] == str(receipt.left.run_id)
         }
         with tempfile.TemporaryDirectory(prefix="agent-lab-maf-live-") as raw_run_root:
-            run_root = Path(raw_run_root).resolve() / str(receipt.left.run_id)
-            run_root.mkdir(mode=0o700)
-            for child in ("workspace", "checkpoints", "state", "traces"):
-                (run_root / child).mkdir(mode=0o700)
             hashes = contract_bundle_hashes()
             manifest = RunManifest(
                 run_id=receipt.left.run_id,
@@ -105,38 +114,46 @@ async def run_live_maf_investigation(base_url: str, model: str) -> dict[str, obj
                 tool_catalog_sha256=hashes["tool_catalog_sha256"],
                 world_manifest_sha256=receipt.left.world_manifest_sha256,
             )
+            control_plane = ControlPlane(Path(raw_run_root), graceful_shutdown_seconds=2)
+            _bundle, paths = control_plane.allocate_run(manifest)
             request = RunRequest(
                 manifest=manifest,
-                paths=RunPaths(
-                    run_root=run_root,
-                    bundle=run_root,
-                    workspace=run_root / "workspace",
-                    checkpoints=run_root / "checkpoints",
-                    state=run_root / "state",
-                    traces=run_root / "traces",
-                ),
+                paths=paths,
                 role_endpoints=role_endpoints,
                 public_ticket=str(
                     registry.get(receipt.left.run_id).world.incident.public_view()["brief"]
                 ),
                 order_seed=1729,
             )
-            payload = await _run_maf_subprocess(request)
+            payload = await _run_maf_protocol(control_plane, request, registry)
+            checkpoint_text = "".join(
+                path.read_text(encoding="utf-8") for path in paths.checkpoints.glob("*.json")
+            )
+            if "approval_token" in checkpoint_text:
+                raise RuntimeError("MAF checkpoint persisted an approval token")
 
         world = registry.get(receipt.left.run_id).world
         operations = [event.operation for event in world.audit_log]
-        if world.applied_request_id is not None or world.recovery_verified:
-            raise RuntimeError("investigation phase changed the isolated world")
-        if not payload["packet"]["passed"]:
-            raise RuntimeError(f"live evidence gate failed: {payload['packet']['gate_reasons']}")
+        execution = payload["execution"]
+        if world.applied_request_id is None or not world.recovery_verified:
+            raise RuntimeError(
+                "approved workflow did not apply an effective mitigation and recover: "
+                f"action={execution['action_to_execute']!r}, "
+                f"effective={execution['mitigation']['effective']!r}, "
+                f"recovered={execution['recovery']['recovered']!r}"
+            )
+        if execution["status"] != "completed" or not execution["recovery"]["recovered"]:
+            raise RuntimeError("MAF workflow returned without verified recovery")
         if payload["model"] != model:
-            raise RuntimeError("MAF live investigation reported an unexpected model")
+            raise RuntimeError("MAF live workflow reported an unexpected model")
         return {
             **payload,
             "status": "ok",
             "advertised_models": advertised_models,
             "world_operations": operations,
-            "world_state_changed": False,
+            "world_state_changed": True,
+            "checkpoint_contains_approval_token": False,
+            "compatibility_approval_policy": COMPATIBILITY_APPROVAL_POLICY,
         }
     finally:
         server.should_exit = True
@@ -144,10 +161,25 @@ async def run_live_maf_investigation(base_url: str, model: str) -> dict[str, obj
         listener.close()
 
 
-async def _run_maf_subprocess(request: RunRequest) -> dict[str, object]:
-    environment = dict(os.environ)
-    environment.pop("VIRTUAL_ENV", None)
-    process = await asyncio.create_subprocess_exec(
+async def _run_maf_protocol(
+    control_plane: ControlPlane,
+    request: RunRequest,
+    registry: RunWorldRegistry,
+) -> dict[str, object]:
+    world = registry.get(request.manifest.run_id).world
+
+    async def approve(event):
+        return world.decide_mitigation(
+            str(event.payload["request_id"]),
+            ApprovalDecision.EDIT,
+            decided_by="maf-live-compat-reviewer",
+            edited_action=SEED_42_RECOVERY_ACTION,
+        )
+
+    async def complete(_event):
+        return await finalize_workflow_bundle(request, world)
+
+    command = [
         "uv",
         "run",
         "--project",
@@ -155,24 +187,45 @@ async def _run_maf_subprocess(request: RunRequest) -> dict[str, object]:
         "--no-sync",
         "python",
         "-m",
-        "maf_runner.workflow_lane",
-        "--live-investigation",
-        cwd=REPOSITORY_ROOT,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=environment,
+        "maf_runner.protocol_runner",
+        "--run",
+    ]
+    result = await control_plane.execute(
+        command,
+        request,
+        approval_handler=approve,
+        completion_handler=complete,
     )
-    stdout, stderr = await asyncio.wait_for(
-        process.communicate(input=request.model_dump_json().encode()),
-        timeout=request.manifest.budget.wall_clock_seconds,
-    )
-    if process.returncode != 0:
+    if result.terminal.status is not TerminalStatus.COMPLETED:
         raise RuntimeError(
-            f"MAF live investigation failed with {process.returncode}: "
-            f"{stderr.decode(errors='replace')}"
+            f"MAF protocol workflow failed with {result.terminal.status.value}: "
+            f"{result.terminal.reason}; stderr={result.stderr_path.read_text()!r}"
         )
-    return json.loads(stdout)
+    payload = json.loads((request.paths.state / "workflow-execution.json").read_text())
+    events = [
+        json.loads(line)
+        for line in (request.paths.bundle / "events.jsonl").read_text().splitlines()
+    ]
+    validation = validate_bundle(request.paths.bundle)
+    if not validation.valid:
+        raise RuntimeError(
+            "MAF finalized bundle failed validation: "
+            f"{[finding.code for finding in validation.findings]}"
+        )
+    scores = json.loads((request.paths.bundle / "scores.json").read_text())
+    return {
+        **payload,
+        "protocol_terminal_status": result.terminal.status.value,
+        "protocol_usage": {
+            "model_calls": result.terminal.used_model_calls,
+            "tool_calls": result.terminal.used_tool_calls,
+            "output_tokens": result.terminal.used_output_tokens,
+        },
+        "normalized_event_kinds": [event["kind"] for event in events],
+        "bundle_valid": True,
+        "task_success": scores["task_success"],
+        "total_score": scores["total_score"],
+    }
 
 
 async def _verify_model(base_url: str, model: str) -> list[str]:
@@ -212,7 +265,7 @@ def main() -> None:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--model", required=True)
     args = parser.parse_args()
-    result = asyncio.run(run_live_maf_investigation(args.base_url, args.model))
+    result = asyncio.run(run_live_maf_workflow(args.base_url, args.model))
     print(json.dumps(result, sort_keys=True))
 
 

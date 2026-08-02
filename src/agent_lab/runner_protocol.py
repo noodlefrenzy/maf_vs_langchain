@@ -20,6 +20,7 @@ from agent_lab.contracts import (
     AgentRole,
     ApprovalDecision,
     FrameworkLane,
+    NativeTracingProfile,
     NormalizedEvent,
     RunManifest,
     TerminalStatus,
@@ -84,6 +85,9 @@ class RunRequest(ProtocolModel):
     role_endpoints: dict[AgentRole, RoleEndpoint]
     public_ticket: str
     order_seed: int
+    tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
+    capture_sensitive: bool = False
+    capture_reasoning: Literal[False] = False
     attempt: int = Field(default=0, ge=0, le=1)
 
     @model_validator(mode="after")
@@ -148,15 +152,47 @@ class ApprovalCommand(ProtocolModel):
     run_id: UUID
     request_id: str
     decision: ApprovalDecision
-    edited_action: str | None = None
+    decided_by: str = Field(min_length=1)
+    decided_tick: int = Field(ge=0)
+    action_to_execute: str | None = None
+    approval_token: str | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
-    def validate_edit(self) -> ApprovalCommand:
-        if self.decision is ApprovalDecision.EDIT and not self.edited_action:
-            raise ValueError("edited approval requires edited_action")
-        if self.decision is not ApprovalDecision.EDIT and self.edited_action is not None:
-            raise ValueError("edited_action is valid only for an edit decision")
+    def validate_decision(self) -> ApprovalCommand:
+        if self.decision in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:
+            if not self.action_to_execute or not self.approval_token:
+                raise ValueError("approved or edited commands require an action and approval token")
+        elif self.action_to_execute is not None or self.approval_token is not None:
+            raise ValueError("rejected commands cannot authorize an action")
         return self
+
+
+class FinalizedArtifact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(pattern=r"^artifacts/[A-Za-z0-9][A-Za-z0-9._-]*\.json$")
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class FinalizationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    artifacts: list[FinalizedArtifact] = Field(default_factory=list)
+    task_success: bool | None = None
+    total_score: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def require_unique_artifacts(self) -> FinalizationResult:
+        paths = [artifact.path for artifact in self.artifacts]
+        if len(paths) != len(set(paths)):
+            raise ValueError("finalized artifact paths must be unique")
+        return self
+
+
+class FinalizeCommand(ProtocolModel):
+    kind: Literal["finalize"] = "finalize"
+    run_id: UUID
+    finalization: FinalizationResult
 
 
 class CancelCommand(ProtocolModel):
@@ -171,7 +207,12 @@ class ShutdownCommand(ProtocolModel):
 
 
 RunnerCommand = Annotated[
-    PrepareCommand | StartCommand | ApprovalCommand | CancelCommand | ShutdownCommand,
+    PrepareCommand
+    | StartCommand
+    | ApprovalCommand
+    | FinalizeCommand
+    | CancelCommand
+    | ShutdownCommand,
     Field(discriminator="kind"),
 ]
 

@@ -29,6 +29,15 @@ The control plane must:
 If a held-constant hash differs within a pair, the pair is invalid rather than
 quietly included.
 
+Before either lane starts, each isolated runner reports the hashes of the
+contract bundle it actually loaded and its framework-neutral normalized
+topology. The control plane compares both runners with the repository contract
+lock and the canonical matched topology, then snapshots the effective model,
+budget, fault profile, source tree, world manifest, role-prompt hash, tool-schema
+hash, and completion-schema hash. Any drift aborts the pair before execution.
+The byte-stable snapshot and its digest are stored as
+`native/pair-contract-preflight.json` in both run bundles.
+
 ## During a run
 
 - Enforce budgets in a framework-neutral outer watchdog.
