@@ -1,11 +1,14 @@
 import json
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 
 import pytest
 
 from agent_lab.contracts import ModelProfile
 from agent_lab.local_inference_benchmark import (
+    _post_json,
     _write_json_exclusive,
     calibrate_prompt,
     parse_vllm_metrics,
@@ -47,6 +50,25 @@ class _FakeStream(list[bytes]):
 
 def _sse(payload: dict[str, Any]) -> bytes:
     return f"data: {json.dumps(payload)}\n\n".encode()
+
+
+def test_post_json_preserves_bounded_http_error_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = HTTPError(
+        "http://127.0.0.1:8001/v1/chat/completions",
+        400,
+        "Bad Request",
+        {},
+        BytesIO(b'{"error":{"message":"invalid tool history"}}'),
+    )
+    monkeypatch.setattr(
+        "agent_lab.local_inference_benchmark.urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(error),
+    )
+
+    with pytest.raises(ValueError, match="HTTP 400.*invalid tool history"):
+        _post_json("http://127.0.0.1:8001/v1/chat/completions", {"synthetic": True}, 5)
 
 
 def test_stream_completion_measures_first_token_and_usage_without_retaining_text() -> None:
@@ -286,7 +308,11 @@ def test_malformed_tool_recovery_requires_one_corrected_json_call() -> None:
         {"name": "lookup_incident", "arguments": {"incident_id": "INC-42"}}
     ]
     prior = captured["payload"]["messages"][2]
-    assert prior["tool_calls"][0]["function"]["arguments"] == '{"incident_id":'
+    assert prior["role"] == "assistant"
+    assert '"arguments":{"incident_id":' in prior["content"]
+    assert "tool_calls" not in prior
+    assert captured["payload"]["messages"][3]["role"] == "user"
+    assert "invalid JSON" in captured["payload"]["messages"][3]["content"]
     assert captured["payload"]["tool_choice"] == "required"
     assert captured["payload"]["parallel_tool_calls"] is False
 
