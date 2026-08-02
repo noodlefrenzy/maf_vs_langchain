@@ -165,6 +165,17 @@ Every call records start/end times, normalized arguments after redaction,
 result digest, result size, error category, and simulated-world tick. Framework
 retries are visible; the MCP service does not silently retry.
 
+The simulator preserves three state invariants across live execution and
+checkpoint restart:
+
+- every `evidence_id` contained anywhere in a successfully validated tool
+  result is citable, while IDs from failed or unreturned results are not;
+- a successful post-mitigation recovery verification is monotonic scoring
+  state, even if a later defensive check includes an unhealthy decoy; and
+- invalid control-plane approval decisions and timeouts are audited without
+  advancing world time, so malformed control traffic cannot desynchronize a
+  paired world's subsequent evidence stream.
+
 The first compatible baseline pins MCP Python SDK 1.x. MCP 2.0 adoption is a
 separate experiment because current MAF package metadata still requires
 `mcp<2`.

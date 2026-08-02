@@ -605,7 +605,6 @@ class IncidentWorld:
         decided_by: str,
         edited_action: str | None,
     ) -> ApprovalRecord:
-        self.world_tick += 1
         if request_id not in self.approval_requests:
             self._raise_and_audit_control(
                 "approval_decision",
@@ -637,6 +636,7 @@ class IncidentWorld:
                 "an edited approval requires edited_action",
             )
 
+        self.world_tick += 1
         if decision is ApprovalDecision.REJECT:
             action = None
             token = None
@@ -676,7 +676,6 @@ class IncidentWorld:
         """Expire a pending approval without changing incident state."""
 
         with self._lock:
-            self.world_tick += 1
             if request_id not in self.approval_requests:
                 self._raise_and_audit_control(
                     "approval_timeout",
@@ -699,6 +698,7 @@ class IncidentWorld:
                     f"mitigation request {request_id!r} already timed out",
                 )
 
+            self.world_tick += 1
             self.timed_out_request_ids.add(request_id)
             result = {
                 "request_id": request_id,
@@ -740,8 +740,8 @@ class IncidentWorld:
                     f"mitigation request {request_id!r} was rejected",
                 )
             if not record.approval_token or not hmac.compare_digest(
-                record.approval_token,
-                approval_token,
+                record.approval_token.encode("utf-8"),
+                approval_token.encode("utf-8", errors="surrogatepass"),
             ):
                 self._raise(
                     ToolErrorCode.STALE_APPROVAL,
@@ -794,7 +794,9 @@ class IncidentWorld:
                 and self.incident.affected_service in services
                 and all(check["error_rate"] <= 0.02 for check in checks)
             )
-            self.recovery_verified = recovered
+            # Scoring records whether recovery was ever successfully verified after
+            # mitigation. A later defensive check must not erase that established fact.
+            self.recovery_verified = self.recovery_verified or recovered
             return {
                 "evidence_id": self._evidence_id("recovery", tick),
                 "case_id": self.incident.case_id,
@@ -925,9 +927,7 @@ class IncidentWorld:
             )
             raise WorldToolError(error) from exc
 
-        evidence_id = result.get("evidence_id")
-        if isinstance(evidence_id, str):
-            self.observed_evidence_ids.add(evidence_id)
+        self.observed_evidence_ids.update(self._returned_evidence_ids(result))
         self._append_audit(
             operation=name,
             arguments=arguments,
@@ -1047,6 +1047,23 @@ class IncidentWorld:
             :12
         ]
         return f"ev-{digest}"
+
+    @staticmethod
+    def _returned_evidence_ids(result: dict[str, Any]) -> set[str]:
+        """Collect citable evidence IDs from one successfully validated result."""
+
+        evidence_ids: set[str] = set()
+        pending: list[Any] = [result]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, dict):
+                evidence_id = value.get("evidence_id")
+                if isinstance(evidence_id, str):
+                    evidence_ids.add(evidence_id)
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value)
+        return evidence_ids
 
     @staticmethod
     def _redact(arguments: dict[str, Any]) -> dict[str, Any]:
