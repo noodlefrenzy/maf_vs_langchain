@@ -245,9 +245,7 @@ async def _run_experiment(
                         effective_request_policy_sha256=preflight["effective_request_policy"][
                             "lane_policy_sha256"
                         ][lane.value],
-                        execution_provenance_sha256=preflight[
-                            "execution_provenance_sha256"
-                        ],
+                        execution_provenance_sha256=preflight["execution_provenance_sha256"],
                         world_manifest_sha256=receipt.world_manifest_sha256,
                         host_fingerprint={
                             "hostname": platform.node(),

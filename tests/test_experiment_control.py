@@ -150,10 +150,7 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
         "collection_status": "not_collected_protocol_probe",
         "measurement_eligible": False,
     }
-    assert (
-        preflight["execution_provenance_sha256"]
-        == execution_provenance["provenance_sha256"]
-    )
+    assert preflight["execution_provenance_sha256"] == execution_provenance["provenance_sha256"]
     for run in summary["runs"]:
         bundle = Path(run["bundle"])
         checkpoint = Path(run["world_checkpoint"])
@@ -174,10 +171,7 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
         assert '"token": "[REDACTED]"' in request
         assert "v1." not in request
         manifest = json.loads((bundle / "manifest.json").read_text())
-        assert (
-            manifest["execution_provenance_sha256"]
-            == execution_provenance["provenance_sha256"]
-        )
+        assert manifest["execution_provenance_sha256"] == execution_provenance["provenance_sha256"]
         validation = validate_bundle(bundle)
         assert validation.valid is False
         assert validation.inference_status == "invalid_provenance"
