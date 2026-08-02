@@ -11,6 +11,7 @@ capture_sensitive = false
 capture_reasoning = false
 
 [inference_runtime]
+server_kind = "llama_cpp"
 host = "lonestar"
 compute_backend = "vulkan"
 process_name = "llama-server"

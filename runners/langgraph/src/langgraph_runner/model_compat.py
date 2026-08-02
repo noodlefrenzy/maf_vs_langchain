@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
+from agent_lab.contracts import ModelProfile
 from agent_lab.model_compat_contracts import (
     MODEL_ACTOR_PROBES,
     MODEL_NAME,
@@ -183,8 +184,9 @@ async def _actor_probes(profile: Any) -> dict[str, Any]:
     return probes
 
 
-async def run(base_url: str, model: str) -> dict[str, Any]:
-    profile = compatibility_model_profile(base_url, model)
+async def run(profile: ModelProfile) -> dict[str, Any]:
+    base_url = profile.base_url
+    model = profile.name
     client = ChatOpenAI(
         api_key="model-wire-test",
         default_headers={"X-Agent-Lab-Framework": "langchain"},
@@ -208,7 +210,7 @@ async def run(base_url: str, model: str) -> dict[str, Any]:
         },
         "model": model,
         "base_url": base_url,
-        "settings": explicit_request_settings(),
+        "settings": explicit_request_settings(profile),
         "fixtures": fixtures,
         "actor_probes": await _actor_probes(profile),
     }
@@ -216,10 +218,17 @@ async def run(base_url: str, model: str) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", required=True)
+    parser.add_argument("--base-url")
     parser.add_argument("--model", default=MODEL_NAME)
+    parser.add_argument("--profile-json")
     args = parser.parse_args()
-    print(json.dumps(asyncio.run(run(args.base_url, args.model)), sort_keys=True))
+    if args.profile_json:
+        profile = ModelProfile.model_validate_json(args.profile_json)
+    elif args.base_url:
+        profile = compatibility_model_profile(args.base_url, args.model)
+    else:
+        parser.error("--profile-json or --base-url is required")
+    print(json.dumps(asyncio.run(run(profile)), sort_keys=True))
 
 
 if __name__ == "__main__":
