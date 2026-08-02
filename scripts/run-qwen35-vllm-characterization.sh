@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 readonly CONTAINER_NAME="agent-lab-qwen35-9b-vllm"
 readonly IMAGE="vllm/vllm-openai@sha256:674c5aa666d38c07a0dc779f8c77a05c2b859617410d16dcdd8a8776166c92b9"
@@ -16,6 +17,7 @@ readonly CONTEXT_TOKENS="$1"
 readonly RESTART_PHASE="$2"
 readonly OUTPUT="$3"
 readonly COMPAT_OUTPUT="${OUTPUT%.json}-compat.json"
+readonly SERVER_LOG="${OUTPUT%.json}-server.log"
 
 case "$CONTEXT_TOKENS" in
   8192|16384|32768) ;;
@@ -38,17 +40,26 @@ if docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
   echo "container $CONTAINER_NAME already exists; refusing to replace it" >&2
   exit 2
 fi
-if [[ -e "$OUTPUT" || ( "$CONTEXT_TOKENS" == "32768" && -e "$COMPAT_OUTPUT" ) ]]; then
-  echo "an output report already exists; refusing to overwrite evidence" >&2
+if [[ -e "$OUTPUT" || -e "$SERVER_LOG" || ( "$CONTEXT_TOKENS" == "32768" && -e "$COMPAT_OUTPUT" ) ]]; then
+  echo "an output report or server log already exists; refusing to overwrite evidence" >&2
   exit 2
 fi
 
 cleanup() {
-  docker stop --time 30 "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  local exit_status=$?
+  if docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+    docker stop --time 30 "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    mkdir -p "$(dirname "$SERVER_LOG")"
+    docker logs "$CONTAINER_NAME" >"$SERVER_LOG" 2>&1 || true
+    docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  fi
+  return "$exit_status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-docker run --detach --rm --pull never \
+docker run --detach --pull never \
   --name "$CONTAINER_NAME" \
   --gpus all \
   --ipc host \
@@ -70,7 +81,7 @@ docker run --detach --rm --pull never \
   --max-model-len "$CONTEXT_TOKENS" \
   --max-num-batched-tokens "$CONTEXT_TOKENS" \
   --max-num-seqs 2 \
-  --gpu-memory-utilization 0.90 \
+  --gpu-memory-utilization 0.75 \
   --seed 1729 \
   --generation-config vllm \
   --reasoning-parser qwen3 \
@@ -88,7 +99,7 @@ for _attempt in $(seq 1 240); do
   if curl --fail --silent --max-time 2 "http://127.0.0.1:${PORT}/health" >/dev/null; then
     break
   fi
-  if ! docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+  if [[ "$(docker container inspect --format '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || true)" != "true" ]]; then
     echo "vLLM container exited during startup" >&2
     docker logs "$CONTAINER_NAME" >&2 || true
     exit 1
