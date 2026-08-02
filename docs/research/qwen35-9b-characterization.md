@@ -1,6 +1,7 @@
 # Qwen3.5-9B RTX 4090 characterization runbook
 
-Status: in-flight 4-bit fit established; characterization measurements pending.
+Status: pre-restart 8K/16K/32K characterization accepted; full WSL/Docker
+restart reproduction pending.
 
 This runbook is the execution contract for issue 13. It deliberately uses port
 `8001`; port `8000` remains available for the `lonestar` SSH tunnel.
@@ -68,6 +69,85 @@ replacement tool call.
 The launcher preserves the complete vLLM log beside each report as
 `*-server.log` before removing only its named container. Reports and logs use
 mode-0600 creation permissions and are never overwritten.
+
+## Pre-restart results
+
+All three pre-restart reports were collected on 2026-08-02 from clean source
+commit `cc85017d74e710c2b8b1505e1a645c582644532b`. Their execution-provenance
+attestations were complete and each report set `measurement_eligible` to true.
+Times are seconds. Resource peaks are whole-device or whole-host observations,
+not increments over the recorded baseline.
+
+The accepted pre-restart identity is:
+
+| Component | Recorded identity |
+| --- | --- |
+| Model and tokenizer revision | `c202236235762e1c871ad0ccb60c8ee5ba337b9a` |
+| Tokenizer config SHA-256 | `bcdef5ac54ccaeb41edf18fa52115d579bdbe7fb8e4a25216973c0a5108ce882` |
+| Tokenizer identity SHA-256 | `4131d7f0092daa3bbae86865c2e9f180268c8188676fa1e502ac6c302f1d4daa` |
+| Chat-template SHA-256 | `a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715` |
+| Image content digest | `sha256:c68a8de36a9de31b9453ba051031366c55d3379d63896381da9a82641f91e475` |
+| Server/runtime | vLLM `0.26.1rc1.dev77+g6f91edf96`; PyTorch `2.13.0+cu130`; CUDA `13.0`; BitsAndBytes `0.50.0` |
+| Reasoning/tool parsers | `qwen3` / `qwen3_coder`, automatic tool choice enabled |
+| Serve-command SHA-256, 8K / 16K / 32K | `accc8c0f4a959c2ff01fab1e8a88b74f4b7acd6655ffef342aa270aa6b4d7a25` / `38b8a6d56015032f9445eb80cd5c0e0c469e1609b92e1bf6145e420ff8f4b577` / `cc826176233c623fe7ad3c479dd40b86ca4aecb598e4eb53192933b46ab0968d` |
+| Attestation SHA-256, 8K / 16K / 32K | `7daee2b8cde68f2f4a1c7b433e542f5ac325dfb81403f267c1df4e58b3aaa722` / `ddb1187685d5d9d1ac65e921c5bff13ddd07de46bced9fd9d10f23ad85560f15` / `8ef458f61d2872701a747d5eb3f4fa743dc2b631a142aebe562691b2e89485ae` |
+
+| Served context | Cold TTFT | Warm TTFT | Prefix-cache TTFT | Peak GPU MiB | Peak GPU use | Peak host MiB | Peak container MiB |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8,192 | 1.173 | 0.740 | 0.150 | 22,504 | 97% | 13,476 | 4,065 |
+| 16,384 | 1.923 | 1.489 | 0.171 | 22,773 | 100% | 13,546 | 4,079 |
+| 32,768 | 3.860 | 3.026 | 0.207 | 22,924 | 100% | 13,563 | 4,086 |
+
+The matrix below reports aggregate generated tokens divided by batch wall time,
+so the one-request column includes TTFT. Request-local decode after the first
+visible token was approximately 96--103 tokens/second for the completed
+single-request samples.
+
+| Served context | Output cap | One in flight, tok/s | Two in flight, tok/s | Completion observation |
+| ---: | ---: | ---: | ---: | --- |
+| 8,192 | 512 | 90.12 | 168.25 | all reached cap |
+| 8,192 | 2,048 | 99.53 | 172.85 | all reached cap |
+| 16,384 | 512 | 77.78 | 163.29 | all reached cap |
+| 16,384 | 2,048 | 80.53 | 167.33 | model stopped at 578 tokens for one single sample and 2,001 tokens for one concurrent sample |
+| 16,384 | 8,192 | 99.54 | 168.64 | all reached cap |
+| 32,768 | 512 | 61.16 | 152.80 | all reached cap |
+| 32,768 | 2,048 | 86.91 | 159.19 | all reached cap |
+| 32,768 | 8,192 | 95.10 | 146.91 | single reached cap; concurrent samples stopped at 5,620 and 4,586 tokens |
+
+The 8K report structurally skipped the 8,192-token output cap because it would
+leave fewer than 128 prompt tokens. At every context, the disconnect probe
+observed a client cancellation, a drained server, and a subsequent healthy
+endpoint. The vLLM abort counter did not increment, so each report explicitly
+retains that counter-evidence gap rather than claiming counter confirmation.
+Malformed-history recovery produced exactly one corrected
+`lookup_incident(INC-42)` call at every context.
+
+The initial 32K native compatibility gate exposed an overly strict verifier:
+both frameworks completed the tool loop but returned boundary newlines around
+`multi-turn complete`. PR #48 normalizes only surrounding whitespace and
+retains the unmodified text as `raw_value`. The exact-profile live rerun then
+passed with `errors: []` for both MAF and LangChain across plain, streaming,
+strict structured output, sequential and parallel tool calls, multi-turn tool
+execution, and every actor header probe. The benchmark's separate malformed
+history fixture remains the positive recovery proof because a live model is not
+expected to emit intentionally invalid JSON on demand.
+
+Local evidence is intentionally ignored by Git and remains mode 0600. These
+hashes identify the pre-restart reports and the accepted compatibility rerun:
+
+| Evidence | SHA-256 |
+| --- | --- |
+| `qwen35-9b-8192-before.json` | `0a41d85115ca850d793615385945ea80081c02a72940b1a3d07dc4c52e9a76b9` |
+| `qwen35-9b-16384-before.json` | `542b3fbf9185373477c261cb098bbfc7c1275501c97468465f072e456f1ba361` |
+| `qwen35-9b-32768-before.json` | `ec1d1cd22501dc8d16e661ae506e53ea9713cdc9d24c22fbd58ef3436b910275` |
+| `qwen35-9b-32768-before-compat-after-whitespace-fix.json` | `abd5f5f957700fd25ffea9d537f931065c8f12ab5db9ae06ab2f845ed09c4375` |
+
+The corresponding server logs have SHA-256 values
+`e963f5cb611a452201f44a86b587c091eb47a9b3e009941c8787b3ffef07d623`,
+`4b55ba6c74863c6b1f230cdb6f20cecd20bf0c846250c6c8c3ef65d30b3b54f8`,
+`850b5a348c1ae7a574ba1b098a68f2a3fa4a15dc40888e22f350fe2a384bfbb7`,
+and `f64acccd3b1c6c1b525991949dfca4b94a4f178276142ad4f85abd38626884ca`
+in the same table order.
 
 ## One-time artifact acquisition
 
