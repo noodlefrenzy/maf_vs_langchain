@@ -76,6 +76,12 @@ def fixture_prompt(fixture: ModelFixture) -> str:
     return f"[model-wire-fixture:{fixture.value}] {instructions[fixture]}"
 
 
+def normalize_fixture_text(value: str) -> str:
+    """Remove incidental boundary whitespace from a fixture response."""
+
+    return value.strip()
+
+
 def explicit_request_settings(profile: ModelProfile | None = None) -> dict[str, Any]:
     """Return the sampling and ceiling settings shared by both runners."""
 

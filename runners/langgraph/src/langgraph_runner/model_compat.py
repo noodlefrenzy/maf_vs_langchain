@@ -22,6 +22,7 @@ from agent_lab.model_compat_contracts import (
     compatibility_model_profile,
     explicit_request_settings,
     fixture_prompt,
+    normalize_fixture_text,
     openai_tool_schemas,
 )
 from agent_lab.model_request_policy import langchain_model_kwargs, model_request_headers
@@ -151,19 +152,25 @@ async def _multi_turn(client: ChatOpenAI) -> dict[str, Any]:
         )
         messages = state["messages"]
         final = messages[-1]
-        text = str(final.text)
+        raw_text = str(final.text)
+        text = normalize_fixture_text(raw_text)
         if text != "multi-turn complete" or _executed_tools != [
             {"name": "lookup_incident", "incident_id": "INC-42"}
         ]:
-            raise RuntimeError(f"unexpected loop result text={text!r} tools={_executed_tools!r}")
+            raise RuntimeError(
+                f"unexpected loop result text={raw_text!r} tools={_executed_tools!r}"
+            )
         usage = _sum_usage(messages)
-        return {
+        result = {
             "status": "passed",
             "value": text,
             "usage": usage,
             "usage_gap": None if usage else "agent state exposed no usage metadata",
             "executed_tools": list(_executed_tools),
         }
+        if raw_text != text:
+            result["raw_value"] = raw_text
+        return result
     except Exception as exc:
         return _failed(exc, "framework_loop")
 

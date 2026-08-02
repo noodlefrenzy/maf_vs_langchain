@@ -21,6 +21,7 @@ from agent_lab.model_compat_contracts import (
     compatibility_model_profile,
     explicit_request_settings,
     fixture_prompt,
+    normalize_fixture_text,
     openai_tool_schemas,
 )
 from agent_lab.model_request_policy import maf_request_options, model_request_headers
@@ -143,13 +144,17 @@ async def _multi_turn(client: OpenAIChatCompletionClient, profile: Any) -> dict[
                 allow_multiple_tool_calls=False,
             ),
         )
-        if response.text != "multi-turn complete" or _executed_tools != [
+        raw_text = response.text
+        text = normalize_fixture_text(raw_text)
+        if text != "multi-turn complete" or _executed_tools != [
             {"name": "lookup_incident", "incident_id": "INC-42"}
         ]:
             raise RuntimeError(
-                f"unexpected loop result text={response.text!r} tools={_executed_tools!r}"
+                f"unexpected loop result text={raw_text!r} tools={_executed_tools!r}"
             )
-        result = _passed(response.text, response.usage_details)
+        result = _passed(text, response.usage_details)
+        if raw_text != text:
+            result["raw_value"] = raw_text
         result["executed_tools"] = list(_executed_tools)
         return result
     except Exception as exc:
