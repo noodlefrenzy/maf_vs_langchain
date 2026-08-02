@@ -42,7 +42,7 @@ _METRICS = {
     "vllm:prefix_cache_hits_total",
     "vllm:request_success_total",
 }
-_VISIBLE_DELTA_KEYS = ("content", "reasoning_content", "tool_calls")
+_VISIBLE_DELTA_KEYS = ("content", "reasoning", "reasoning_content", "tool_calls")
 
 OpenUrl = Callable[..., AbstractContextManager[BinaryIO]]
 
@@ -643,7 +643,9 @@ def verify_malformed_tool_recovery(
     return {
         "passed": passed,
         "corrected_calls": corrected,
-        "reasoning_channel_present": bool(message.get("reasoning_content")),
+        "reasoning_channel_present": bool(
+            message.get("reasoning") or message.get("reasoning_content")
+        ),
         "response_sha256": hashlib.sha256(
             json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest(),
