@@ -52,6 +52,11 @@ GPU-memory reservation, and an 8,192-token chunked-prefill ceiling at every
 context size. No package or model artifact was installed for this change;
 BitsAndBytes was already inside the quarantined image.
 
+The first benchmark request then exposed that this vLLM build streams thinking
+under the OpenAI delta field `reasoning`, while the initial measurement client
+recognized only `reasoning_content`. The client now treats either field as a
+generated-token event for TTFT and throughput without retaining its text.
+
 The launcher preserves the complete vLLM log beside each report as
 `*-server.log` before removing only its named container. Reports and logs use
 mode-0600 creation permissions and are never overwritten.

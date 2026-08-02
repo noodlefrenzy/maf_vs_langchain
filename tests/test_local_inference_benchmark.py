@@ -119,6 +119,40 @@ def test_stream_completion_closes_after_first_visible_delta_for_cancellation() -
     assert "completion_tokens" not in result
 
 
+def test_stream_completion_accepts_reasoning_only_output() -> None:
+    stream = _FakeStream(
+        [
+            _sse({"choices": [{"delta": {"role": "assistant"}}]}),
+            _sse({"choices": [{"delta": {"reasoning": "thinking"}}]}),
+            _sse({"choices": [{"delta": {}, "finish_reason": "length"}]}),
+            _sse(
+                {
+                    "choices": [],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 1,
+                        "total_tokens": 11,
+                    },
+                }
+            ),
+            b"data: [DONE]\n\n",
+        ]
+    )
+
+    result = stream_completion(
+        _profile(),
+        [{"role": "user", "content": "measure reasoning"}],
+        1,
+        opener=lambda *_args, **_kwargs: stream,
+    )
+
+    assert result["status"] == "completed"
+    assert result["finish_reason"] == "length"
+    assert result["completion_tokens"] == 1
+    assert result["visible_stream_events"] == 1
+    assert "thinking" not in json.dumps(result)
+
+
 def test_prompt_calibration_uses_the_served_chat_tokenizer() -> None:
     calls = 0
 
@@ -191,7 +225,7 @@ def test_malformed_tool_recovery_requires_one_corrected_json_call() -> None:
                 {
                     "message": {
                         "role": "assistant",
-                        "reasoning_content": "correcting",
+                        "reasoning": "correcting",
                         "tool_calls": [
                             {
                                 "id": "corrected",
