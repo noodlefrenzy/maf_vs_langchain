@@ -111,10 +111,11 @@ def _vllm_command_runner(command: list[str] | tuple[str, ...], _timeout: float) 
             "--served-model-name Qwen/Qwen3.5-9B "
             f"--revision {revision} --tokenizer-revision {revision} "
             "--tokenizer Qwen/Qwen3.5-9B --max-model-len 32768 "
-            "--max-num-batched-tokens 32768 --max-num-seqs 2 "
+            "--max-num-batched-tokens 8192 --max-num-seqs 2 "
             "--host 127.0.0.1 --port 8001 --dtype bfloat16 "
-            "--load-format safetensors --tensor-parallel-size 1 "
-            "--gpu-memory-utilization 0.9 --seed 1729 "
+            "--load-format bitsandbytes --quantization bitsandbytes "
+            "--tensor-parallel-size 1 "
+            "--gpu-memory-utilization 0.75 --seed 1729 "
             "--generation-config vllm --reasoning-parser qwen3 "
             "--tool-call-parser qwen3_coder --enable-auto-tool-choice "
             "--enable-chunked-prefill --enable-prefix-caching "
@@ -157,7 +158,7 @@ def _vllm_container_command_runner(command: list[str] | tuple[str, ...], _timeou
                         "--max-model-len",
                         "32768",
                         "--max-num-batched-tokens",
-                        "32768",
+                        "8192",
                         "--max-num-seqs",
                         "2",
                         "--host",
@@ -167,11 +168,13 @@ def _vllm_container_command_runner(command: list[str] | tuple[str, ...], _timeou
                         "--dtype",
                         "bfloat16",
                         "--load-format",
-                        "safetensors",
+                        "bitsandbytes",
+                        "--quantization",
+                        "bitsandbytes",
                         "--tensor-parallel-size",
                         "1",
                         "--gpu-memory-utilization",
-                        "0.9",
+                        "0.75",
                         "--seed",
                         "1729",
                         "--generation-config",
@@ -198,7 +201,13 @@ def _vllm_container_command_runner(command: list[str] | tuple[str, ...], _timeou
     if command[:2] == ["docker", "exec"]:
         assert command[3] == "/usr/bin/python3"
         return json.dumps(
-            {"python": "3.12.12", "pytorch": "2.10.0", "cuda": "13.0", "vllm": "0.26.dev"}
+            {
+                "python": "3.12.12",
+                "pytorch": "2.10.0",
+                "cuda": "13.0",
+                "vllm": "0.26.dev",
+                "bitsandbytes": "0.50.0",
+            }
         )
     if command[:2] == ["nvidia-smi", "--query-gpu=name,uuid,driver_version,memory.total"]:
         return "NVIDIA GeForce RTX 4090, GPU-test, 610.74, 24564\n"
@@ -321,6 +330,8 @@ def test_vllm_runtime_attestation_hashes_pinned_model_tokenizer_and_serve_contra
     )
 
     assert result["artifact"]["revision"] == "b" * 40
+    assert result["artifact"]["load_format"] == "bitsandbytes"
+    assert result["artifact"]["quantization"] == "bitsandbytes"
     assert result["tokenizer"]["revision"] == "b" * 40
     assert result["server"]["kind"] == "vllm"
     assert result["server"]["build"] == "0.24.0+test"
@@ -375,6 +386,49 @@ def test_vllm_runtime_attestation_rejects_missing_required_serve_flag(
         )
 
 
+def test_vllm_runtime_attestation_rejects_unquantized_qwen_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "agent_lab.execution_provenance._fetch_json",
+        lambda url, _timeout: (
+            {"data": [{"id": "Qwen/Qwen3.5-9B"}]}
+            if url.endswith("/models")
+            else {"version": "0.24.0"}
+            if url.endswith("/version")
+            else {"tokenizer_class": "Qwen2TokenizerFast", "chat_template": "template"}
+        ),
+    )
+    monkeypatch.setattr(
+        "agent_lab.execution_provenance._post_json",
+        lambda _url, _payload, _timeout: {"count": 4, "max_model_len": 32768},
+    )
+
+    def unquantized(command: list[str] | tuple[str, ...], timeout: float) -> str:
+        return _vllm_command_runner(command, timeout).replace(
+            "--load-format bitsandbytes --quantization bitsandbytes ",
+            "--load-format safetensors ",
+        )
+
+    profile = _profile().model_copy(
+        update={
+            "name": "Qwen/Qwen3.5-9B",
+            "base_url": "http://127.0.0.1:8001/v1",
+            "context_window_tokens": 32768,
+        }
+    )
+    with pytest.raises(ValueError, match="--load-format"):
+        attest_model_runtime(
+            profile,
+            InferenceRuntimeProfile(
+                server_kind="vllm",
+                compute_backend="nvidia",
+                process_name="vllm",
+            ),
+            command_runner=unquantized,
+        )
+
+
 def test_vllm_container_attestation_binds_manifest_stack_and_loopback_port(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -423,6 +477,7 @@ def test_vllm_container_attestation_binds_manifest_stack_and_loopback_port(
         "pytorch": "2.10.0",
         "cuda": "13.0",
         "vllm": "0.26.dev",
+        "bitsandbytes": "0.50.0",
     }
 
 

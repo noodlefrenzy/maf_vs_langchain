@@ -1,6 +1,6 @@
 # Qwen3.5-9B RTX 4090 characterization runbook
 
-Status: artifacts acquired; revised 0.75 GPU-reservation measurements pending.
+Status: in-flight 4-bit fit established; characterization measurements pending.
 
 This runbook is the execution contract for issue 13. It deliberately uses port
 `8001`; port `8000` remains available for the `lonestar` SSH tunnel.
@@ -14,6 +14,7 @@ image pull or model download:
 | --- | --- | --- | --- |
 | vLLM amd64 nightly | commit `6f91edf96d3f3272945809c04702380053bff4de`, manifest `sha256:674c5aa666d38c07a0dc779f8c77a05c2b859617410d16dcdd8a8776166c92b9` | Docker Hub `last_pushed` 2026-07-29 06:13:56 UTC | about 94 hours |
 | Qwen3.5-9B | revision `c202236235762e1c871ad0ccb60c8ee5ba337b9a` | Hugging Face `lastModified` 2026-03-02 00:51:43 UTC | about 153 days |
+| BitsAndBytes | version `0.50.0`, already contained in the pinned image | PyPI earliest file upload 2026-07-24 19:48:51 UTC | about 250 hours |
 
 The selected vLLM manifest is the linux/amd64 child of multi-architecture tag
 `nightly-6f91edf96d3f3272945809c04702380053bff4de`. The Docker Hub repository
@@ -21,7 +22,7 @@ reported its compressed size as 8,738,929,920 bytes. Hugging Face reported the
 model repository at 19,319,118,862 bytes. A measured run uses `--pull never`,
 `HF_HUB_OFFLINE=1`, and `TRANSFORMERS_OFFLINE=1`; missing artifacts fail closed.
 
-## Initial fit observation
+## Fit observations and selected candidate
 
 The first 8K startup attempt on 2026-08-02 used vLLM's 0.90 GPU-memory
 reservation. The immutable image and model loaded successfully, with 16.8 GiB
@@ -32,10 +33,26 @@ approximately 4.14 GiB after the container exited. The server exited with code
 ephemeral-container launcher removed the final server log, preventing a more
 specific failure classification.
 
-That 0.90 operating point is rejected for this shared RTX 4090 environment; it
-is not a rejection of the model. The frozen serving contract now reserves 0.75
-of GPU memory to retain headroom for the observed system allocation. The
-launcher also preserves the complete vLLM log beside each report as
+An 8K BF16 follow-up with a 0.75 reservation reported -3.50 GiB available for
+KV cache. Reducing the chunked-prefill ceiling from 8,192 to 1,024 tokens and
+raising the reservation to 0.83 still reported -1.31 GiB. The BF16 profile is
+therefore rejected on this 24 GB device: it cannot leave any KV cache, much less
+the useful capacity required for two in-flight requests. A 4 GiB CPU-weight
+offload reduced model loading from 16.8 to 12.77 GiB, but vLLM's Qwen GDN
+warmup rejected the resulting CPU tensor in a Triton kernel. CPU offload is
+also rejected for this pinned stack.
+
+The selected candidate dynamically loads the same immutable official
+safetensors through the pinned image's BitsAndBytes 0.50.0 support. Its 8K fit
+probe loaded the model in 7.56 GiB and became healthy with 8.07 GiB of KV cache,
+186,181 token slots, and a reported maximum 22.73 concurrent 8K requests. A
+short Chat Completions request also completed without a server error. The
+measured profile uses BF16 compute, in-flight 4-bit weight quantization, a 0.75
+GPU-memory reservation, and an 8,192-token chunked-prefill ceiling at every
+context size. No package or model artifact was installed for this change;
+BitsAndBytes was already inside the quarantined image.
+
+The launcher preserves the complete vLLM log beside each report as
 `*-server.log` before removing only its named container. Reports and logs use
 mode-0600 creation permissions and are never overwritten.
 
@@ -123,9 +140,10 @@ recovery, and the exact effective request policy against the 32K server.
 
 ## Serving contract
 
-The script and preflight require BF16 safetensors, one tensor-parallel worker,
-two maximum sequences, a 0.75 GPU-memory reservation, explicit
-batched-token/context ceilings, generation
+The script and preflight require official safetensors dynamically loaded with
+BitsAndBytes 4-bit weights and BF16 compute, one tensor-parallel worker, two
+maximum sequences, a 0.75 GPU-memory reservation, an 8,192-token
+chunked-prefill ceiling, explicit context ceilings, generation
 defaults disabled (`--generation-config vllm`), Qwen `qwen3` reasoning and
 `qwen3_coder` tool parsers, text-only serving, chunked prefill, automatic tool
 choice, prefix caching, usage details, per-request timing metrics, tokenizer
