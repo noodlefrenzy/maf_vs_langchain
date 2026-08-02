@@ -168,6 +168,12 @@ Every call records start/end times, normalized arguments after redaction,
 result digest, result size, error category, and simulated-world tick. Framework
 retries are visible; the MCP service does not silently retry.
 
+For the v0.1 explicit workflow, structured tool failures receive no
+application-level retry and both native client error surfaces normalize to the
+same failure. MAF's connection-loss reconnect remains a preregistered native
+runtime behavior; server audit and the outer budget count any replay that
+reaches the service.
+
 The simulator preserves four state invariants across live execution and
 checkpoint restart:
 

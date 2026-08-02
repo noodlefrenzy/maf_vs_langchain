@@ -89,7 +89,6 @@ class RunRequest(ProtocolModel):
     tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
     capture_sensitive: bool = False
     capture_reasoning: Literal[False] = False
-    attempt: int = Field(default=0, ge=0, le=1)
 
     @model_validator(mode="after")
     def validate_request_identity(self) -> RunRequest:

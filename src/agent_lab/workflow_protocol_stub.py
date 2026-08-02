@@ -14,7 +14,7 @@ from agent_lab.runner_host import (
 )
 from agent_lab.runner_protocol import CheckpointCapability, RunRequest
 from agent_lab.scenario import MitigationActionId
-from agent_lab.workflow_errors import EvidenceGateFailed
+from agent_lab.workflow_errors import EvidenceGateFailed, WorkflowToolFailure
 from agent_lab.workflow_telemetry import WorkflowTelemetry
 
 
@@ -119,6 +119,58 @@ async def _execute_tool_failure(
     raise ConnectionError("hermetic tool service failure")
 
 
+async def _execute_normalized_tool_failure(
+    _request: RunRequest,
+    _approval_provider: ApprovalProvider,
+    telemetry: WorkflowTelemetry,
+    *,
+    code: str,
+    retryable: bool,
+) -> dict[str, object]:
+    await telemetry.tool_started(
+        actor="telemetry_investigator",
+        tool_name="query_service_health",
+    )
+    await telemetry.tool_finished(
+        actor="telemetry_investigator",
+        tool_name="query_service_health",
+        succeeded=False,
+    )
+    raise WorkflowToolFailure(
+        code=code,
+        retryable=retryable,
+        detail="hermetic normalized tool error",
+    )
+
+
+async def _execute_tool_timeout(
+    request: RunRequest,
+    approval_provider: ApprovalProvider,
+    telemetry: WorkflowTelemetry,
+) -> dict[str, object]:
+    return await _execute_normalized_tool_failure(
+        request,
+        approval_provider,
+        telemetry,
+        code="transient_timeout",
+        retryable=True,
+    )
+
+
+async def _execute_invalid_arguments(
+    request: RunRequest,
+    approval_provider: ApprovalProvider,
+    telemetry: WorkflowTelemetry,
+) -> dict[str, object]:
+    return await _execute_normalized_tool_failure(
+        request,
+        approval_provider,
+        telemetry,
+        code="invalid_arguments",
+        retryable=False,
+    )
+
+
 async def _execute_gate_failure(
     _request: RunRequest,
     _approval_provider: ApprovalProvider,
@@ -168,6 +220,8 @@ def main() -> None:
             "success",
             "model_timeout",
             "tool_service",
+            "tool_timeout",
+            "invalid_arguments",
             "gate_failure",
             "parallel_interleave",
         ],
@@ -178,6 +232,8 @@ def main() -> None:
         "success": _execute,
         "model_timeout": _execute_model_timeout,
         "tool_service": _execute_tool_failure,
+        "tool_timeout": _execute_tool_timeout,
+        "invalid_arguments": _execute_invalid_arguments,
         "gate_failure": _execute_gate_failure,
         "parallel_interleave": _execute_parallel_interleave,
     }[args.scenario]

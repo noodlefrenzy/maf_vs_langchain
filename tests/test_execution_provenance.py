@@ -56,6 +56,7 @@ def _endpoint_payloads() -> tuple[dict[str, Any], dict[str, Any]]:
         "data": [
             {
                 "id": "org/model:Q4",
+                "created": 1,
                 "aliases": ["org/model:Q4"],
                 "meta": {
                     "vocab_type": 2,
@@ -143,6 +144,30 @@ def test_model_runtime_attestation_rejects_context_drift(
             InferenceRuntimeProfile(compute_backend="vulkan"),
             command_runner=_command_runner,
         )
+
+
+def test_model_runtime_attestation_excludes_volatile_endpoint_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    props, models = _endpoint_payloads()
+    request_count = 0
+
+    def fetch(url: str, _timeout: float) -> dict[str, Any]:
+        nonlocal request_count
+        if url.endswith("/props"):
+            return {**props, "is_sleeping": bool(request_count % 2)}
+        request_count += 1
+        models["data"][0]["created"] = request_count
+        return models
+
+    monkeypatch.setattr("agent_lab.execution_provenance._fetch_json", fetch)
+    runtime = InferenceRuntimeProfile(compute_backend="vulkan")
+
+    first = attest_model_runtime(_profile(), runtime, command_runner=_command_runner)
+    second = attest_model_runtime(_profile(), runtime, command_runner=_command_runner)
+
+    assert first["attestation_sha256"] == second["attestation_sha256"]
+    assert first["endpoint_identity_sha256"] == second["endpoint_identity_sha256"]
 
 
 def test_dirty_worktree_is_labeled_for_protocol_probe_and_rejected_for_measurement(

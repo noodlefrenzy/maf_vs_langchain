@@ -251,9 +251,9 @@ def attest_model_runtime(
             "serve_process": host_runtime.pop("serve_process"),
         },
         "compute_runtime": host_runtime,
-        "endpoint_payload_sha256": {
-            "props": sha256_payload(props),
-            "models": sha256_payload(models),
+        "endpoint_identity_sha256": {
+            "props": sha256_payload(_stable_props_identity(props)),
+            "models": sha256_payload(_stable_models_identity(models)),
         },
     }
     return {**attestation, "attestation_sha256": sha256_payload(attestation)}
@@ -419,6 +419,22 @@ def _props_url(base_url: str) -> str:
     if path.endswith("/v1"):
         path = path[:-3]
     return urlunsplit((parsed.scheme, parsed.netloc, f"{path}/props", "", ""))
+
+
+def _stable_props_identity(props: dict[str, Any]) -> dict[str, Any]:
+    """Exclude live server state that is not an inference input."""
+
+    return {key: value for key, value in props.items() if key != "is_sleeping"}
+
+
+def _stable_models_identity(models: dict[str, Any]) -> dict[str, Any]:
+    """Exclude llama.cpp response timestamps generated at request time."""
+
+    normalized = json.loads(json.dumps(models))
+    for item in normalized.get("data", []):
+        if isinstance(item, dict):
+            item.pop("created", None)
+    return normalized
 
 
 def _redacted_endpoint(base_url: str) -> str:

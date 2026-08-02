@@ -124,6 +124,7 @@ def preflight_pair_contract(
         "role_prompts_sha256": expected_contract_hashes["prompt_bundle_sha256"],
         "tool_schemas_sha256": expected_contract_hashes["tool_catalog_sha256"],
         "completion_schema_sha256": expected_contract_hashes["artifact_schemas_sha256"],
+        "workflow_contract_sha256": expected_contract_hashes["workflow_contract_sha256"],
         "effective_request_policy": request_policy,
         "effective_request_policy_sha256": request_policy["policy_sha256"],
         "execution_provenance_sha256": left_execution["provenance_sha256"],

@@ -8,7 +8,7 @@ import tempfile
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from agent_framework import (
     Agent,
@@ -25,7 +25,6 @@ from agent_framework import (
 from agent_framework.openai import OpenAIChatCompletionClient
 from httpx import AsyncClient, Timeout
 from openai import AsyncOpenAI
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_lab.contracts import AgentRole, ApprovalDecision, ApprovalRequest, ModelProfile
 from agent_lab.model_request_policy import maf_request_options, model_request_headers
@@ -38,18 +37,27 @@ from agent_lab.tool_catalog import (
     RecoveryCheckResult,
     tool_definitions_for_role,
 )
+from agent_lab.workflow_contracts import (
+    SPECIALIST_ROLES,
+    ApprovalResponse,
+    CommanderSynthesis,
+    EvidencePacket,
+    InvestigationTask,
+    RoleRunStats,
+    SpecialistFinding,
+    WorkflowExecutionResult,
+    WorkflowModel,
+    commander_synthesis_prompt,
+    evaluate_evidence,
+    evidence_ids_from_text,
+    invoke_tool_once,
+    observation_calls,
+    render_tool_result,
+    specialist_observation_prompt,
+    structured_tool_payload,
+)
 from agent_lab.workflow_errors import EvidenceGateFailed
 from agent_lab.workflow_telemetry import NOOP_WORKFLOW_TELEMETRY, WorkflowTelemetry
-
-SPECIALIST_ROLES = (
-    AgentRole.TELEMETRY_INVESTIGATOR,
-    AgentRole.CHANGE_INVESTIGATOR,
-    AgentRole.RELIABILITY_REVIEWER,
-)
-MAX_CLAIMS_PER_ROLE = 6
-MAX_EVIDENCE_IDS_PER_ROLE = 8
-MIN_INDEPENDENT_ROLES = 2
-MIN_EVIDENCE_IDS = 2
 
 Investigator = Callable[["InvestigationTask"], Awaitable["SpecialistFinding"]]
 Commander = Callable[[list["SpecialistFinding"]], Awaitable["CommanderSynthesis"]]
@@ -57,112 +65,22 @@ MitigationPreparer = Callable[["EvidencePacket"], Awaitable[ApprovalRequest]]
 MitigationExecutor = Callable[[str], Awaitable[tuple[MitigationResult, RecoveryCheckResult]]]
 
 
-class LaneModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class InvestigationTask(LaneModel):
-    public_ticket: str
-    attempt: int = Field(default=0, ge=0, le=1)
-    feedback: tuple[str, ...] = ()
-
-
-class SpecialistFinding(LaneModel):
-    role: AgentRole
-    summary: str = Field(min_length=1)
-    claims: list[str] = Field(min_length=1, max_length=MAX_CLAIMS_PER_ROLE)
-    evidence_ids: list[str] = Field(min_length=1, max_length=MAX_EVIDENCE_IDS_PER_ROLE)
-    tools_used: list[str] = Field(min_length=1)
-    uncertainties: list[str] = Field(default_factory=list, max_length=4)
-
-
-class CommanderSynthesis(LaneModel):
-    role: Literal[AgentRole.INCIDENT_COMMANDER] = AgentRole.INCIDENT_COMMANDER
-    root_cause: str = Field(min_length=1)
-    chronology: list[str] = Field(min_length=2, max_length=6)
-    evidence_ids: list[str] = Field(min_length=MIN_EVIDENCE_IDS, max_length=12)
-    proposed_mitigation_id: MitigationActionId
-    proposed_mitigation: str = Field(min_length=1)
-    recovery_checks: list[str] = Field(min_length=1, max_length=6)
-    evidence_sufficient: bool
-    uncertainties: list[str] = Field(default_factory=list, max_length=4)
-
-
-class SynthesisPacket(LaneModel):
+class SynthesisPacket(WorkflowModel):
     findings: list[SpecialistFinding]
     synthesis: CommanderSynthesis
-    attempt: int = Field(default=0, ge=0, le=1)
 
 
-class EvidencePacket(LaneModel):
-    passed: bool
-    findings: list[SpecialistFinding]
-    synthesis: CommanderSynthesis
-    evidence_ids: list[str]
-    independent_roles: list[AgentRole]
-    gate_reasons: list[str]
-    attempt: int = Field(ge=0, le=1)
-
-
-class ApprovalEnvelope(LaneModel):
+class ApprovalEnvelope(WorkflowModel):
     evidence: EvidencePacket
     request: ApprovalRequest
 
 
-class AuthorizedEnvelope(LaneModel):
+class AuthorizedEnvelope(WorkflowModel):
     evidence: EvidencePacket
     request: ApprovalRequest
     decision: ApprovalDecision
     action_id_to_execute: MitigationActionId
     action_to_execute: str
-
-
-class ApprovalResponse(LaneModel):
-    request_id: str
-    decision: ApprovalDecision
-    action_id_to_execute: MitigationActionId | None = None
-    action_to_execute: str | None = None
-    approval_token: str | None = Field(default=None, repr=False, exclude=True)
-
-
-class WorkflowExecutionResult(LaneModel):
-    status: Literal["completed", "approval_rejected"]
-    evidence: EvidencePacket
-    approval_request: ApprovalRequest
-    approval_decision: ApprovalDecision
-    action_id_to_execute: MitigationActionId | None = None
-    action_to_execute: str | None = None
-    mitigation: MitigationResult | None = None
-    recovery: RecoveryCheckResult | None = None
-
-    @model_validator(mode="after")
-    def validate_terminal_state(self) -> "WorkflowExecutionResult":
-        if self.status == "completed":
-            if self.approval_decision not in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:
-                raise ValueError("completed execution requires an approved decision")
-            if (
-                not self.action_id_to_execute
-                or not self.action_to_execute
-                or self.mitigation is None
-                or self.recovery is None
-            ):
-                raise ValueError("completed execution requires action, mitigation, and recovery")
-        elif (
-            self.approval_decision is not ApprovalDecision.REJECT
-            or self.action_id_to_execute is not None
-            or self.action_to_execute is not None
-            or self.mitigation is not None
-            or self.recovery is not None
-        ):
-            raise ValueError("rejected execution cannot contain authorized execution state")
-        return self
-
-
-class RoleRunStats(LaneModel):
-    model_calls: int = Field(ge=0)
-    tool_calls: int = Field(ge=0)
-    input_tokens: int = Field(ge=0)
-    output_tokens: int = Field(ge=0)
 
 
 class _TrackingMCPStreamableHTTPTool(MCPStreamableHTTPTool):
@@ -243,49 +161,7 @@ class _EvidenceGate(Executor):
         ctx: WorkflowContext[dict[str, Any], dict[str, Any]],
     ) -> None:
         synthesis_packet = SynthesisPacket.model_validate(payload)
-        findings = synthesis_packet.findings
-        synthesis = synthesis_packet.synthesis
-        roles = sorted({finding.role for finding in findings}, key=lambda role: role.value)
-        available_evidence_ids = {
-            evidence_id for finding in findings for evidence_id in finding.evidence_ids
-        }
-        cited_evidence_ids = set(synthesis.evidence_ids)
-        cited_roles = sorted(
-            {
-                finding.role
-                for finding in findings
-                if cited_evidence_ids.intersection(finding.evidence_ids)
-            },
-            key=lambda role: role.value,
-        )
-        evidence_ids = sorted(
-            {evidence_id for finding in findings for evidence_id in finding.evidence_ids}
-        )
-        reasons: list[str] = []
-        if set(roles) != set(SPECIALIST_ROLES):
-            reasons.append("all three specialist roles must report")
-        if len(roles) < MIN_INDEPENDENT_ROLES:
-            reasons.append("at least two independent specialist roles are required")
-        if len(evidence_ids) < MIN_EVIDENCE_IDS:
-            reasons.append("at least two distinct evidence identifiers are required")
-        if any(not finding.claims for finding in findings):
-            reasons.append("every specialist finding must contain a claim")
-        if not synthesis.evidence_sufficient:
-            reasons.append("incident commander marked the evidence insufficient")
-        unknown_evidence_ids = sorted(cited_evidence_ids - available_evidence_ids)
-        if unknown_evidence_ids:
-            reasons.append(f"commander cited unknown evidence identifiers: {unknown_evidence_ids}")
-        if len(cited_roles) < MIN_INDEPENDENT_ROLES:
-            reasons.append("commander synthesis must cite at least two specialist roles")
-        packet = EvidencePacket(
-            passed=not reasons,
-            findings=findings,
-            synthesis=synthesis,
-            evidence_ids=evidence_ids,
-            independent_roles=cited_roles,
-            gate_reasons=reasons,
-            attempt=synthesis_packet.attempt,
-        )
+        packet = evaluate_evidence(synthesis_packet.findings, synthesis_packet.synthesis)
         if self._continue_on_pass and packet.passed:
             await ctx.send_message(packet.model_dump(mode="json"))
         else:
@@ -533,21 +409,13 @@ class MafRoleAgent:
         )
         observations = []
         observed_evidence_ids: set[str] = set()
-        for tool_name, arguments in _observation_calls(self.role):
+        for tool_name, arguments in observation_calls(self.role):
             result = await self._call_tool(tool_name, **arguments)
-            rendered = _render_tool_result(result)
-            observed_evidence_ids.update(_evidence_ids(rendered))
+            rendered = render_tool_result(result)
+            observed_evidence_ids.update(evidence_ids_from_text(rendered))
             observations.append({"tool": tool_name, "result": rendered})
-        prompt = (
-            f"Public ticket:\n{task.public_ticket}\n\n"
-            "The role-scoped MCP observations below were collected exactly once each with no "
-            "retry. Use only these observations. Ground every claim in their returned evidence "
-            f"IDs and return the requested finding for role {self.role.value}. The tools_used "
-            "field must list exactly the observation tool names.\n\n"
-            f"Observations:\n{json.dumps(observations, sort_keys=True)}"
-        )
-        if task.feedback:
-            prompt += "\nEvidence-gate feedback:\n- " + "\n- ".join(task.feedback)
+        prompt = specialist_observation_prompt(task, self.role, observations)
+        self.stats = self.stats.model_dispatched()
         await self.telemetry.model_started(actor=self.role.value, model=self.profile.name)
         response = await self.agent.run(
             prompt,
@@ -584,11 +452,7 @@ class MafRoleAgent:
                 f"{self.role.value} cited evidence not returned by its MCP tools: "
                 f"cited={finding.evidence_ids}, observed={sorted(observed_evidence_ids)}"
             )
-        self.stats = RoleRunStats(
-            model_calls=sum(
-                1 for message in response.messages if getattr(message, "role", None) == "assistant"
-            ),
-            tool_calls=len(tool_names),
+        self.stats = self.stats.model_completed(
             input_tokens=int(usage.get("input_token_count", 0)),
             output_tokens=int(usage.get("output_token_count", 0)),
         )
@@ -600,9 +464,10 @@ class MafRoleAgent:
         return finding
 
     async def _call_tool(self, tool_name: str, **arguments: Any) -> Any:
+        self.stats = self.stats.tool_dispatched()
         await self.telemetry.tool_started(actor=self.role.value, tool_name=tool_name)
         try:
-            result = await self._mcp.call_tool(tool_name, **arguments)
+            result = await invoke_tool_once(lambda: self._mcp.call_tool(tool_name, **arguments))
         except Exception:
             await self.telemetry.tool_finished(
                 actor=self.role.value,
@@ -677,22 +542,8 @@ class MafCommanderAgent:
         await self._stack.__aexit__(*exc_info)
 
     async def synthesize(self, findings: list[SpecialistFinding]) -> CommanderSynthesis:
-        available_ids = sorted(
-            {evidence_id for finding in findings for evidence_id in finding.evidence_ids}
-        )
-        prompt = (
-            "Synthesize the specialist findings below into one incident-command decision. "
-            "Use only their claims and evidence identifiers. Cite evidence from at least two "
-            "specialist roles, describe a chronology with at least two steps, propose the "
-            "least-destructive reversible mitigation, copy its canonical action ID from the "
-            "reliability runbook evidence into proposed_mitigation_id, and name post-mitigation "
-            "recovery checks. "
-            "Set evidence_sufficient true only when those requirements are met. Do not call tools "
-            "or claim that a mitigation has run.\n\n"
-            f"Available evidence IDs: {json.dumps(available_ids)}\n"
-            f"Specialist findings:\n"
-            f"{json.dumps([item.model_dump(mode='json') for item in findings], sort_keys=True)}"
-        )
+        prompt = commander_synthesis_prompt(findings)
+        self.stats = self.stats.model_dispatched()
         await self.telemetry.model_started(
             actor=AgentRole.INCIDENT_COMMANDER.value,
             model=self.profile.name,
@@ -714,11 +565,7 @@ class MafCommanderAgent:
         )
         if not isinstance(response.value, CommanderSynthesis):
             raise TypeError("incident commander did not return a CommanderSynthesis")
-        self.stats = RoleRunStats(
-            model_calls=sum(
-                1 for message in response.messages if getattr(message, "role", None) == "assistant"
-            ),
-            tool_calls=0,
+        self.stats = self.stats.model_completed(
             input_tokens=int(usage.get("input_token_count", 0)),
             output_tokens=int(usage.get("output_token_count", 0)),
         )
@@ -741,9 +588,8 @@ class MafCommanderAgent:
             ),
             evidence_ids=synthesis.evidence_ids,
         )
-        self._update_tool_stats()
         return ApprovalRequest.model_validate(
-            _structured_payload(
+            structured_tool_payload(
                 result,
                 {"request_id", "proposed_action_id", "proposed_action", "status"},
             )
@@ -763,26 +609,23 @@ class MafCommanderAgent:
             "verify_recovery",
             services=["checkout-api"],
         )
-        self._update_tool_stats()
         mitigation = MitigationResult.model_validate(
-            _structured_payload(
+            structured_tool_payload(
                 mitigation_result,
                 {"request_id", "effective", "action_id", "action"},
             )
         )
         recovery = RecoveryCheckResult.model_validate(
-            _structured_payload(recovery_result, {"case_id", "recovered", "checks"})
+            structured_tool_payload(recovery_result, {"case_id", "recovered", "checks"})
         )
         return mitigation, recovery
 
-    def _update_tool_stats(self) -> None:
-        self.stats = self.stats.model_copy(update={"tool_calls": len(self._mcp.called_tools)})
-
     async def _call_tool(self, tool_name: str, **arguments: Any) -> Any:
         actor = AgentRole.INCIDENT_COMMANDER.value
+        self.stats = self.stats.tool_dispatched()
         await self.telemetry.tool_started(actor=actor, tool_name=tool_name)
         try:
-            result = await self._mcp.call_tool(tool_name, **arguments)
+            result = await invoke_tool_once(lambda: self._mcp.call_tool(tool_name, **arguments))
         except Exception:
             await self.telemetry.tool_finished(
                 actor=actor,
@@ -796,94 +639,6 @@ class MafCommanderAgent:
             succeeded=True,
         )
         return result
-
-
-def _observation_calls(role: AgentRole) -> tuple[tuple[str, dict[str, Any]], ...]:
-    return {
-        AgentRole.TELEMETRY_INVESTIGATOR: (
-            ("query_service_health", {"service": "checkout-api"}),
-            (
-                "query_metric",
-                {"service": "checkout-api", "metric": "retry_attempts", "start_tick": 0},
-            ),
-        ),
-        AgentRole.CHANGE_INVESTIGATOR: (
-            ("list_recent_changes", {"service": None, "since_tick": 0}),
-            ("get_config_diff", {"service": "checkout-api", "change_id": None}),
-        ),
-        AgentRole.RELIABILITY_REVIEWER: (
-            ("search_runbooks", {"query": "reversible mitigation", "limit": 5}),
-            ("get_runbook", {"runbook_id": "reversible-mitigation"}),
-        ),
-    }[role]
-
-
-def _render_tool_result(result: Any) -> str:
-    if isinstance(result, str):
-        return result
-    if isinstance(result, list):
-        parts = [str(item.text) for item in result if isinstance(getattr(item, "text", None), str)]
-        if parts:
-            return "\n".join(parts)
-    raise TypeError(f"unsupported MCP result type {type(result).__name__}")
-
-
-def _structured_payload(result: Any, required_keys: set[str]) -> dict[str, Any]:
-    rendered = _render_tool_result(result)
-    decoder = json.JSONDecoder()
-    for index, character in enumerate(rendered):
-        if character not in "[{":
-            continue
-        try:
-            value, _end = decoder.raw_decode(rendered, index)
-        except json.JSONDecodeError:
-            continue
-        found = _find_payload(value, required_keys)
-        if found is not None:
-            return found
-    raise ValueError(f"MCP result did not contain required fields {sorted(required_keys)}")
-
-
-def _find_payload(value: Any, required_keys: set[str]) -> dict[str, Any] | None:
-    if isinstance(value, dict):
-        if required_keys.issubset(value):
-            return value
-        for child in value.values():
-            found = _find_payload(child, required_keys)
-            if found is not None:
-                return found
-    elif isinstance(value, list):
-        for child in value:
-            found = _find_payload(child, required_keys)
-            if found is not None:
-                return found
-    return None
-
-
-def _evidence_ids(text: str) -> set[str]:
-    values: set[str] = set()
-    decoder = json.JSONDecoder()
-    for index, character in enumerate(text):
-        if character not in "[{":
-            continue
-        try:
-            payload, _end = decoder.raw_decode(text, index)
-        except json.JSONDecodeError:
-            continue
-        _collect_evidence_ids(payload, values)
-    return values
-
-
-def _collect_evidence_ids(value: Any, destination: set[str]) -> None:
-    if isinstance(value, dict):
-        evidence_id = value.get("evidence_id")
-        if isinstance(evidence_id, str):
-            destination.add(evidence_id)
-        for child in value.values():
-            _collect_evidence_ids(child, destination)
-    elif isinstance(value, list):
-        for child in value:
-            _collect_evidence_ids(child, destination)
 
 
 async def run_live_investigation(request: RunRequest) -> dict[str, Any]:

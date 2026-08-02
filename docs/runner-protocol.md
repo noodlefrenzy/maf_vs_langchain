@@ -156,8 +156,8 @@ misreporting the failure as a missing approval checkpoint.
 
 The mock-runner matrix covers success, startup/launch failure, crash, wall
 timeout, approval timeout, model-request timeout classification, explicit
-cancellation, oversized protocol output, graceful shutdown, and all four usage
-budgets. Native MAF and
+cancellation, oversized protocol output, graceful shutdown, structured tool
+timeout and invalid-argument classification, and all four usage budgets. Native MAF and
 LangGraph processes also implement the boundary in an explicit `protocol_probe`
 mode. They report installed framework
 versions and planned topology, emit canonical run lifecycle events, and prove

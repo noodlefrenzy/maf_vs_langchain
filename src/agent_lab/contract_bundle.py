@@ -9,6 +9,7 @@ from typing import Any
 from agent_lab.contracts import SCHEMA_VERSION, ToolErrorCode
 from agent_lab.prompt_bundle import prompt_bundle_payload
 from agent_lab.tool_catalog import artifact_schema_payload, tool_catalog_payload
+from agent_lab.workflow_contracts import workflow_contract_payload
 
 
 def canonical_json(value: Any) -> bytes:
@@ -41,6 +42,7 @@ def contract_bundle_payload() -> dict[str, object]:
         "schema_version": SCHEMA_VERSION,
         "prompts": prompt_bundle_payload(),
         "tools": tool_catalog_payload(),
+        "workflow": workflow_contract_payload(),
         "artifacts": artifact_schema_payload(),
         "errors": error_taxonomy_payload(),
     }
@@ -49,11 +51,13 @@ def contract_bundle_payload() -> dict[str, object]:
 def contract_bundle_hashes() -> dict[str, str]:
     prompts = prompt_bundle_payload()
     tools = tool_catalog_payload()
+    workflow = workflow_contract_payload()
     artifacts = artifact_schema_payload()
     errors = error_taxonomy_payload()
     return {
         "prompt_bundle_sha256": sha256_payload(prompts),
         "tool_catalog_sha256": sha256_payload(tools),
+        "workflow_contract_sha256": sha256_payload(workflow),
         "artifact_schemas_sha256": sha256_payload(artifacts),
         "error_taxonomy_sha256": sha256_payload(errors),
         "contract_bundle_sha256": sha256_payload(
@@ -61,6 +65,7 @@ def contract_bundle_hashes() -> dict[str, str]:
                 "schema_version": SCHEMA_VERSION,
                 "prompts": prompts,
                 "tools": tools,
+                "workflow": workflow,
                 "artifacts": artifacts,
                 "errors": errors,
             }

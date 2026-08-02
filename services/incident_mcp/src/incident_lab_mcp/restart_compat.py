@@ -61,7 +61,16 @@ def resume(checkpoint: Path) -> dict[str, object]:
         approval.request_id,
         approval.approval_token or "",
     )
+    replay = world.apply_mitigation(
+        approval.request_id,
+        approval.approval_token or "",
+    )
     recovery = world.verify_recovery([world.incident.affected_service])
+    state_changing_applies = [
+        event
+        for event in world.audit_log
+        if event.operation == "apply_mitigation" and event.state_changed
+    ]
     return {
         "phase": "resumed",
         "pid": os.getpid(),
@@ -69,6 +78,9 @@ def resume(checkpoint: Path) -> dict[str, object]:
         "approval_state": approval.decision.value,
         "world_tick": world.world_tick,
         "applied": result["effective"],
+        "first_apply_idempotent": result["idempotent_replay"],
+        "replay_idempotent": replay["idempotent_replay"],
+        "state_changing_apply_count": len(state_changing_applies),
         "recovered": recovery["recovered"],
         "audit_sequences": [event.sequence for event in world.audit_log],
     }
