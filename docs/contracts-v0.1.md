@@ -36,6 +36,7 @@ recovery.
 description and never mutates the world. The approval token binds the request,
 action ID, and description. `apply_mitigation` is the only state-changing v0.1
 tool and requires a request identifier plus that valid approval token. Effects
-and safety checks use the canonical ID; descriptions remain visible to agents
-and operators. The tool service performs no hidden retry; only
+and safety checks use the canonical ID. The catalog supplies the description
+shown for approval and execution; the agent's submitted wording remains in the
+audit log. The tool service performs no hidden retry; only
 `transient_timeout` is retryable under the frozen error taxonomy.

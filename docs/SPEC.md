@@ -177,8 +177,10 @@ checkpoint restart:
   paired world's subsequent evidence stream; and
 - mitigation effects and safety outcomes are selected by a versioned canonical
   action ID from the runbook catalog. Human-readable action descriptions remain
-  in requests, approval records, audit events, and reports, but prose equality
-  does not determine simulator state or scorer credit.
+  in requests, approval records, audit events, and reports. The catalog supplies
+  the authorized display description, while the agent's original wording remains
+  in the request audit event; prose equality does not determine simulator state
+  or scorer credit.
 
 The first compatible baseline pins MCP Python SDK 1.x. MCP 2.0 adoption is a
 separate experiment because current MAF package metadata still requires

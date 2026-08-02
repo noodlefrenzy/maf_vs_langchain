@@ -29,6 +29,7 @@ from agent_lab.scenario import (
     IncidentVariant,
     MitigationActionId,
     generate_incident,
+    mitigation_action_description,
     mitigation_action_descriptions,
 )
 from agent_lab.tool_catalog import get_tool_definition
@@ -577,13 +578,14 @@ class IncidentWorld:
     ) -> dict[str, Any]:
         def result(tick: int) -> dict[str, Any]:
             self._validate_evidence(evidence_ids)
+            canonical_description = mitigation_action_description(proposed_action_id)
             request_number = len(self.approval_requests) + 1
             request_id = f"mit-{self.incident.case_id}-{request_number:02d}"
             request = ApprovalRequest(
                 request_id=request_id,
                 case_id=self.incident.case_id,
                 proposed_action_id=proposed_action_id,
-                proposed_action=proposed_action,
+                proposed_action=canonical_description,
                 rationale=rationale,
                 evidence_ids=evidence_ids,
                 requested_by="incident_commander",
@@ -674,7 +676,7 @@ class IncidentWorld:
                 if decision is ApprovalDecision.EDIT
                 else request.proposed_action_id
             )
-            action = edited_action if decision is ApprovalDecision.EDIT else request.proposed_action
+            action = mitigation_action_description(action_id)
             token = self._approval_token(request_id, action_id, action or "")
 
         record = ApprovalRecord(

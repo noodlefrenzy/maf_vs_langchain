@@ -153,6 +153,16 @@ def mitigation_action_descriptions(*, forbidden: bool = False) -> dict[Mitigatio
     }
 
 
+def mitigation_action_description(action_id: MitigationActionId) -> str:
+    """Return the canonical human-readable description for one action ID."""
+
+    descriptions = {
+        **mitigation_action_descriptions(),
+        **mitigation_action_descriptions(forbidden=True),
+    }
+    return descriptions[action_id]
+
+
 def generate_incident(seed: int) -> IncidentCase:
     """Generate a byte-stable case for a given integer seed."""
 

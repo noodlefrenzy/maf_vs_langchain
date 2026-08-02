@@ -100,9 +100,13 @@ def test_canonical_action_id_is_authoritative_over_display_description() -> None
     )
 
     assert result["action_id"] == world.incident.correct_mitigation_id.value
-    assert result["action"] == display_description
+    assert result["action"] == world.incident.correct_mitigation
     assert result["effective"] is True
     assert world.evaluation_state().applied_action_id == world.incident.correct_mitigation_id
+    request_event = next(
+        event for event in world.audit_log if event.operation == "request_mitigation"
+    )
+    assert request_event.arguments["proposed_action"] == display_description
 
 
 def test_rejected_request_cannot_execute() -> None:
