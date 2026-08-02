@@ -143,6 +143,10 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
     assert (
         preflight["completion_schema_sha256"] == contract_bundle_hashes()["artifact_schemas_sha256"]
     )
+    assert (
+        preflight["workflow_contract_sha256"]
+        == contract_bundle_hashes()["workflow_contract_sha256"]
+    )
     execution_provenance = preflight["held_constants"]["execution_provenance"]
     assert execution_provenance["execution_mode"] == "protocol_probe"
     assert execution_provenance["source_worktree"]["measurement_eligible"] is False

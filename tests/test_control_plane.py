@@ -417,6 +417,32 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
             ],
         ),
         (
+            "tool_timeout",
+            TerminalStatus.TOOL_SERVICE_FAILURE,
+            "native_tool_service_failed:WorkflowToolFailure",
+            [
+                "run.started",
+                "tool.requested",
+                "tool.started",
+                "tool.failed",
+                "error",
+                "run.finished",
+            ],
+        ),
+        (
+            "invalid_arguments",
+            TerminalStatus.TOOL_SERVICE_FAILURE,
+            "native_tool_service_failed:WorkflowToolFailure",
+            [
+                "run.started",
+                "tool.requested",
+                "tool.started",
+                "tool.failed",
+                "error",
+                "run.finished",
+            ],
+        ),
+        (
             "gate_failure",
             TerminalStatus.RUNNER_FAILURE,
             'evidence_gate_failed:["incident commander marked the evidence insufficient",'

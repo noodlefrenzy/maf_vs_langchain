@@ -111,6 +111,9 @@ def test_native_framework_and_world_resume_across_process_restart(
     assert runner_resumed["checkpoint_id"] != runner_prepared["checkpoint_id"]
     assert world_resumed["approval_state"] == "approve"
     assert world_resumed["applied"] is True
+    assert world_resumed["first_apply_idempotent"] is False
+    assert world_resumed["replay_idempotent"] is True
+    assert world_resumed["state_changing_apply_count"] == 1
     assert world_resumed["recovered"] is True
     assert {
         world_prepared["request_id"],

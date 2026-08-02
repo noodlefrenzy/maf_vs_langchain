@@ -9,6 +9,8 @@ Its canonical sources are:
   input/output schemas, and approval metadata;
 - `agent_lab.contracts` for evidence, approval, incident-report, audit, event,
   and terminal models;
+- `agent_lab.workflow_contracts` for explicit-workflow schemas, observation
+  policy, dynamic instructions, evidence gating, result parsing, and accounting;
 - `agent_lab.contract_bundle` for canonical serialization and SHA-256 hashes.
 
 The committed hashes are in `contracts/v0.1.0/contract-lock.json`; one

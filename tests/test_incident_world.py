@@ -355,6 +355,9 @@ def test_approved_mitigation_resumes_in_a_fresh_process(tmp_path: Path) -> None:
     assert prepared_payload["pid"] != resumed_payload["pid"]
     assert prepared_payload["applied"] is False
     assert resumed_payload["applied"] is True
+    assert resumed_payload["first_apply_idempotent"] is False
+    assert resumed_payload["replay_idempotent"] is True
+    assert resumed_payload["state_changing_apply_count"] == 1
     assert resumed_payload["recovered"] is True
     assert resumed_payload["request_id"] == prepared_payload["request_id"]
     assert resumed_payload["audit_sequences"] == list(

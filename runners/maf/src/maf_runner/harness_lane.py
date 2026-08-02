@@ -34,8 +34,9 @@ from agent_lab.prompt_bundle import get_role_definition, render_role_prompt
 from agent_lab.runner_host import ApprovalProvider
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 from agent_lab.tool_catalog import tool_definitions_for_role
+from agent_lab.workflow_contracts import evidence_ids_from_text, render_tool_result
 from agent_lab.workflow_telemetry import WorkflowTelemetry
-from maf_runner.workflow_lane import MafCommanderAgent, _evidence_ids, _render_tool_result
+from maf_runner.workflow_lane import MafCommanderAgent
 
 
 class _ModelDispatchMiddleware(ChatMiddleware):
@@ -164,7 +165,7 @@ class _TrackedRoleMCP(MCPStreamableHTTPTool):
             succeeded=True,
         )
         self.called_tools.append(tool_name)
-        self.observed_evidence_ids.update(_evidence_ids(_render_tool_result(result)))
+        self.observed_evidence_ids.update(evidence_ids_from_text(render_tool_result(result)))
         return result
 
 
