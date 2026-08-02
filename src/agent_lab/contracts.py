@@ -377,6 +377,8 @@ class RunTerminal(BaseModel):
     used_tool_calls: int = Field(ge=0)
     used_output_tokens: int = Field(ge=0)
     elapsed_seconds: float = Field(ge=0)
+    execution_started: bool = True
+    event_stream_complete: bool = True
 
 
 class WorldEvaluationState(BaseModel):

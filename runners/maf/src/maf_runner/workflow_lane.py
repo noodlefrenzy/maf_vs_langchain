@@ -36,6 +36,7 @@ from agent_lab.tool_catalog import (
     RecoveryCheckResult,
     tool_definitions_for_role,
 )
+from agent_lab.workflow_errors import EvidenceGateFailed
 from agent_lab.workflow_telemetry import NOOP_WORKFLOW_TELEMETRY, WorkflowTelemetry
 
 SPECIALIST_ROLES = (
@@ -961,6 +962,13 @@ async def run_live_approved(
         requests = initial.get_request_info_events()
         latest = await storage.get_latest(workflow_name="agent-lab-maf-explicit-approved-v1")
         if len(requests) != 1 or latest is None:
+            packets = [
+                EvidencePacket.model_validate(output)
+                for output in initial.get_outputs()
+                if isinstance(output, dict) and "gate_reasons" in output
+            ]
+            if len(packets) == 1 and not packets[0].passed:
+                raise EvidenceGateFailed(packets[0].gate_reasons)
             raise RuntimeError("MAF workflow did not persist exactly one approval request")
         approval_event = requests[0]
         envelope = ApprovalEnvelope.model_validate(approval_event.data)

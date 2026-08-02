@@ -120,11 +120,23 @@ and a process exit without a terminal message become a persisted
 first use protocol commands, then process termination, and finally a kill only
 after the configured grace period.
 
+The cancellation command carries the control plane's authoritative non-success
+terminal status as well as its reason. While shutdown is in progress, the
+control plane continues draining usage, normalized events, and the runner's
+terminal acknowledgement. A runner that acknowledges cancellation therefore
+finishes with an exact event stream; a crash or forced kill is recorded in
+`terminal.json` as a bounded incomplete stream rather than being mislabeled as
+corrupt completed evidence.
+
 An exception escaping while a normalized model request is in flight becomes
 `model_failure`. An exception following a normalized failed tool boundary (or
 while that tool is still in flight) becomes `tool_service_failure`. The error
 and terminal events retain only the bounded exception class and classification,
 while detailed framework tracebacks stay in the runner-local stderr artifact.
+Deterministic evidence-gate failures use the stable
+`evidence_gate_failed:<json-reasons>` runner-failure subtype in both workflow
+lanes, preserving the concrete gate reasons without exposing model content or
+misreporting the failure as a missing approval checkpoint.
 
 The mock-runner matrix covers success, startup/launch failure, crash, wall
 timeout, approval timeout, model-request timeout classification, explicit

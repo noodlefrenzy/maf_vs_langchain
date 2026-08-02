@@ -198,7 +198,14 @@ class FinalizeCommand(ProtocolModel):
 class CancelCommand(ProtocolModel):
     kind: Literal["cancel"] = "cancel"
     run_id: UUID
+    status: TerminalStatus = TerminalStatus.CANCELLED
     reason: str
+
+    @model_validator(mode="after")
+    def require_failure_status(self) -> CancelCommand:
+        if self.status in {TerminalStatus.COMPLETED, TerminalStatus.APPROVAL_REJECTED}:
+            raise ValueError("cancel commands require a non-success terminal status")
+        return self
 
 
 class ShutdownCommand(ProtocolModel):

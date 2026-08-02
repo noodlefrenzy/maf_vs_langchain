@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_lab.bundle_validation import validate_bundle
 from agent_lab.contract_bundle import sha256_payload
 from agent_lab.contracts import (
     AgentRole,
@@ -98,6 +99,13 @@ def _command(mode: str, *, budget_field: str | None = None) -> list[str]:
     return command
 
 
+def _assert_bundle_valid(result) -> None:
+    validation = validate_bundle(result.paths.bundle)
+    assert validation.valid, [
+        (finding.level.value, finding.code, finding.message) for finding in validation.findings
+    ]
+
+
 def test_mock_runner_success_and_isolated_paths(tmp_path: Path) -> None:
     control_plane = ControlPlane(tmp_path)
     request = _request(control_plane, _manifest())
@@ -133,6 +141,7 @@ def test_mock_runner_wall_timeout_is_budget_exhaustion(tmp_path: Path) -> None:
     assert result.terminal.status is TerminalStatus.BUDGET_EXHAUSTED
     assert result.terminal.reason == "wall_clock_budget_exhausted"
     assert result.graceful_shutdown is True
+    _assert_bundle_valid(result)
 
 
 def test_mock_runner_approval_timeout_has_distinct_terminal_state(tmp_path: Path) -> None:
@@ -143,6 +152,7 @@ def test_mock_runner_approval_timeout_has_distinct_terminal_state(tmp_path: Path
 
     assert result.terminal.status is TerminalStatus.APPROVAL_TIMEOUT
     assert result.terminal.reason == "approval_deadline_exhausted"
+    _assert_bundle_valid(result)
 
 
 def test_mock_runner_model_timeout_is_model_failure(tmp_path: Path) -> None:
@@ -155,6 +165,7 @@ def test_mock_runner_model_timeout_is_model_failure(tmp_path: Path) -> None:
     assert result.terminal.reason == "model_request_timeout"
     assert result.terminal.used_model_calls == 1
     assert result.graceful_shutdown is True
+    _assert_bundle_valid(result)
 
 
 def test_control_plane_delivers_token_bound_approval_without_persisting_secret(
@@ -203,6 +214,32 @@ def test_control_plane_delivers_token_bound_approval_without_persisting_secret(
         "request_id": "mit-control-plane-01",
     }
     assert approval_token not in result.stderr_path.read_text()
+
+
+def test_real_workflow_rejection_produces_a_valid_operational_bundle(tmp_path: Path) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+
+    async def reject(event):
+        return ApprovalRecord(
+            request_id=str(event.payload["request_id"]),
+            case_id="case-protocol-stub",
+            decision=ApprovalDecision.REJECT,
+            decided_by="control-plane-test-reviewer",
+            decided_tick=7,
+        )
+
+    result = asyncio.run(
+        control_plane.execute(
+            [sys.executable, "-m", "agent_lab.workflow_protocol_stub"],
+            request,
+            approval_handler=reject,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.APPROVAL_REJECTED
+    assert result.terminal.reason == "native_workflow_approval_rejected"
+    _assert_bundle_valid(result)
 
 
 def test_control_plane_rejects_mismatched_approval_record(tmp_path: Path) -> None:
@@ -368,6 +405,13 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
                 "run.finished",
             ],
         ),
+        (
+            "gate_failure",
+            TerminalStatus.RUNNER_FAILURE,
+            'evidence_gate_failed:["incident commander marked the evidence insufficient",'
+            '"commander synthesis must cite at least two specialist roles"]',
+            ["run.started", "error", "run.finished"],
+        ),
     ],
 )
 def test_real_workflow_protocol_classifies_operation_failures(
@@ -402,6 +446,7 @@ def test_real_workflow_protocol_classifies_operation_failures(
     assert [event["kind"] for event in events] == event_kinds
     assert events[-2]["payload"] == {"reason": reason}
     assert events[-1]["payload"]["status"] == status.value
+    _assert_bundle_valid(result)
 
 
 def test_real_workflow_protocol_preserves_interleaved_actor_parentage(
@@ -456,6 +501,7 @@ def test_mock_runner_crash_is_runner_failure(tmp_path: Path) -> None:
 
     assert result.terminal.status is TerminalStatus.RUNNER_FAILURE
     assert result.terminal.reason == "runner_exited_without_terminal:17"
+    _assert_bundle_valid(result)
 
 
 def test_runner_launch_failure_is_terminalized(tmp_path: Path) -> None:
@@ -496,6 +542,7 @@ def test_mock_runner_external_cancellation(tmp_path: Path) -> None:
     assert result.terminal.status is TerminalStatus.CANCELLED
     assert result.terminal.reason == "control_plane_cancelled"
     assert result.graceful_shutdown is True
+    _assert_bundle_valid(result)
 
 
 @pytest.mark.parametrize(
@@ -531,6 +578,7 @@ def test_mock_runner_usage_limits_fail_closed(
         assert result.terminal.used_tool_calls == used
     elif field == "output_tokens":
         assert result.terminal.used_output_tokens == used
+    _assert_bundle_valid(result)
 
 
 def test_budget_terminal_does_not_require_success_finalization(tmp_path: Path) -> None:

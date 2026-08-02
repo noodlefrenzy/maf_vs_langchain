@@ -87,7 +87,7 @@ def validate_bundle(path: Path, *, mark: bool = False) -> BundleValidationResult
     terminal = _load_terminal(path, findings)
 
     if manifest is not None:
-        _validate_event_stream(manifest, events, findings)
+        _validate_event_stream(manifest, terminal, events, findings)
     if manifest is not None and terminal is not None:
         _validate_terminal(manifest, terminal, events, findings)
     _validate_artifacts(path, events, terminal, findings)
@@ -254,10 +254,6 @@ def _load_events(
     except OSError as exc:
         _error(findings, "events_unreadable", str(exc), "events.jsonl")
         return []
-    if not lines:
-        _error(findings, "events_empty", "events.jsonl contains no events.", "events.jsonl")
-        return []
-
     events: list[NormalizedEvent] = []
     for line_number, line in enumerate(lines, start=1):
         if not line.strip():
@@ -307,9 +303,34 @@ def _load_terminal(
 
 def _validate_event_stream(
     manifest: RunManifest,
+    terminal: RunTerminal | None,
     events: list[NormalizedEvent],
     findings: list[ValidationFinding],
 ) -> None:
+    stream_complete = terminal is None or terminal.event_stream_complete
+    if terminal is not None and not stream_complete:
+        incomplete_allowed = {
+            TerminalStatus.BUDGET_EXHAUSTED,
+            TerminalStatus.APPROVAL_TIMEOUT,
+            TerminalStatus.RUNNER_FAILURE,
+            TerminalStatus.CANCELLED,
+            TerminalStatus.INVALID_PROVENANCE,
+        }
+        if terminal.status not in incomplete_allowed:
+            _error(
+                findings,
+                "event_stream_incomplete_for_status",
+                f"{terminal.status.value} requires a complete runner event stream.",
+                "terminal.json",
+            )
+        _warning(
+            findings,
+            "event_stream_incomplete",
+            "The control plane recorded a bounded partial runner stream; usage is a ceiling "
+            "over the observed normalized events.",
+            "terminal.json",
+        )
+
     sequences = [event.sequence for event in events]
     if sequences != list(range(len(events))):
         _error(
@@ -336,28 +357,50 @@ def _validate_event_stream(
 
     starts = [event for event in events if event.kind is EventKind.RUN_STARTED]
     finishes = [event for event in events if event.kind is EventKind.RUN_FINISHED]
-    if len(starts) != 1:
+    execution_started = terminal is None or terminal.execution_started
+    if not execution_started and events:
+        _error(
+            findings,
+            "event_before_execution_start",
+            "A pre-start terminal cannot contain normalized execution events.",
+            "events.jsonl",
+        )
+    if stream_complete and execution_started and len(starts) != 1:
         _error(
             findings,
             "run_start_count",
             f"Expected one run.started event, observed {len(starts)}.",
             "events.jsonl",
         )
-    elif starts[0].sequence != 0:
+    elif len(starts) > 1:
+        _error(
+            findings,
+            "run_start_count",
+            f"Expected at most one run.started event, observed {len(starts)}.",
+            "events.jsonl",
+        )
+    elif starts and starts[0].sequence != 0:
         _error(
             findings,
             "run_start_not_first",
             "run.started must be sequence 0.",
             "events.jsonl",
         )
-    if len(finishes) != 1:
+    if stream_complete and execution_started and len(finishes) != 1:
         _error(
             findings,
             "run_finish_count",
             f"Expected one run.finished event, observed {len(finishes)}.",
             "events.jsonl",
         )
-    elif events and finishes[0].sequence != events[-1].sequence:
+    elif len(finishes) > 1:
+        _error(
+            findings,
+            "run_finish_count",
+            f"Expected at most one run.finished event, observed {len(finishes)}.",
+            "events.jsonl",
+        )
+    elif finishes and events and finishes[0].sequence != events[-1].sequence:
         _error(
             findings,
             "run_finish_not_last",
@@ -397,6 +440,19 @@ def _validate_terminal(
             f"terminal run_id {terminal.run_id} differs from manifest {manifest.run_id}.",
             "terminal.json",
         )
+    if not terminal.execution_started and any(
+        (
+            terminal.used_model_calls,
+            terminal.used_tool_calls,
+            terminal.used_output_tokens,
+        )
+    ):
+        _error(
+            findings,
+            "usage_before_execution_start",
+            "A pre-start terminal cannot record model, tool, or output-token usage.",
+            "terminal.json",
+        )
 
     model_calls = sum(event.kind is EventKind.MODEL_REQUESTED for event in events)
     tool_calls = sum(event.kind is EventKind.TOOL_REQUESTED for event in events)
@@ -422,11 +478,19 @@ def _validate_terminal(
     }
     for field_name, observed in observed_usage.items():
         recorded = getattr(terminal, field_name)
-        if recorded != observed:
+        mismatch = recorded != observed if terminal.event_stream_complete else recorded < observed
+        if mismatch:
             _error(
                 findings,
                 "terminal_usage_mismatch",
                 f"{field_name} records {recorded}, events derive {observed}.",
+                "terminal.json",
+            )
+        elif not terminal.event_stream_complete and recorded > observed:
+            _warning(
+                findings,
+                "terminal_usage_partially_observed",
+                f"{field_name} records {recorded}; the partial event stream derives {observed}.",
                 "terminal.json",
             )
 
@@ -439,7 +503,11 @@ def _validate_terminal(
     }
     for field_name, used in budget_usage.items():
         limit = getattr(manifest.budget, field_name)
-        if used > limit and terminal.status is not TerminalStatus.BUDGET_EXHAUSTED:
+        overage_is_terminal = terminal.status is TerminalStatus.BUDGET_EXHAUSTED or (
+            terminal.status is TerminalStatus.APPROVAL_TIMEOUT
+            and field_name == "wall_clock_seconds"
+        )
+        if used > limit and not overage_is_terminal:
             _error(
                 findings,
                 "budget_exceeded_without_status",
@@ -540,12 +608,20 @@ def _validate_artifacts(
 
     undeclared = sorted(actual_files - set(declared))
     if undeclared:
-        _error(
-            findings,
-            "artifact_event_missing",
-            f"Artifacts have no artifact.written event: {undeclared}.",
-            "artifacts",
-        )
+        if terminal is not None and not terminal.event_stream_complete:
+            _warning(
+                findings,
+                "partial_artifacts_unattested",
+                f"Partial artifacts have no observed artifact.written event: {undeclared}.",
+                "artifacts",
+            )
+        else:
+            _error(
+                findings,
+                "artifact_event_missing",
+                f"Artifacts have no artifact.written event: {undeclared}.",
+                "artifacts",
+            )
     if terminal is not None and terminal.status is TerminalStatus.COMPLETED:
         required = {
             "artifacts/incident-report.json",

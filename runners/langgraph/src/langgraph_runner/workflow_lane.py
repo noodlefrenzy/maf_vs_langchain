@@ -30,6 +30,7 @@ from agent_lab.tool_catalog import (
     RecoveryCheckResult,
     tool_definitions_for_role,
 )
+from agent_lab.workflow_errors import EvidenceGateFailed
 from agent_lab.workflow_telemetry import NOOP_WORKFLOW_TELEMETRY, WorkflowTelemetry
 from langgraph_runner.checkpoint_compat import _FileBackedSaver
 
@@ -893,6 +894,11 @@ async def run_live_approved(
         config,
     )
     if "__interrupt__" not in initial:
+        packet_payload = initial.get("packet")
+        if packet_payload is not None:
+            packet = EvidencePacket.model_validate(packet_payload)
+            if not packet.passed:
+                raise EvidenceGateFailed(packet.gate_reasons)
         raise RuntimeError("LangGraph did not persist an approval interrupt")
     snapshot = graph.get_state(config)
     approval_request = ApprovalRequest.model_validate(snapshot.values["approval_request"])

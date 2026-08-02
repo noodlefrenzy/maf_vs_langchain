@@ -95,6 +95,29 @@ def _cancelled_bundle(root: Path, lane: FrameworkLane) -> Path:
     return bundle.path
 
 
+def _incomplete_operational_bundle(
+    root: Path,
+    lane: FrameworkLane,
+    status: TerminalStatus,
+) -> Path:
+    manifest = _paired_manifest(lane)
+    bundle = RunBundle.create(root, manifest)
+    bundle.emit(EventKind.RUN_STARTED)
+    bundle.write_terminal(
+        RunTerminal(
+            run_id=manifest.run_id,
+            status=status,
+            reason=f"test_{status.value}",
+            used_model_calls=0,
+            used_tool_calls=0,
+            used_output_tokens=0,
+            elapsed_seconds=0.1,
+            event_stream_complete=False,
+        )
+    )
+    return bundle.path
+
+
 def _rewrite_manifest(bundle_path: Path, body: dict[str, object]) -> None:
     manifest_bytes = (json.dumps(body, indent=2) + "\n").encode()
     (bundle_path / "manifest.json").write_bytes(manifest_bytes)
@@ -211,6 +234,81 @@ def test_artifact_digest_and_terminal_usage_are_reconciled(tmp_path: Path) -> No
     assert "terminal_usage_mismatch" in codes
 
 
+def test_incomplete_budget_bundle_preserves_bounded_partial_evidence(tmp_path: Path) -> None:
+    manifest = _paired_manifest(FrameworkLane.MAF_WORKFLOW)
+    bundle = RunBundle.create(tmp_path, manifest)
+    bundle.emit(EventKind.RUN_STARTED)
+    bundle.emit(EventKind.MODEL_REQUESTED, payload={"model": "local-test"})
+    bundle.write_artifact("partial-diagnosis.json", {"status": "interrupted"})
+    bundle.write_terminal(
+        RunTerminal(
+            run_id=manifest.run_id,
+            status=TerminalStatus.BUDGET_EXHAUSTED,
+            reason="model_call_budget_exhausted",
+            used_model_calls=2,
+            used_tool_calls=0,
+            used_output_tokens=0,
+            elapsed_seconds=0.1,
+            event_stream_complete=False,
+        )
+    )
+
+    result = validate_bundle(bundle.path)
+
+    assert result.valid is True
+    codes = _finding_codes(result)
+    assert "event_stream_incomplete" in codes
+    assert "terminal_usage_partially_observed" in codes
+    assert "partial_artifacts_unattested" in codes
+
+
+def test_incomplete_stream_cannot_underreport_observed_usage(tmp_path: Path) -> None:
+    manifest = _paired_manifest(FrameworkLane.MAF_WORKFLOW)
+    bundle = RunBundle.create(tmp_path, manifest)
+    bundle.emit(EventKind.RUN_STARTED)
+    bundle.emit(EventKind.MODEL_REQUESTED, payload={"model": "local-test"})
+    bundle.write_terminal(
+        RunTerminal(
+            run_id=manifest.run_id,
+            status=TerminalStatus.CANCELLED,
+            reason="control_plane_cancelled",
+            used_model_calls=0,
+            used_tool_calls=0,
+            used_output_tokens=0,
+            elapsed_seconds=0.1,
+            event_stream_complete=False,
+        )
+    )
+
+    result = validate_bundle(bundle.path)
+
+    assert result.valid is False
+    assert "terminal_usage_mismatch" in _finding_codes(result)
+
+
+def test_pre_start_runner_failure_with_empty_event_stream_is_valid(tmp_path: Path) -> None:
+    manifest = _paired_manifest(FrameworkLane.MAF_WORKFLOW)
+    bundle = RunBundle.create(tmp_path, manifest)
+    bundle.write_terminal(
+        RunTerminal(
+            run_id=manifest.run_id,
+            status=TerminalStatus.RUNNER_FAILURE,
+            reason="runner_launch_failed:FileNotFoundError",
+            used_model_calls=0,
+            used_tool_calls=0,
+            used_output_tokens=0,
+            elapsed_seconds=0.1,
+            execution_started=False,
+            event_stream_complete=False,
+        )
+    )
+
+    result = validate_bundle(bundle.path)
+
+    assert result.valid is True
+    assert "event_stream_incomplete" in _finding_codes(result)
+
+
 def test_world_manifest_linkage_survives_self_consistent_artifact_tampering(
     tmp_path: Path,
 ) -> None:
@@ -251,6 +349,33 @@ def test_matched_pair_passes_with_lane_specific_dependency_locks(
     assert result.track == "explicit_workflow"
     assert (left / "pair-validation.json").is_file()
     assert (right / "pair-validation.json").is_file()
+
+
+def test_pair_validation_accepts_one_or_both_incomplete_operational_runs(
+    tmp_path: Path,
+) -> None:
+    left = _incomplete_operational_bundle(
+        tmp_path / "one-incomplete-left",
+        FrameworkLane.MAF_WORKFLOW,
+        TerminalStatus.BUDGET_EXHAUSTED,
+    )
+    right_complete = _cancelled_bundle(
+        tmp_path / "one-incomplete-right",
+        FrameworkLane.LANGGRAPH,
+    )
+
+    one_incomplete = validate_pair(left, right_complete)
+
+    assert one_incomplete.valid is True
+
+    right_incomplete = _incomplete_operational_bundle(
+        tmp_path / "both-incomplete-right",
+        FrameworkLane.LANGGRAPH,
+        TerminalStatus.CANCELLED,
+    )
+    both_incomplete = validate_pair(left, right_incomplete)
+
+    assert both_incomplete.valid is True
 
 
 def test_pair_fails_closed_on_held_constant_drift(tmp_path: Path) -> None:
