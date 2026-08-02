@@ -143,6 +143,17 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
     assert (
         preflight["completion_schema_sha256"] == contract_bundle_hashes()["artifact_schemas_sha256"]
     )
+    execution_provenance = preflight["held_constants"]["execution_provenance"]
+    assert execution_provenance["execution_mode"] == "protocol_probe"
+    assert execution_provenance["source_worktree"]["measurement_eligible"] is False
+    assert execution_provenance["model_runtime"] == {
+        "collection_status": "not_collected_protocol_probe",
+        "measurement_eligible": False,
+    }
+    assert (
+        preflight["execution_provenance_sha256"]
+        == execution_provenance["provenance_sha256"]
+    )
     for run in summary["runs"]:
         bundle = Path(run["bundle"])
         checkpoint = Path(run["world_checkpoint"])
@@ -162,6 +173,11 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
         request = (bundle / "native" / "run-request.redacted.json").read_text()
         assert '"token": "[REDACTED]"' in request
         assert "v1." not in request
+        manifest = json.loads((bundle / "manifest.json").read_text())
+        assert (
+            manifest["execution_provenance_sha256"]
+            == execution_provenance["provenance_sha256"]
+        )
         validation = validate_bundle(bundle)
         assert validation.valid is False
         assert validation.inference_status == "invalid_provenance"
@@ -172,7 +188,10 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
     assert Path(summary["index"]).is_file()
 
 
-@pytest.mark.parametrize("drift", ["contract_hashes", "normalized_topology"])
+@pytest.mark.parametrize(
+    "drift",
+    ["contract_hashes", "normalized_topology", "execution_provenance"],
+)
 def test_pair_contract_preflight_fails_closed_on_runner_drift(drift: str) -> None:
     hashes = contract_bundle_hashes()
     lanes = (FrameworkLane.MAF_WORKFLOW, FrameworkLane.LANGGRAPH)
@@ -195,17 +214,38 @@ def test_pair_contract_preflight_fails_closed_on_runner_drift(drift: str) -> Non
         for lane in lanes
     }
     right = descriptors[FrameworkLane.LANGGRAPH]
+    execution_snapshot = {
+        "schema_version": "execution-provenance/v1",
+        "execution_mode": "protocol_probe",
+    }
+    execution = {
+        **execution_snapshot,
+        "provenance_sha256": sha256_payload(execution_snapshot),
+    }
+    execution_by_lane = {lane: execution for lane in lanes}
     if drift == "contract_hashes":
         changed_hashes = {**hashes, "tool_catalog_sha256": "f" * 64}
         descriptors[FrameworkLane.LANGGRAPH] = right.model_copy(
             update={"contract_hashes": changed_hashes}
         )
-    else:
+    elif drift == "normalized_topology":
         descriptors[FrameworkLane.LANGGRAPH] = right.model_copy(
             update={"normalized_topology": {FrameworkLane.LANGGRAPH: {"kind": "drifted-topology"}}}
         )
+    else:
+        changed_snapshot = {**execution_snapshot, "execution_mode": "native_workflow"}
+        execution_by_lane[FrameworkLane.LANGGRAPH] = {
+            **changed_snapshot,
+            "provenance_sha256": sha256_payload(changed_snapshot),
+        }
 
-    with pytest.raises(ValueError, match="runner (contract hashes|normalized topology) differ"):
+    with pytest.raises(
+        ValueError,
+        match=(
+            "runner (contract hashes|normalized topology) differ"
+            "|effective inference execution provenance differs"
+        ),
+    ):
         preflight_pair_contract(
             track="explicit_workflow",
             left_lane=FrameworkLane.MAF_WORKFLOW,
@@ -235,6 +275,7 @@ def test_pair_contract_preflight_fails_closed_on_runner_drift(drift: str) -> Non
             fault_profile="none",
             source_commit="0" * 40,
             source_tree_sha256="1" * 64,
+            execution_provenance_by_lane=execution_by_lane,
             world_manifest_sha256="2" * 64,
         )
 

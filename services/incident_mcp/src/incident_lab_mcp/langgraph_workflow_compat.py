@@ -118,6 +118,7 @@ async def run_live_langgraph_workflow(base_url: str, model: str) -> dict[str, ob
                     profile,
                     FrameworkLane.LANGGRAPH,
                 )["policy_sha256"],
+                execution_provenance_sha256="0" * 64,
                 world_manifest_sha256=receipt.right.world_manifest_sha256,
             )
             control_plane = ControlPlane(Path(raw_run_root), graceful_shutdown_seconds=2)

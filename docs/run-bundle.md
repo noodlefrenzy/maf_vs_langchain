@@ -179,7 +179,8 @@ event are retained as unattested partial artifacts and excluded from scoring.
 
 `agent-lab bundle validate-pair <left-run-dir> <right-run-dir>` additionally
 checks matched lane topology and held-constant prompt, tool, world, model,
-budget, source, seed, repetition, and generator provenance. Framework
+effective request-policy, execution-runtime, budget, source, seed, repetition,
+and generator provenance. Framework
 dependency-lock digests are required but intentionally lane-specific.
 
 Invalid bundles stay available for debugging. The validator writes

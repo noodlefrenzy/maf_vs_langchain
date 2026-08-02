@@ -203,6 +203,17 @@ class NativeTracingProfile(BaseModel):
         return self
 
 
+class InferenceRuntimeProfile(BaseModel):
+    """How measured-run preflight identifies the model-serving compute host."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    host: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]+$")
+    compute_backend: Literal["auto", "nvidia", "vulkan"] = "auto"
+    process_name: str = Field(default="llama-server", pattern=r"^[A-Za-z0-9._-]+$")
+    command_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+
+
 class ExperimentSpec(BaseModel):
     """Validated experiment configuration loaded from TOML."""
 
@@ -219,6 +230,7 @@ class ExperimentSpec(BaseModel):
     fault_profile: Literal["none", "standard", "adversarial"]
     budget: Budget
     tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
+    inference_runtime: InferenceRuntimeProfile = Field(default_factory=InferenceRuntimeProfile)
     capture_sensitive: bool = False
     capture_reasoning: Literal[False] = False
 
@@ -245,6 +257,7 @@ class RunManifest(BaseModel):
     prompt_bundle_sha256: Sha256Hex
     tool_catalog_sha256: Sha256Hex
     effective_request_policy_sha256: Sha256Hex
+    execution_provenance_sha256: Sha256Hex
     world_manifest_sha256: Sha256Hex
     started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     host_fingerprint: dict[str, str] = Field(default_factory=dict)

@@ -1073,6 +1073,10 @@ def _validate_pair_manifests(
             left.effective_request_policy_sha256,
             right.effective_request_policy_sha256,
         ),
+        "execution_provenance_sha256": (
+            left.execution_provenance_sha256,
+            right.execution_provenance_sha256,
+        ),
         "world_manifest_sha256": (
             left.world_manifest_sha256,
             right.world_manifest_sha256,

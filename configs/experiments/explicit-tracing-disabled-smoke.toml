@@ -10,6 +10,12 @@ fault_profile = "none"
 capture_sensitive = false
 capture_reasoning = false
 
+[inference_runtime]
+host = "lonestar"
+compute_backend = "vulkan"
+process_name = "llama-server"
+command_timeout_seconds = 10
+
 [tracing]
 enabled = false
 collector_endpoint = "http://127.0.0.1:6006/v1/traces"

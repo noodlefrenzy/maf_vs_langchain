@@ -302,6 +302,8 @@ class ControlPlane:
                         or prepared.tool_catalog_sha256 != request.manifest.tool_catalog_sha256
                         or prepared.effective_request_policy_sha256
                         != request.manifest.effective_request_policy_sha256
+                        or prepared.execution_provenance_sha256
+                        != request.manifest.execution_provenance_sha256
                     ):
                         terminal_status = TerminalStatus.INVALID_PROVENANCE
                         terminal_reason = "prepared_run_provenance_mismatch"
@@ -640,6 +642,8 @@ class ControlPlane:
                     or prepared.tool_catalog_sha256 != request.manifest.tool_catalog_sha256
                     or prepared.effective_request_policy_sha256
                     != request.manifest.effective_request_policy_sha256
+                    or prepared.execution_provenance_sha256
+                    != request.manifest.execution_provenance_sha256
                 ):
                     stream_error = "prepared_run_provenance_mismatch"
                     continue

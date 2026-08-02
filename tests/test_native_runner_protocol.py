@@ -54,6 +54,7 @@ def _manifest(lane: FrameworkLane) -> RunManifest:
         prompt_bundle_sha256="1" * 64,
         tool_catalog_sha256="2" * 64,
         effective_request_policy_sha256=effective_request_policy(model, lane)["policy_sha256"],
+        execution_provenance_sha256="7" * 64,
         world_manifest_sha256="3" * 64,
     )
 

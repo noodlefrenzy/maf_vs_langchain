@@ -75,6 +75,7 @@ def run_oracle(
             model,
             FrameworkLane.SCRIPTED_ORACLE,
         )["policy_sha256"],
+        execution_provenance_sha256="0" * 64,
         world_manifest_sha256=sha256_payload(world.incident.model_dump(mode="json")),
         host_fingerprint={
             "hostname": platform.node(),

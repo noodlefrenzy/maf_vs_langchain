@@ -70,6 +70,7 @@ def _paired_manifest(lane: FrameworkLane) -> RunManifest:
         prompt_bundle_sha256="1" * 64,
         tool_catalog_sha256="2" * 64,
         effective_request_policy_sha256="6" * 64,
+        execution_provenance_sha256="7" * 64,
         world_manifest_sha256="3" * 64,
     )
 
@@ -415,6 +416,19 @@ def test_pair_fails_closed_on_held_constant_drift(tmp_path: Path) -> None:
     right = _cancelled_bundle(tmp_path / "right", FrameworkLane.LANGGRAPH)
     manifest = json.loads((right / "manifest.json").read_text(encoding="utf-8"))
     manifest["tool_catalog_sha256"] = "9" * 64
+    _rewrite_manifest(right, manifest)
+
+    result = validate_pair(left, right)
+
+    assert result.valid is False
+    assert "pair_provenance_drift" in _finding_codes(result)
+
+
+def test_pair_fails_closed_on_execution_provenance_drift(tmp_path: Path) -> None:
+    left = _cancelled_bundle(tmp_path / "left", FrameworkLane.MAF_WORKFLOW)
+    right = _cancelled_bundle(tmp_path / "right", FrameworkLane.LANGGRAPH)
+    manifest = json.loads((right / "manifest.json").read_text(encoding="utf-8"))
+    manifest["execution_provenance_sha256"] = "8" * 64
     _rewrite_manifest(right, manifest)
 
     result = validate_pair(left, right)

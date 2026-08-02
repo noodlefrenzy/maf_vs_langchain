@@ -459,6 +459,7 @@ class NativeRunnerDescriptor(BaseModel):
                 request.manifest.model,
                 lane,
             )["policy_sha256"],
+            execution_provenance_sha256=request.manifest.execution_provenance_sha256,
             framework_versions=self.framework_versions,
             checkpoint=self.checkpoint[lane],
         )

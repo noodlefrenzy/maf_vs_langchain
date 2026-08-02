@@ -81,6 +81,11 @@ plus one terminal bundle and owner-only world checkpoint per lane.
 The execution mode is always labeled `protocol_probe`. It invokes no model or
 MCP tool, produces no score, and is infrastructure evidence only. Actual task
 runs remain gated on the lane implementations and their checkpoint metadata.
+Protocol probes may run from a dirty Git worktree, but the preflight records the
+dirty status entries and hash and marks the run ineligible for measurement.
+`native_workflow` refuses to allocate a run unless the worktree is clean, then
+hashes the source state and complete inference-runtime attestation into the pair
+preflight and each runner's prepared-provenance handshake.
 
 ## Checkpoint restart gate
 

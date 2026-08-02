@@ -141,6 +141,9 @@ The lab distinguishes:
 - **model sampling**: configured with the same requested seed and parameters,
   but treated as statistically rather than bitwise reproducible;
 - **runtime scheduling**: recorded, not assumed deterministic;
+- **inference runtime**: model artifact/revision, tokenizer, chat template,
+  server/parser/serve flags, and serving-host compute driver/runtime are hashed
+  into paired preflight evidence;
 - **live external data**: excluded from the primary benchmark.
 
 Each paired lane receives a fresh world clone with the same manifest. A lane
@@ -358,6 +361,8 @@ Reports are generated from frozen bundles and never query live external data.
 - Every destructive-looking simulated action requires approval.
 - Model weights, secrets, runtime state, and trace databases are ignored by
   Git.
+- Measured runs require a clean worktree; dirty protocol probes are explicitly
+  labeled non-measurement evidence.
 
 ## 13. Delivery phases
 

@@ -68,6 +68,7 @@ def _manifest(*, wall_clock_seconds: int = 5) -> RunManifest:
             model,
             FrameworkLane.MAF_WORKFLOW,
         )["policy_sha256"],
+        execution_provenance_sha256="7" * 64,
         world_manifest_sha256="3" * 64,
     )
 

@@ -57,6 +57,17 @@ and its canonical SHA-256 are written into pair preflight evidence; the same has
 is frozen into each manifest and acknowledged by the runner before execution.
 Adding a `ModelProfile` field without mapping it in both adapters fails closed.
 
+Measured native runs also collect a shared `execution-provenance/v1` preflight
+attestation before either lane starts. For llama.cpp this binds the requested
+model to the advertised model ID, immutable Hugging Face snapshot revision and
+GGUF artifact, tokenizer metadata, chat-template hash and capabilities, server
+build, parser modes, endpoint and process serve flags, context/slot settings,
+and raw endpoint-payload hashes. Compute identity is collected on the configured
+serving host, not the machine owning an SSH tunnel; the lonestar profiles record
+its kernel plus Vulkan device, RADV/Mesa driver, and Vulkan runtime. Missing or
+ambiguous identity, a model mismatch, or a served context smaller than the
+profile fails preflight.
+
 The stub is the CI path and does not install or resolve dependencies. Live mode
 first reads `/v1/models` and refuses to send fixture prompts unless the exact
 requested model identifier is advertised. To run the same native client

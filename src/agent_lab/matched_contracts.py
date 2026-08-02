@@ -69,6 +69,7 @@ def preflight_pair_contract(
     fault_profile: str,
     source_commit: str,
     source_tree_sha256: str,
+    execution_provenance_by_lane: dict[FrameworkLane, dict[str, Any]],
     world_manifest_sha256: str,
 ) -> dict[str, Any]:
     """Fail closed on matched-contract drift before either paired lane starts."""
@@ -86,6 +87,20 @@ def preflight_pair_contract(
             raise ValueError(f"{lane.value} runner normalized topology differs within {track}")
 
     request_policy = matched_effective_request_policy(model, left_lane, right_lane)
+    left_execution = execution_provenance_by_lane[left_lane]
+    right_execution = execution_provenance_by_lane[right_lane]
+    for lane, execution in (
+        (left_lane, left_execution),
+        (right_lane, right_execution),
+    ):
+        frozen_hash = execution.get("provenance_sha256")
+        snapshot_payload = {
+            key: value for key, value in execution.items() if key != "provenance_sha256"
+        }
+        if frozen_hash != sha256_payload(snapshot_payload):
+            raise ValueError(f"{lane.value} execution provenance hash is invalid")
+    if left_execution != right_execution:
+        raise ValueError(f"effective inference execution provenance differs within {track}")
 
     snapshot = {
         "schema_version": "0.1.0",
@@ -102,6 +117,7 @@ def preflight_pair_contract(
             "fault_profile": fault_profile,
             "source_commit": source_commit,
             "source_tree_sha256": source_tree_sha256,
+            "execution_provenance": left_execution,
             "world_manifest_sha256": world_manifest_sha256,
             "contract_hashes": expected_contract_hashes,
         },
@@ -110,5 +126,6 @@ def preflight_pair_contract(
         "completion_schema_sha256": expected_contract_hashes["artifact_schemas_sha256"],
         "effective_request_policy": request_policy,
         "effective_request_policy_sha256": request_policy["policy_sha256"],
+        "execution_provenance_sha256": left_execution["provenance_sha256"],
     }
     return {**snapshot, "snapshot_sha256": sha256_payload(snapshot)}
