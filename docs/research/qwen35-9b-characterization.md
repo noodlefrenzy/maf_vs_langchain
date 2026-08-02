@@ -59,6 +59,11 @@ generated-token event for TTFT and throughput without retaining its text.
 The next run also showed that the cancellation probe's configured 8,192-token
 cap was added to its calibrated 2,048-token prompt at the 8K slice. Cancellation
 now records and caps generation to the exact remaining served context.
+Finally, vLLM correctly rejected invalid JSON embedded in a historical OpenAI
+`tool_calls` object before inference. The recovery fixture now mirrors the
+reachable client path: preserve the malformed output as inert transcript text,
+record the parse failure in the next user correction, and require one valid
+replacement tool call.
 
 The launcher preserves the complete vLLM log beside each report as
 `*-server.log` before removing only its named container. Reports and logs use

@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO, Literal
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from agent_lab.config import load_model_profile
@@ -58,8 +59,12 @@ def _post_json(url: str, payload: dict[str, Any], timeout: float) -> dict[str, A
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - configured loopback
-        value = json.load(response)
+    try:
+        with urlopen(request, timeout=timeout) as response:  # noqa: S310 - configured loopback
+            value = json.load(response)
+    except HTTPError as exc:
+        detail = exc.read(4096).decode("utf-8", errors="replace")
+        raise ValueError(f"endpoint returned HTTP {exc.code}: {detail}") from exc
     if not isinstance(value, dict):
         raise ValueError(f"endpoint returned non-object JSON: {url}")
     return value
@@ -577,7 +582,7 @@ def verify_malformed_tool_recovery(
     *,
     requester: Callable[[str, dict[str, Any], float], dict[str, Any]] = _post_json,
 ) -> dict[str, Any]:
-    """Feed a malformed prior call plus tool error and require one corrected call."""
+    """Feed inert malformed-call evidence plus a correction and require a valid call."""
 
     malformed_arguments = '{"incident_id":'
     messages: list[dict[str, Any]] = [
@@ -588,35 +593,17 @@ def verify_malformed_tool_recovery(
         {"role": "user", "content": "Look up incident INC-42."},
         {
             "role": "assistant",
-            "content": "",
-            "tool_calls": [
-                {
-                    "id": "malformed_call_1",
-                    "type": "function",
-                    "function": {
-                        "name": "lookup_incident",
-                        "arguments": malformed_arguments,
-                    },
-                }
-            ],
-        },
-        {
-            "role": "tool",
-            "tool_call_id": "malformed_call_1",
-            "content": json.dumps(
-                {
-                    "ok": False,
-                    "error": {
-                        "code": "invalid_arguments",
-                        "message": "arguments were not valid JSON",
-                    },
-                },
-                sort_keys=True,
+            "content": (
+                "Rejected malformed tool output: "
+                f'{{"name":"lookup_incident","arguments":{malformed_arguments}'
             ),
         },
         {
             "role": "user",
-            "content": "Retry lookup_incident once with valid JSON for incident INC-42.",
+            "content": (
+                "The prior tool output could not be parsed because its arguments were invalid "
+                "JSON. Retry lookup_incident once with valid JSON for incident INC-42."
+            ),
         },
     ]
     payload = {
@@ -652,6 +639,9 @@ def verify_malformed_tool_recovery(
     return {
         "passed": passed,
         "corrected_calls": corrected,
+        "malformed_evidence_sha256": hashlib.sha256(
+            malformed_arguments.encode("utf-8")
+        ).hexdigest(),
         "reasoning_channel_present": bool(
             message.get("reasoning") or message.get("reasoning_content")
         ),
