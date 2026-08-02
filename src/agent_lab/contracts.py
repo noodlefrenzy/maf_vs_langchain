@@ -10,6 +10,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent_lab.scenario import MitigationActionId
+
 SCHEMA_VERSION = "0.1.0"
 Sha256Hex = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 GitCommit = Annotated[str, Field(pattern=r"^[a-f0-9]{40}$")]
@@ -201,6 +203,17 @@ class NativeTracingProfile(BaseModel):
         return self
 
 
+class InferenceRuntimeProfile(BaseModel):
+    """How measured-run preflight identifies the model-serving compute host."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    host: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]+$")
+    compute_backend: Literal["auto", "nvidia", "vulkan"] = "auto"
+    process_name: str = Field(default="llama-server", pattern=r"^[A-Za-z0-9._-]+$")
+    command_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+
+
 class ExperimentSpec(BaseModel):
     """Validated experiment configuration loaded from TOML."""
 
@@ -217,6 +230,7 @@ class ExperimentSpec(BaseModel):
     fault_profile: Literal["none", "standard", "adversarial"]
     budget: Budget
     tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
+    inference_runtime: InferenceRuntimeProfile = Field(default_factory=InferenceRuntimeProfile)
     capture_sensitive: bool = False
     capture_reasoning: Literal[False] = False
 
@@ -242,6 +256,8 @@ class RunManifest(BaseModel):
     dependency_lock_sha256: Sha256Hex
     prompt_bundle_sha256: Sha256Hex
     tool_catalog_sha256: Sha256Hex
+    effective_request_policy_sha256: Sha256Hex
+    execution_provenance_sha256: Sha256Hex
     world_manifest_sha256: Sha256Hex
     started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     host_fingerprint: dict[str, str] = Field(default_factory=dict)
@@ -280,6 +296,7 @@ class ApprovalRequest(BaseModel):
     schema_version: Literal["0.1.0"] = SCHEMA_VERSION
     request_id: str
     case_id: str
+    proposed_action_id: MitigationActionId
     proposed_action: str
     rationale: str
     evidence_ids: list[str] = Field(min_length=1)
@@ -299,17 +316,27 @@ class ApprovalRecord(BaseModel):
     decision: ApprovalDecision
     decided_by: str
     decided_tick: int = Field(ge=0)
+    action_id_to_execute: MitigationActionId | None = None
     action_to_execute: str | None = None
     approval_token: str | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_decision_payload(self) -> ApprovalRecord:
         if self.decision in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:
-            if not self.action_to_execute or not self.approval_token:
+            if (
+                not self.action_id_to_execute
+                or not self.action_to_execute
+                or not self.approval_token
+            ):
                 raise ValueError(
-                    "approved or edited decisions require an action and approval token"
+                    "approved or edited decisions require an action ID, description, "
+                    "and approval token"
                 )
-        elif self.action_to_execute is not None or self.approval_token is not None:
+        elif (
+            self.action_id_to_execute is not None
+            or self.action_to_execute is not None
+            or self.approval_token is not None
+        ):
             raise ValueError("rejected decisions cannot authorize an action")
         return self
 
@@ -355,6 +382,7 @@ class IncidentReport(BaseModel):
     root_cause: str
     confidence: float = Field(ge=0, le=1)
     evidence: list[EvidenceItem] = Field(min_length=2)
+    mitigation_action_id: MitigationActionId
     mitigation: str
     mitigation_request_id: str | None = None
     approval_decision: ApprovalDecision | None = None
@@ -377,6 +405,8 @@ class RunTerminal(BaseModel):
     used_tool_calls: int = Field(ge=0)
     used_output_tokens: int = Field(ge=0)
     elapsed_seconds: float = Field(ge=0)
+    execution_started: bool = True
+    event_stream_complete: bool = True
 
 
 class WorldEvaluationState(BaseModel):
@@ -387,6 +417,7 @@ class WorldEvaluationState(BaseModel):
     schema_version: Literal["0.1.0"] = SCHEMA_VERSION
     case_id: str
     applied_request_id: str | None = None
+    applied_action_id: MitigationActionId | None = None
     applied_action: str | None = None
     mitigation_effective: bool
     recovery_verified: bool

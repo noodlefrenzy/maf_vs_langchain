@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field
 
+from agent_lab.scenario import MitigationActionId
 from agent_lab.tool_catalog import (
     ApprovalRequest,
     ChangeDetailResult,
@@ -184,12 +185,18 @@ def build_server(
 
         @server.tool(description=_description("request_mitigation"))
         def request_mitigation(
+            proposed_action_id: MitigationActionId,
             proposed_action: str,
             rationale: str,
             evidence_ids: Annotated[list[str], Field(min_length=2)],
         ) -> ApprovalRequest:
             return ApprovalRequest.model_validate(
-                world.request_mitigation(proposed_action, rationale, evidence_ids)
+                world.request_mitigation(
+                    proposed_action_id,
+                    proposed_action,
+                    rationale,
+                    evidence_ids,
+                )
             )
 
         @server.tool(description=_description("apply_mitigation"))

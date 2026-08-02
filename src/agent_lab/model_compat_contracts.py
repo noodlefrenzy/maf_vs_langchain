@@ -7,12 +7,26 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from agent_lab.contracts import ModelProfile
+
 MODEL_NAME = "agent-lab-protocol-stub"
 TEMPERATURE = 0.2
 TOP_P = 0.9
+TOP_K = 23
+MIN_P = 0.07
+PRESENCE_PENALTY = 0.15
+REPETITION_PENALTY = 1.1
 MAX_OUTPUT_TOKENS = 64
+CONTEXT_WINDOW_TOKENS = 4096
 REQUEST_TIMEOUT_SECONDS = 5.0
 SEED = 1729
+THINKING = False
+MODEL_ACTOR_PROBES = (
+    "workflow_specialist",
+    "workflow_commander",
+    "harness_specialist",
+    "harness_commander",
+)
 
 
 class ModelFixture(StrEnum):
@@ -68,10 +82,36 @@ def explicit_request_settings() -> dict[str, Any]:
     return {
         "temperature": TEMPERATURE,
         "top_p": TOP_P,
+        "top_k": TOP_K,
+        "min_p": MIN_P,
+        "presence_penalty": PRESENCE_PENALTY,
+        "repetition_penalty": REPETITION_PENALTY,
         "max_completion_tokens": MAX_OUTPUT_TOKENS,
+        "context_window_tokens": CONTEXT_WINDOW_TOKENS,
         "seed": SEED,
+        "thinking": THINKING,
         "request_timeout_seconds": REQUEST_TIMEOUT_SECONDS,
     }
+
+
+def compatibility_model_profile(base_url: str, model: str) -> ModelProfile:
+    """Build the non-default profile exercised by both native wire probes."""
+
+    return ModelProfile(
+        name=model,
+        base_url=base_url,
+        temperature=TEMPERATURE,
+        top_p=TOP_P,
+        top_k=TOP_K,
+        min_p=MIN_P,
+        presence_penalty=PRESENCE_PENALTY,
+        repetition_penalty=REPETITION_PENALTY,
+        max_output_tokens=MAX_OUTPUT_TOKENS,
+        context_window_tokens=CONTEXT_WINDOW_TOKENS,
+        request_timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+        seed=SEED,
+        thinking=THINKING,
+    )
 
 
 def openai_tool_schemas() -> list[dict[str, Any]]:

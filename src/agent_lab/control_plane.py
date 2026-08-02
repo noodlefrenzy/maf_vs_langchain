@@ -9,6 +9,7 @@ import os
 import random
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextlib import suppress
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -105,13 +106,17 @@ class ControlPlane:
         self,
         runs_root: Path,
         *,
-        graceful_shutdown_seconds: float = 1.0,
+        graceful_shutdown_seconds: float = 5.0,
+        protocol_line_limit_bytes: int = 1024 * 1024,
         environment: Mapping[str, str] | None = None,
     ) -> None:
         if graceful_shutdown_seconds <= 0:
             raise ValueError("graceful_shutdown_seconds must be positive")
+        if protocol_line_limit_bytes < 1024:
+            raise ValueError("protocol_line_limit_bytes must be at least 1024")
         self.runs_root = runs_root.resolve()
         self.graceful_shutdown_seconds = graceful_shutdown_seconds
+        self.protocol_line_limit_bytes = protocol_line_limit_bytes
         self.environment = dict(environment) if environment is not None else _safe_environment()
 
     def allocate_run(self, manifest: RunManifest) -> tuple[RunBundle, RunPaths]:
@@ -182,6 +187,7 @@ class ControlPlane:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=self.protocol_line_limit_bytes,
                 env={
                     **self.environment,
                     "AGENT_LAB_RUN_ID": str(request.manifest.run_id),
@@ -206,6 +212,8 @@ class ControlPlane:
                 used_tool_calls=0,
                 used_output_tokens=0,
                 elapsed_seconds=time.monotonic() - started,
+                execution_started=False,
+                event_stream_complete=False,
             )
             bundle.write_terminal(terminal)
             return RunnerProcessResult(
@@ -226,16 +234,30 @@ class ControlPlane:
         expected_event_sequence = 0
         awaiting_approval = False
         finalization_sent = False
+        runner_terminal: TerminalMessage | None = None
+        execution_started = False
+        event_stream_complete = False
+        stdout_line_failed = False
         deadline = started + request.manifest.budget.wall_clock_seconds
 
-        await self._send(process, PrepareCommand(request=request))
+        try:
+            await self._send(process, PrepareCommand(request=request))
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            terminal_status = TerminalStatus.RUNNER_FAILURE
+            terminal_reason = f"prepare_command_failed:{type(exc).__name__}"
         try:
             while terminal_status is None:
-                wait_result, line = await self._next_line(
-                    process,
-                    deadline=deadline,
-                    cancel_event=cancel_event,
-                )
+                try:
+                    wait_result, line = await self._next_line(
+                        process,
+                        deadline=deadline,
+                        cancel_event=cancel_event,
+                    )
+                except ValueError:
+                    terminal_status = TerminalStatus.RUNNER_FAILURE
+                    terminal_reason = "runner_protocol_line_too_large"
+                    stdout_line_failed = True
+                    break
                 if wait_result == "timeout":
                     if awaiting_approval:
                         terminal_status = TerminalStatus.APPROVAL_TIMEOUT
@@ -278,6 +300,10 @@ class ControlPlane:
                         or prepared.lane is not request.manifest.lane
                         or prepared.effective_prompt_sha256 != request.manifest.prompt_bundle_sha256
                         or prepared.tool_catalog_sha256 != request.manifest.tool_catalog_sha256
+                        or prepared.effective_request_policy_sha256
+                        != request.manifest.effective_request_policy_sha256
+                        or prepared.execution_provenance_sha256
+                        != request.manifest.execution_provenance_sha256
                     ):
                         terminal_status = TerminalStatus.INVALID_PROVENANCE
                         terminal_reason = "prepared_run_provenance_mismatch"
@@ -286,10 +312,16 @@ class ControlPlane:
                         prepared.model_dump_json(indent=2) + "\n",
                         encoding="utf-8",
                     )
-                    await self._send(
-                        process,
-                        StartCommand(run_id=request.manifest.run_id),
-                    )
+                    try:
+                        await self._send(
+                            process,
+                            StartCommand(run_id=request.manifest.run_id),
+                        )
+                    except (BrokenPipeError, ConnectionResetError) as exc:
+                        terminal_status = TerminalStatus.RUNNER_FAILURE
+                        terminal_reason = f"start_command_failed:{type(exc).__name__}"
+                        break
+                    execution_started = True
                 elif isinstance(message, UsageMessage):
                     if prepared is None:
                         terminal_status = TerminalStatus.RUNNER_FAILURE
@@ -343,6 +375,7 @@ class ControlPlane:
                                         decision=approval.decision,
                                         decided_by=approval.decided_by,
                                         decided_tick=approval.decided_tick,
+                                        action_id_to_execute=approval.action_id_to_execute,
                                         action_to_execute=approval.action_to_execute,
                                         approval_token=approval.approval_token,
                                     ),
@@ -396,6 +429,7 @@ class ControlPlane:
                         break
                     violation = _usage_violation(usage, message.usage, request.manifest)
                     usage = message.usage
+                    runner_terminal = message
                     if violation:
                         terminal_status = TerminalStatus.BUDGET_EXHAUSTED
                         terminal_reason = violation
@@ -410,19 +444,59 @@ class ControlPlane:
                         awaiting_approval = True
                     continue
 
-            graceful = await self._stop_process(
-                process,
-                run_id=request.manifest.run_id,
-                cancel_reason=(
-                    None
-                    if terminal_status
-                    in {
-                        TerminalStatus.COMPLETED,
-                        TerminalStatus.APPROVAL_REJECTED,
-                    }
-                    else terminal_reason
-                ),
-            )
+            if stdout_line_failed:
+                raw_drain_task = asyncio.create_task(process.stdout.read())
+                graceful = await self._stop_process(
+                    process,
+                    run_id=request.manifest.run_id,
+                    cancel_status=terminal_status,
+                    cancel_reason=terminal_reason,
+                )
+                await asyncio.gather(raw_drain_task, return_exceptions=True)
+            else:
+                drain_task = asyncio.create_task(
+                    self._drain_runner_output(
+                        process,
+                        request=request,
+                        usage=usage,
+                        expected_event_sequence=expected_event_sequence,
+                        prepared=prepared,
+                        runner_terminal=runner_terminal,
+                    )
+                )
+                graceful = await self._stop_process(
+                    process,
+                    run_id=request.manifest.run_id,
+                    cancel_status=(
+                        None
+                        if terminal_status
+                        in {
+                            TerminalStatus.COMPLETED,
+                            TerminalStatus.APPROVAL_REJECTED,
+                        }
+                        else terminal_status
+                    ),
+                    cancel_reason=(
+                        None
+                        if terminal_status
+                        in {
+                            TerminalStatus.COMPLETED,
+                            TerminalStatus.APPROVAL_REJECTED,
+                        }
+                        else terminal_reason
+                    ),
+                )
+                usage, _, prepared, runner_terminal, stream_error = await drain_task
+                event_stream_complete = runner_terminal is not None and stream_error is None
+                if stream_error is not None:
+                    terminal_status = TerminalStatus.INVALID_PROVENANCE
+                    terminal_reason = f"runner_shutdown_stream_invalid:{stream_error}"
+                elif runner_terminal is not None and (
+                    runner_terminal.status is not terminal_status
+                    or runner_terminal.reason != terminal_reason
+                ):
+                    terminal_status = TerminalStatus.INVALID_PROVENANCE
+                    terminal_reason = "runner_terminal_disagrees_with_control_plane"
         finally:
             if process.returncode is None:
                 process.kill()
@@ -440,6 +514,8 @@ class ControlPlane:
             used_tool_calls=usage.tool_calls,
             used_output_tokens=usage.output_tokens,
             elapsed_seconds=elapsed,
+            execution_started=execution_started,
+            event_stream_complete=event_stream_complete,
         )
         bundle.write_terminal(terminal)
         return RunnerProcessResult(
@@ -471,16 +547,117 @@ class ControlPlane:
         )
         for task in pending:
             task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         if not done:
             return "timeout", b""
+        if line_task in done:
+            return "line", line_task.result()
         if cancel_task is not None and cancel_task in done and cancel_task.result():
-            line_task.cancel()
             return "cancelled", b""
-        return "line", line_task.result()
+        raise RuntimeError("runner wait completed without a line, timeout, or cancellation")
+
+    async def _drain_runner_output(
+        self,
+        process: asyncio.subprocess.Process,
+        *,
+        request: RunRequest,
+        usage: RunnerUsage,
+        expected_event_sequence: int,
+        prepared: PreparedRun | None,
+        runner_terminal: TerminalMessage | None,
+    ) -> tuple[
+        RunnerUsage,
+        int,
+        PreparedRun | None,
+        TerminalMessage | None,
+        str | None,
+    ]:
+        """Drain the runner's bounded shutdown tail without invoking new handlers."""
+
+        assert process.stdout is not None
+        stream_error: str | None = None
+        while True:
+            try:
+                line = await process.stdout.readline()
+            except Exception as exc:
+                return (
+                    usage,
+                    expected_event_sequence,
+                    prepared,
+                    runner_terminal,
+                    f"read_failed:{type(exc).__name__}",
+                )
+            if not line:
+                break
+            try:
+                message = decode_runner_message(line)
+            except Exception as exc:
+                stream_error = f"invalid_message:{type(exc).__name__}"
+                continue
+            message_run_id = _message_run_id(message)
+            if message_run_id is not None and message_run_id != request.manifest.run_id:
+                stream_error = "run_id_mismatch"
+                continue
+            if isinstance(message, UsageMessage):
+                if not message.usage.is_monotonic_from(usage):
+                    stream_error = "usage_counters_regressed"
+                    continue
+                usage = message.usage
+            elif isinstance(message, EventMessage):
+                event = message.event
+                if (
+                    event.run_id != request.manifest.run_id
+                    or event.lane is not request.manifest.lane
+                    or event.sequence != expected_event_sequence
+                ):
+                    stream_error = "invalid_event_sequence_or_identity"
+                    continue
+                with (request.paths.bundle / "events.jsonl").open(
+                    "a",
+                    encoding="utf-8",
+                ) as handle:
+                    handle.write(event.model_dump_json() + "\n")
+                expected_event_sequence += 1
+            elif isinstance(message, TerminalMessage):
+                if runner_terminal is not None:
+                    stream_error = "terminal_repeated"
+                    continue
+                if not message.usage.is_monotonic_from(usage):
+                    stream_error = "terminal_usage_regressed"
+                    continue
+                usage = message.usage
+                runner_terminal = message
+            elif isinstance(message, ErrorMessage):
+                stream_error = f"runner_protocol_error:{message.error}"
+            elif isinstance(message, PreparedMessage):
+                if prepared is not None:
+                    stream_error = "prepared_repeated_during_shutdown"
+                    continue
+                prepared = message.prepared
+                if (
+                    prepared.run_id != request.manifest.run_id
+                    or prepared.lane is not request.manifest.lane
+                    or prepared.effective_prompt_sha256 != request.manifest.prompt_bundle_sha256
+                    or prepared.tool_catalog_sha256 != request.manifest.tool_catalog_sha256
+                    or prepared.effective_request_policy_sha256
+                    != request.manifest.effective_request_policy_sha256
+                    or prepared.execution_provenance_sha256
+                    != request.manifest.execution_provenance_sha256
+                ):
+                    stream_error = "prepared_run_provenance_mismatch"
+                    continue
+                (request.paths.bundle / "native" / "prepared-run.json").write_text(
+                    prepared.model_dump_json(indent=2) + "\n",
+                    encoding="utf-8",
+                )
+            elif isinstance(message, HeartbeatMessage):
+                continue
+        return usage, expected_event_sequence, prepared, runner_terminal, stream_error
 
     async def _send(self, process: asyncio.subprocess.Process, command: BaseModel) -> None:
         if process.stdin is None or process.stdin.is_closing():
-            return
+            raise BrokenPipeError("runner command stream is closed")
         process.stdin.write(encode_protocol_message(command))
         await process.stdin.drain()
 
@@ -489,16 +666,21 @@ class ControlPlane:
         process: asyncio.subprocess.Process,
         *,
         run_id,
+        cancel_status: TerminalStatus | None,
         cancel_reason: str | None,
     ) -> bool:
         if process.returncode is not None:
             return True
         if cancel_reason is not None:
-            await self._send(
-                process,
-                CancelCommand(run_id=run_id, reason=cancel_reason),
-            )
-        await self._send(process, ShutdownCommand(run_id=run_id))
+            if cancel_status is None:
+                raise ValueError("cancel status is required with a cancellation reason")
+            with suppress(BrokenPipeError, ConnectionResetError):
+                await self._send(
+                    process,
+                    CancelCommand(run_id=run_id, status=cancel_status, reason=cancel_reason),
+                )
+        with suppress(BrokenPipeError, ConnectionResetError):
+            await self._send(process, ShutdownCommand(run_id=run_id))
         if process.stdin is not None:
             process.stdin.close()
         try:

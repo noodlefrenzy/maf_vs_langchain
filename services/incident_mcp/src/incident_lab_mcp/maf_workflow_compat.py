@@ -23,6 +23,7 @@ from agent_lab.contracts import (
     TerminalStatus,
 )
 from agent_lab.control_plane import ControlPlane
+from agent_lab.model_request_policy import effective_request_policy
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 from incident_lab_mcp.http_auth import RunCredentialSigner, RunWorldRegistry
 from incident_lab_mcp.http_service import build_http_app, issue_endpoint_credentials
@@ -80,6 +81,17 @@ async def run_live_maf_workflow(base_url: str, model: str) -> dict[str, object]:
         }
         with tempfile.TemporaryDirectory(prefix="agent-lab-maf-live-") as raw_run_root:
             hashes = contract_bundle_hashes()
+            profile = ModelProfile(
+                name=model,
+                base_url=base_url,
+                temperature=0.2,
+                top_p=0.9,
+                max_output_tokens=2048,
+                context_window_tokens=65536,
+                request_timeout_seconds=120,
+                seed=1729,
+                thinking=False,
+            )
             manifest = RunManifest(
                 run_id=receipt.left.run_id,
                 experiment_id="maf_live_investigation",
@@ -88,17 +100,7 @@ async def run_live_maf_workflow(base_url: str, model: str) -> dict[str, object]:
                 scenario_generator_version="0.1.0",
                 scenario_seed=42,
                 repetition=0,
-                model=ModelProfile(
-                    name=model,
-                    base_url=base_url,
-                    temperature=0.2,
-                    top_p=0.9,
-                    max_output_tokens=2048,
-                    context_window_tokens=65536,
-                    request_timeout_seconds=120,
-                    seed=1729,
-                    thinking=False,
-                ),
+                model=profile,
                 budget=Budget(
                     wall_clock_seconds=300,
                     model_calls=24,
@@ -112,6 +114,11 @@ async def run_live_maf_workflow(base_url: str, model: str) -> dict[str, object]:
                 dependency_lock_sha256="0" * 64,
                 prompt_bundle_sha256=hashes["prompt_bundle_sha256"],
                 tool_catalog_sha256=hashes["tool_catalog_sha256"],
+                effective_request_policy_sha256=effective_request_policy(
+                    profile,
+                    FrameworkLane.MAF_WORKFLOW,
+                )["policy_sha256"],
+                execution_provenance_sha256="0" * 64,
                 world_manifest_sha256=receipt.left.world_manifest_sha256,
             )
             control_plane = ControlPlane(Path(raw_run_root), graceful_shutdown_seconds=2)
@@ -173,6 +180,7 @@ async def _run_maf_protocol(
             str(event.payload["request_id"]),
             ApprovalDecision.EDIT,
             decided_by="maf-live-compat-reviewer",
+            edited_action_id=world.incident.correct_mitigation_id,
             edited_action=SEED_42_RECOVERY_ACTION,
         )
 

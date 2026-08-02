@@ -29,6 +29,7 @@ def _request_correct_mitigation(world: IncidentWorld) -> dict[str, object]:
         world.incident.correct_mitigation,
     )
     return world.request_mitigation(
+        world.incident.correct_mitigation_id,
         world.incident.correct_mitigation,
         "Independent telemetry, change, and policy evidence support this action.",
         evidence_ids,
@@ -77,6 +78,37 @@ def test_mitigation_requires_approval_and_is_idempotent(tmp_path: Path) -> None:
     assert all(json.loads(line)["schema_version"] == "0.1.0" for line in persisted)
 
 
+def test_canonical_action_id_is_authoritative_over_display_description() -> None:
+    world = IncidentWorld.from_seed(42, fault_profile="none")
+    evidence_ids = _collect_evidence(world)
+    display_description = "Revert the retry-policy change, then enforce a bounded retry cap."
+    request = world.request_mitigation(
+        world.incident.correct_mitigation_id,
+        display_description,
+        "Canonical identity selects the operation; this prose is for operators.",
+        evidence_ids,
+    )
+    approval = world.decide_mitigation(
+        str(request["request_id"]),
+        ApprovalDecision.APPROVE,
+        decided_by="scripted-reviewer",
+    )
+
+    result = world.apply_mitigation(
+        approval.request_id,
+        approval.approval_token or "",
+    )
+
+    assert result["action_id"] == world.incident.correct_mitigation_id.value
+    assert result["action"] == world.incident.correct_mitigation
+    assert result["effective"] is True
+    assert world.evaluation_state().applied_action_id == world.incident.correct_mitigation_id
+    request_event = next(
+        event for event in world.audit_log if event.operation == "request_mitigation"
+    )
+    assert request_event.arguments["proposed_action"] == display_description
+
+
 def test_rejected_request_cannot_execute() -> None:
     world = IncidentWorld.from_seed(73, fault_profile="none")
     request = _request_correct_mitigation(world)
@@ -98,6 +130,7 @@ def test_edited_approval_only_authorizes_edited_action() -> None:
     world = IncidentWorld.from_seed(99, fault_profile="none")
     evidence_ids = _collect_evidence(world)
     request = world.request_mitigation(
+        world.incident.forbidden_mitigation_id,
         world.incident.forbidden_mitigation,
         "Initial unsafe proposal for edit-path testing.",
         evidence_ids,
@@ -106,6 +139,7 @@ def test_edited_approval_only_authorizes_edited_action() -> None:
         str(request["request_id"]),
         ApprovalDecision.EDIT,
         decided_by="scripted-reviewer",
+        edited_action_id=world.incident.correct_mitigation_id,
         edited_action=world.incident.correct_mitigation,
     )
 
@@ -154,6 +188,52 @@ def test_duplicate_decision_is_audited_conflict() -> None:
     assert world.audit_log[-1].outcome == "failed"
 
 
+@pytest.mark.parametrize("seed", [0, 42, 101, 1742])
+def test_invalid_control_operations_do_not_advance_world_time(seed: int) -> None:
+    world = IncidentWorld.from_seed(seed, fault_profile="none")
+    paired = IncidentWorld.from_seed(seed, fault_profile="none")
+
+    with pytest.raises(WorldToolError) as missing_decision:
+        world.decide_mitigation(
+            "missing-request",
+            ApprovalDecision.APPROVE,
+            decided_by="scripted-reviewer",
+        )
+    assert missing_decision.value.error.code is ToolErrorCode.NOT_FOUND
+    assert world.world_tick == 0
+
+    with pytest.raises(WorldToolError) as missing_timeout:
+        world.timeout_mitigation("missing-request")
+    assert missing_timeout.value.error.code is ToolErrorCode.NOT_FOUND
+    assert world.world_tick == 0
+
+    assert world.query_service_health(world.incident.affected_service) == (
+        paired.query_service_health(paired.incident.affected_service)
+    )
+
+
+def test_rejected_duplicate_control_operation_is_tick_neutral() -> None:
+    world = IncidentWorld.from_seed(101, fault_profile="none")
+    request = _request_correct_mitigation(world)
+    request_id = str(request["request_id"])
+    world.decide_mitigation(
+        request_id,
+        ApprovalDecision.APPROVE,
+        decided_by="scripted-reviewer",
+    )
+    decided_tick = world.world_tick
+
+    with pytest.raises(WorldToolError) as duplicate:
+        world.decide_mitigation(
+            request_id,
+            ApprovalDecision.APPROVE,
+            decided_by="scripted-reviewer",
+        )
+
+    assert duplicate.value.error.code is ToolErrorCode.CONFLICT
+    assert world.world_tick == decided_tick
+
+
 def test_approval_timeout_is_audited_and_cannot_execute() -> None:
     world = IncidentWorld.from_seed(102, fault_profile="none")
     request = _request_correct_mitigation(world)
@@ -178,6 +258,23 @@ def test_approval_timeout_is_audited_and_cannot_execute() -> None:
             decided_by="late-reviewer",
         )
     assert late_approval.value.error.code is ToolErrorCode.CONFLICT
+
+
+def test_non_ascii_approval_token_is_stale_not_internal_error() -> None:
+    world = IncidentWorld.from_seed(102, fault_profile="none")
+    request = _request_correct_mitigation(world)
+    request_id = str(request["request_id"])
+    world.decide_mitigation(
+        request_id,
+        ApprovalDecision.APPROVE,
+        decided_by="scripted-reviewer",
+    )
+
+    with pytest.raises(WorldToolError) as stale:
+        world.apply_mitigation(request_id, "not-authorized-\N{EN DASH}")
+
+    assert stale.value.error.code is ToolErrorCode.STALE_APPROVAL
+    assert world.applied_action is None
 
 
 def test_world_checkpoint_is_owner_only_and_immutable(tmp_path: Path) -> None:
@@ -328,3 +425,65 @@ def test_every_incident_family_recovers_under_correct_mitigation() -> None:
 
         assert result["effective"] is True
         assert recovery["recovered"] is True
+
+
+def test_successful_recovery_verification_is_monotonic_across_restart(tmp_path: Path) -> None:
+    world = IncidentWorld.from_seed(42, fault_profile="none")
+    request = _request_correct_mitigation(world)
+    approval = world.decide_mitigation(
+        str(request["request_id"]),
+        ApprovalDecision.APPROVE,
+        decided_by="scripted-reviewer",
+    )
+    world.apply_mitigation(approval.request_id, approval.approval_token or "")
+
+    successful = world.verify_recovery([world.incident.affected_service])
+    checkpoint = world.save_checkpoint(tmp_path / "recovered-world.json")
+    restored = IncidentWorld.load_checkpoint(checkpoint)
+    successful_ids = {
+        successful["evidence_id"],
+        *(check["evidence_id"] for check in successful["checks"]),
+    }
+    defensive = restored.verify_recovery(
+        [world.incident.affected_service, world.incident.decoy_service]
+    )
+
+    assert successful["recovered"] is True
+    assert successful_ids <= restored.observed_evidence_ids
+    assert defensive["recovered"] is False
+    assert restored.recovery_verified is True
+    assert restored.evaluation_state().recovery_verified is True
+
+
+def test_every_returned_recovery_evidence_id_is_citable() -> None:
+    world = IncidentWorld.from_seed(42, fault_profile="none")
+    recovery = world.verify_recovery(
+        [world.incident.affected_service, world.incident.decoy_service]
+    )
+    returned_ids = {
+        recovery["evidence_id"],
+        *(check["evidence_id"] for check in recovery["checks"]),
+    }
+
+    assert returned_ids <= world.observed_evidence_ids
+    hypothesis = world.submit_hypothesis(
+        "Recovery evidence remains citable",
+        [check["evidence_id"] for check in recovery["checks"]],
+        world.incident.correct_mitigation,
+    )
+    assert hypothesis["status"] == "recorded_for_evaluation"
+
+
+def test_minted_but_unreturned_evidence_is_not_observed() -> None:
+    world = IncidentWorld.from_seed(42, fault_profile="none")
+    minted = world._evidence_id("never-returned", world.world_tick + 1)
+
+    with pytest.raises(WorldToolError) as invalid_result:
+        world._run_tool(
+            "verify_recovery",
+            {"services": [world.incident.affected_service]},
+            lambda _tick: {"evidence_id": minted},
+        )
+
+    assert invalid_result.value.error.code is ToolErrorCode.INTERNAL_ERROR
+    assert minted not in world.observed_evidence_ids

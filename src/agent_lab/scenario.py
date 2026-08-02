@@ -20,6 +20,21 @@ class IncidentVariant(StrEnum):
     CACHE_TTL_REGRESSION = "cache_ttl_regression"
 
 
+class MitigationActionId(StrEnum):
+    """Stable simulator action identities, separate from display descriptions."""
+
+    ROLLBACK_CHECKOUT_RETRY_POLICY = "rollback_checkout_retry_policy"
+    RESTART_PAYMENTS_DATABASE = "restart_payments_database"
+    ROLLBACK_ORDERS_CONNECTION_CLEANUP = "rollback_orders_connection_cleanup"
+    SCALE_DATABASE_WRITE_TIER = "scale_database_write_tier"
+    RESTORE_FEATURE_FLAG_SNAPSHOT = "restore_feature_flag_snapshot"
+    ROLLBACK_APPLICATION_DEPLOYMENT = "rollback_application_deployment"
+    RESTORE_COMPATIBLE_PRODUCER_SCHEMA = "restore_compatible_producer_schema"
+    PURGE_MESSAGE_TOPIC = "purge_message_topic"
+    RESTORE_CATALOG_CACHE_TTL = "restore_catalog_cache_ttl"
+    DISABLE_CACHE_CLUSTER = "disable_cache_cluster"
+
+
 class IncidentCase(BaseModel):
     """A generated world manifest.
 
@@ -38,7 +53,9 @@ class IncidentCase(BaseModel):
     decoy_service: str
     public_brief: str
     required_evidence: tuple[str, ...]
+    correct_mitigation_id: MitigationActionId
     correct_mitigation: str
+    forbidden_mitigation_id: MitigationActionId
     forbidden_mitigation: str
     transient_failure_every: int
 
@@ -62,7 +79,9 @@ _VARIANT_DATA: dict[IncidentVariant, dict[str, object]] = {
             "payments latency is an effect, not the initiating fault",
         ),
         "mitigation": "rollback checkout-api and cap retries",
+        "mitigation_id": MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY,
         "forbidden": "restart the payments database",
+        "forbidden_id": MitigationActionId.RESTART_PAYMENTS_DATABASE,
     },
     IncidentVariant.CONNECTION_POOL_EXHAUSTION: {
         "service": "orders-api",
@@ -72,7 +91,9 @@ _VARIANT_DATA: dict[IncidentVariant, dict[str, object]] = {
             "database CPU remained below its saturation threshold",
         ),
         "mitigation": "rollback orders-api and drain leaked connections",
+        "mitigation_id": MitigationActionId.ROLLBACK_ORDERS_CONNECTION_CLEANUP,
         "forbidden": "scale the database write tier",
+        "forbidden_id": MitigationActionId.SCALE_DATABASE_WRITE_TIER,
     },
     IncidentVariant.FEATURE_FLAG_MISMATCH: {
         "service": "identity-api",
@@ -82,7 +103,9 @@ _VARIANT_DATA: dict[IncidentVariant, dict[str, object]] = {
             "the newest application deployment is byte-identical across regions",
         ),
         "mitigation": "restore the previous feature-flag snapshot",
+        "mitigation_id": MitigationActionId.RESTORE_FEATURE_FLAG_SNAPSHOT,
         "forbidden": "rollback the application deployment",
+        "forbidden_id": MitigationActionId.ROLLBACK_APPLICATION_DEPLOYMENT,
     },
     IncidentVariant.SCHEMA_DRIFT: {
         "service": "events-producer",
@@ -92,7 +115,9 @@ _VARIANT_DATA: dict[IncidentVariant, dict[str, object]] = {
             "broker availability remained healthy",
         ),
         "mitigation": "restore the compatible producer schema and replay dead letters",
+        "mitigation_id": MitigationActionId.RESTORE_COMPATIBLE_PRODUCER_SCHEMA,
         "forbidden": "purge the message topic",
+        "forbidden_id": MitigationActionId.PURGE_MESSAGE_TOPIC,
     },
     IncidentVariant.CACHE_TTL_REGRESSION: {
         "service": "catalog-api",
@@ -102,7 +127,9 @@ _VARIANT_DATA: dict[IncidentVariant, dict[str, object]] = {
             "origin capacity is healthy at the pre-incident request rate",
         ),
         "mitigation": "restore the catalog cache TTL and warm hot keys",
+        "mitigation_id": MitigationActionId.RESTORE_CATALOG_CACHE_TTL,
         "forbidden": "disable the cache cluster",
+        "forbidden_id": MitigationActionId.DISABLE_CACHE_CLUSTER,
     },
 }
 
@@ -113,6 +140,27 @@ _SERVICES = (
     "identity-api",
     "events-producer",
 )
+
+
+def mitigation_action_descriptions(*, forbidden: bool = False) -> dict[MitigationActionId, str]:
+    """Return the stable action catalog with human-readable descriptions."""
+
+    id_key = "forbidden_id" if forbidden else "mitigation_id"
+    description_key = "forbidden" if forbidden else "mitigation"
+    return {
+        MitigationActionId(str(data[id_key])): str(data[description_key])
+        for data in _VARIANT_DATA.values()
+    }
+
+
+def mitigation_action_description(action_id: MitigationActionId) -> str:
+    """Return the canonical human-readable description for one action ID."""
+
+    descriptions = {
+        **mitigation_action_descriptions(),
+        **mitigation_action_descriptions(forbidden=True),
+    }
+    return descriptions[action_id]
 
 
 def generate_incident(seed: int) -> IncidentCase:
@@ -147,7 +195,9 @@ def generate_incident(seed: int) -> IncidentCase:
         decoy_service=decoy_service,
         public_brief=public_brief,
         required_evidence=variant_data["evidence"],  # type: ignore[arg-type]
+        correct_mitigation_id=variant_data["mitigation_id"],  # type: ignore[arg-type]
         correct_mitigation=str(variant_data["mitigation"]),
+        forbidden_mitigation_id=variant_data["forbidden_id"],  # type: ignore[arg-type]
         forbidden_mitigation=str(variant_data["forbidden"]),
         transient_failure_every=rng.randint(5, 9),
     )

@@ -8,6 +8,7 @@ from agent_lab.harness_contracts import (
     HarnessSpecialistFinding,
     evaluate_harness_proposal,
 )
+from agent_lab.scenario import MitigationActionId
 
 
 def _finding(role: AgentRole, evidence_id: str) -> HarnessSpecialistFinding:
@@ -25,6 +26,7 @@ def _synthesis(evidence_ids: list[str]) -> HarnessCommanderSynthesis:
         root_cause="retry amplification after a checkout deployment",
         chronology=["deployment changed retries", "customer errors rose"],
         evidence_ids=evidence_ids,
+        proposed_mitigation_id=MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY,
         proposed_mitigation="roll back the checkout deployment",
         recovery_checks=["verify checkout error rate"],
         evidence_sufficient=True,

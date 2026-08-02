@@ -55,6 +55,7 @@ def test_incident_report_requires_multiple_evidence_items() -> None:
             root_cause="retry storm",
             confidence=0.8,
             evidence=[evidence],
+            mitigation_action_id="rollback_checkout_retry_policy",
             mitigation="rollback",
             approval_decision=ApprovalDecision.APPROVE,
             customer_impact="checkout errors",

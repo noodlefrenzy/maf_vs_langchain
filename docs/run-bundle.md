@@ -99,6 +99,10 @@ completeness matrix. `native/traces/spans.jsonl` is not a raw OTLP dump: it is a
 content-free structural projection with span identity, timing, status,
 instrumentation scope, operation family, and a small attribute allowlist.
 Prompts, messages, tool arguments, and tool results are excluded.
+Concurrent local span exports are serialized, and `trace-link.json` is written
+through an owner-only temporary file plus atomic rename before the runner's
+terminal protocol message. Validators therefore never observe a partially
+written trace link as a completed runner outcome.
 `native/tracing-profile.json` and its digest keep the held-constant tracing and
 capture inputs immutable without changing the frozen v0.1 run-manifest schema.
 
@@ -122,6 +126,36 @@ Default bundles do not include:
 Hashes and structural metadata make it possible to compare effective inputs
 without retaining sensitive content.
 
+## `terminal.json` and unhappy-path bundles
+
+`terminal.json` is written exactly once by the control plane. In addition to
+the authoritative status, reason, elapsed time, and usage counters, it records
+two lifecycle facts:
+
+- `execution_started` says whether the control plane successfully dispatched
+  `start`; and
+- `event_stream_complete` says whether it observed the runner's terminal
+  message after draining the bounded shutdown tail.
+
+The legal shapes for the nine terminal statuses are:
+
+| Status | Normalized event contract | Usage and artifact contract |
+| --- | --- | --- |
+| `completed` | Execution started; exactly one `run.started` and final `run.finished`; complete stream | Event-derived usage must equal terminal usage; all scorer artifacts and scores are required |
+| `approval_rejected` | Same complete lifecycle as `completed` | Exact usage; partial task artifacts may be declared but are not scored as completed work |
+| `model_failure`, `tool_service_failure` | Started, complete lifecycle ending in the matching status | Exact usage through the failed boundary; no completed-run scorer artifacts required |
+| `budget_exhausted` | Normally complete after control-plane cancellation and drain; a forced exit may be explicitly incomplete | Terminal counters are exact when complete and upper bounds over observed events when incomplete |
+| `approval_timeout` | Same as `budget_exhausted`, with the approval deadline as the authoritative wall-clock terminal | The expected wall-clock overage is legal only for this status; partial evidence stays in the denominator |
+| `cancelled` | Complete when the runner acknowledges cancellation; explicitly incomplete after forced termination | Exact or bounded-partial usage according to `event_stream_complete` |
+| `runner_failure` | May be pre-start, complete after a classified runner failure, or explicitly incomplete after crash/forced termination | Pre-start usage must be zero; observed partial usage cannot exceed terminal counters |
+| `invalid_provenance` | May be pre-start or partial, but remains explicitly ineligible for comparative inference | Evidence is retained for diagnosis and never promoted to a completed score |
+
+An incomplete stream still requires contiguous identities for every event that
+was observed. It may omit the runner's final lifecycle events, and terminal
+usage may exceed event-derived usage, but it may never under-report observed
+requests or tokens. Files preserved without an observed `artifact.written`
+event are retained as unattested partial artifacts and excluded from scoring.
+
 ## Validation
 
 `agent-lab bundle validate <run-dir>` checks:
@@ -130,18 +164,23 @@ without retaining sensitive content.
 - immutable-manifest hash;
 - contiguous event sequence;
 - unique event IDs and parent links that resolve to earlier events;
-- one start and one terminal event;
+- the status-specific start/finish and bounded partial-stream contract;
 - event run/lane IDs match the manifest;
 - terminal budgets reconcile with events;
 - artifact and native-evidence digests;
+- strict lexical artifact paths (one JSON filename directly under
+  `artifacts/`, with no traversal or nested path segments);
 - trace-link identity, local span-ledger digest, event correlation, and
   recomputed completeness;
-- scorer version and ground-truth manifest linkage;
+- scorer version and ground-truth manifest linkage, followed by deterministic
+  score recomputation from the validated incident, report, audit, and terminal
+  world state;
 - within-pair held-constant hashes.
 
 `agent-lab bundle validate-pair <left-run-dir> <right-run-dir>` additionally
 checks matched lane topology and held-constant prompt, tool, world, model,
-budget, source, seed, repetition, and generator provenance. Framework
+effective request-policy, execution-runtime, budget, source, seed, repetition,
+and generator provenance. Framework
 dependency-lock digests are required but intentionally lane-specific.
 
 Invalid bundles stay available for debugging. The validator writes

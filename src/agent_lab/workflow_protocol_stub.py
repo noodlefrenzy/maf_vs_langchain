@@ -13,6 +13,8 @@ from agent_lab.runner_host import (
     run_workflow_protocol,
 )
 from agent_lab.runner_protocol import CheckpointCapability, RunRequest
+from agent_lab.scenario import MitigationActionId
+from agent_lab.workflow_errors import EvidenceGateFailed
 from agent_lab.workflow_telemetry import WorkflowTelemetry
 
 
@@ -68,6 +70,7 @@ async def _execute(
         ApprovalRequest(
             request_id="mit-protocol-stub-01",
             case_id="case-protocol-stub",
+            proposed_action_id=MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY,
             proposed_action="rollback checkout-api",
             rationale="hermetic protocol exercise",
             evidence_ids=["ev-protocol-01", "ev-protocol-02"],
@@ -79,8 +82,9 @@ async def _execute(
         "framework": "workflow_protocol_stub",
         "model": request.manifest.model.name,
         "execution": {
-            "status": "completed",
+            "status": ("approval_rejected" if approval["decision"] == "reject" else "completed"),
             "approval_decision": approval["decision"],
+            "action_id_to_execute": approval["action_id_to_execute"],
             "action_to_execute": approval["action_to_execute"],
         },
     }
@@ -115,6 +119,19 @@ async def _execute_tool_failure(
     raise ConnectionError("hermetic tool service failure")
 
 
+async def _execute_gate_failure(
+    _request: RunRequest,
+    _approval_provider: ApprovalProvider,
+    _telemetry: WorkflowTelemetry,
+) -> dict[str, object]:
+    raise EvidenceGateFailed(
+        [
+            "incident commander marked the evidence insufficient",
+            "commander synthesis must cite at least two specialist roles",
+        ]
+    )
+
+
 async def _execute_parallel_interleave(
     request: RunRequest,
     _approval_provider: ApprovalProvider,
@@ -147,7 +164,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--scenario",
-        choices=["success", "model_timeout", "tool_service", "parallel_interleave"],
+        choices=[
+            "success",
+            "model_timeout",
+            "tool_service",
+            "gate_failure",
+            "parallel_interleave",
+        ],
         default="success",
     )
     args = parser.parse_args()
@@ -155,6 +178,7 @@ def main() -> None:
         "success": _execute,
         "model_timeout": _execute_model_timeout,
         "tool_service": _execute_tool_failure,
+        "gate_failure": _execute_gate_failure,
         "parallel_interleave": _execute_parallel_interleave,
     }[args.scenario]
     raise SystemExit(asyncio.run(run_workflow_protocol(_descriptor(), executor)))

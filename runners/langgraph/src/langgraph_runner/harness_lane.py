@@ -30,6 +30,7 @@ from agent_lab.harness_contracts import (
     harness_specialist_prompt,
     harness_task_prompt,
 )
+from agent_lab.model_request_policy import langchain_model_kwargs, model_request_headers
 from agent_lab.prompt_bundle import get_role_definition, render_role_prompt
 from agent_lab.runner_host import ApprovalProvider
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
@@ -72,18 +73,9 @@ class _InstrumentedChatOpenAI(ChatOpenAI):
         telemetry: WorkflowTelemetry,
     ) -> None:
         super().__init__(
-            model=profile.name,
             api_key="agent-lab-local",
-            base_url=profile.base_url,
-            temperature=profile.temperature,
-            top_p=profile.top_p,
-            presence_penalty=profile.presence_penalty,
-            max_completion_tokens=min(profile.max_output_tokens, 4096),
-            seed=profile.seed,
-            timeout=profile.request_timeout_seconds,
-            max_retries=0,
-            stream_usage=True,
-            default_headers={"X-Agent-Lab-Framework": "deep-agents"},
+            default_headers=model_request_headers("deep-agents", actor),
+            **langchain_model_kwargs(profile),
         )
         self._actor = actor
         self._lab_profile = profile
@@ -398,8 +390,12 @@ async def run_live_approved(
             approval_decision=approval.decision,
         )
     else:
-        if not approval.approval_token or not approval.action_to_execute:
-            raise ValueError("approved response requires an action and approval token")
+        if (
+            not approval.approval_token
+            or not approval.action_id_to_execute
+            or not approval.action_to_execute
+        ):
+            raise ValueError("approved response requires an action ID, description, and token")
         mitigation, recovery = await command_agent.apply_and_verify(
             approval.request_id,
             approval.approval_token,
@@ -409,6 +405,7 @@ async def run_live_approved(
             evidence=evidence,
             approval_request=approval_request,
             approval_decision=approval.decision,
+            action_id_to_execute=approval.action_id_to_execute,
             action_to_execute=approval.action_to_execute,
             mitigation=mitigation,
             recovery=recovery,

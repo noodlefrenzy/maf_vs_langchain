@@ -69,6 +69,8 @@ def _paired_manifest(lane: FrameworkLane) -> RunManifest:
         dependency_lock_sha256=("a" if lane is FrameworkLane.MAF_WORKFLOW else "b") * 64,
         prompt_bundle_sha256="1" * 64,
         tool_catalog_sha256="2" * 64,
+        effective_request_policy_sha256="6" * 64,
+        execution_provenance_sha256="7" * 64,
         world_manifest_sha256="3" * 64,
     )
 
@@ -90,6 +92,29 @@ def _cancelled_bundle(root: Path, lane: FrameworkLane) -> Path:
             used_tool_calls=0,
             used_output_tokens=0,
             elapsed_seconds=0.1,
+        )
+    )
+    return bundle.path
+
+
+def _incomplete_operational_bundle(
+    root: Path,
+    lane: FrameworkLane,
+    status: TerminalStatus,
+) -> Path:
+    manifest = _paired_manifest(lane)
+    bundle = RunBundle.create(root, manifest)
+    bundle.emit(EventKind.RUN_STARTED)
+    bundle.write_terminal(
+        RunTerminal(
+            run_id=manifest.run_id,
+            status=status,
+            reason=f"test_{status.value}",
+            used_model_calls=0,
+            used_tool_calls=0,
+            used_output_tokens=0,
+            elapsed_seconds=0.1,
+            event_stream_complete=False,
         )
     )
     return bundle.path
@@ -211,6 +236,112 @@ def test_artifact_digest_and_terminal_usage_are_reconciled(tmp_path: Path) -> No
     assert "terminal_usage_mismatch" in codes
 
 
+def test_schema_valid_score_tampering_is_recomputed_and_rejected(tmp_path: Path) -> None:
+    bundle_path = _oracle_bundle(tmp_path)
+    scores_path = bundle_path / "scores.json"
+    scores = json.loads(scores_path.read_text(encoding="utf-8"))
+    scores["total_score"] = 0.123456
+    scores["task_success"] = False
+    scores_path.write_text(json.dumps(scores, indent=2) + "\n", encoding="utf-8")
+
+    result = validate_bundle(bundle_path)
+
+    assert result.valid is False
+    assert "score_recomputation_mismatch" in _finding_codes(result)
+
+
+def test_artifact_event_rejects_lexical_path_traversal(tmp_path: Path) -> None:
+    bundle_path = _oracle_bundle(tmp_path)
+    event_path = bundle_path / "events.jsonl"
+    events = [json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()]
+    artifact_event = next(event for event in events if event["kind"] == "artifact.written")
+    artifact_event["payload"]["artifact"] = "artifacts/../manifest.json"
+    event_path.write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    result = validate_bundle(bundle_path)
+
+    assert result.valid is False
+    assert "artifact_event_path_invalid" in _finding_codes(result)
+
+
+def test_incomplete_budget_bundle_preserves_bounded_partial_evidence(tmp_path: Path) -> None:
+    manifest = _paired_manifest(FrameworkLane.MAF_WORKFLOW)
+    bundle = RunBundle.create(tmp_path, manifest)
+    bundle.emit(EventKind.RUN_STARTED)
+    bundle.emit(EventKind.MODEL_REQUESTED, payload={"model": "local-test"})
+    bundle.write_artifact("partial-diagnosis.json", {"status": "interrupted"})
+    bundle.write_terminal(
+        RunTerminal(
+            run_id=manifest.run_id,
+            status=TerminalStatus.BUDGET_EXHAUSTED,
+            reason="model_call_budget_exhausted",
+            used_model_calls=2,
+            used_tool_calls=0,
+            used_output_tokens=0,
+            elapsed_seconds=0.1,
+            event_stream_complete=False,
+        )
+    )
+
+    result = validate_bundle(bundle.path)
+
+    assert result.valid is True
+    codes = _finding_codes(result)
+    assert "event_stream_incomplete" in codes
+    assert "terminal_usage_partially_observed" in codes
+    assert "partial_artifacts_unattested" in codes
+
+
+def test_incomplete_stream_cannot_underreport_observed_usage(tmp_path: Path) -> None:
+    manifest = _paired_manifest(FrameworkLane.MAF_WORKFLOW)
+    bundle = RunBundle.create(tmp_path, manifest)
+    bundle.emit(EventKind.RUN_STARTED)
+    bundle.emit(EventKind.MODEL_REQUESTED, payload={"model": "local-test"})
+    bundle.write_terminal(
+        RunTerminal(
+            run_id=manifest.run_id,
+            status=TerminalStatus.CANCELLED,
+            reason="control_plane_cancelled",
+            used_model_calls=0,
+            used_tool_calls=0,
+            used_output_tokens=0,
+            elapsed_seconds=0.1,
+            event_stream_complete=False,
+        )
+    )
+
+    result = validate_bundle(bundle.path)
+
+    assert result.valid is False
+    assert "terminal_usage_mismatch" in _finding_codes(result)
+
+
+def test_pre_start_runner_failure_with_empty_event_stream_is_valid(tmp_path: Path) -> None:
+    manifest = _paired_manifest(FrameworkLane.MAF_WORKFLOW)
+    bundle = RunBundle.create(tmp_path, manifest)
+    bundle.write_terminal(
+        RunTerminal(
+            run_id=manifest.run_id,
+            status=TerminalStatus.RUNNER_FAILURE,
+            reason="runner_launch_failed:FileNotFoundError",
+            used_model_calls=0,
+            used_tool_calls=0,
+            used_output_tokens=0,
+            elapsed_seconds=0.1,
+            execution_started=False,
+            event_stream_complete=False,
+        )
+    )
+
+    result = validate_bundle(bundle.path)
+
+    assert result.valid is True
+    assert "event_stream_incomplete" in _finding_codes(result)
+
+
 def test_world_manifest_linkage_survives_self_consistent_artifact_tampering(
     tmp_path: Path,
 ) -> None:
@@ -253,11 +384,51 @@ def test_matched_pair_passes_with_lane_specific_dependency_locks(
     assert (right / "pair-validation.json").is_file()
 
 
+def test_pair_validation_accepts_one_or_both_incomplete_operational_runs(
+    tmp_path: Path,
+) -> None:
+    left = _incomplete_operational_bundle(
+        tmp_path / "one-incomplete-left",
+        FrameworkLane.MAF_WORKFLOW,
+        TerminalStatus.BUDGET_EXHAUSTED,
+    )
+    right_complete = _cancelled_bundle(
+        tmp_path / "one-incomplete-right",
+        FrameworkLane.LANGGRAPH,
+    )
+
+    one_incomplete = validate_pair(left, right_complete)
+
+    assert one_incomplete.valid is True
+
+    right_incomplete = _incomplete_operational_bundle(
+        tmp_path / "both-incomplete-right",
+        FrameworkLane.LANGGRAPH,
+        TerminalStatus.CANCELLED,
+    )
+    both_incomplete = validate_pair(left, right_incomplete)
+
+    assert both_incomplete.valid is True
+
+
 def test_pair_fails_closed_on_held_constant_drift(tmp_path: Path) -> None:
     left = _cancelled_bundle(tmp_path / "left", FrameworkLane.MAF_WORKFLOW)
     right = _cancelled_bundle(tmp_path / "right", FrameworkLane.LANGGRAPH)
     manifest = json.loads((right / "manifest.json").read_text(encoding="utf-8"))
     manifest["tool_catalog_sha256"] = "9" * 64
+    _rewrite_manifest(right, manifest)
+
+    result = validate_pair(left, right)
+
+    assert result.valid is False
+    assert "pair_provenance_drift" in _finding_codes(result)
+
+
+def test_pair_fails_closed_on_execution_provenance_drift(tmp_path: Path) -> None:
+    left = _cancelled_bundle(tmp_path / "left", FrameworkLane.MAF_WORKFLOW)
+    right = _cancelled_bundle(tmp_path / "right", FrameworkLane.LANGGRAPH)
+    manifest = json.loads((right / "manifest.json").read_text(encoding="utf-8"))
+    manifest["execution_provenance_sha256"] = "8" * 64
     _rewrite_manifest(right, manifest)
 
     result = validate_pair(left, right)

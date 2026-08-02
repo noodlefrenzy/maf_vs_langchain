@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_lab.bundle_validation import validate_bundle
 from agent_lab.contract_bundle import sha256_payload
 from agent_lab.contracts import (
     AgentRole,
@@ -18,6 +19,7 @@ from agent_lab.contracts import (
     TerminalStatus,
 )
 from agent_lab.control_plane import ControlPlane, resolve_lane_order
+from agent_lab.model_request_policy import effective_request_policy
 from agent_lab.run_bundle import RunBundle
 from agent_lab.runner_protocol import (
     FinalizationResult,
@@ -28,9 +30,19 @@ from agent_lab.runner_protocol import (
     encode_protocol_message,
     redacted_request_payload,
 )
+from agent_lab.scenario import MitigationActionId
 
 
 def _manifest(*, wall_clock_seconds: int = 5) -> RunManifest:
+    model = ModelProfile(
+        name="local-test",
+        base_url="http://127.0.0.1:8000/v1",
+        temperature=0.6,
+        top_p=0.95,
+        max_output_tokens=1000,
+        context_window_tokens=8192,
+        request_timeout_seconds=60,
+    )
     return RunManifest(
         experiment_id="control_plane_test",
         lane=FrameworkLane.MAF_WORKFLOW,
@@ -38,15 +50,7 @@ def _manifest(*, wall_clock_seconds: int = 5) -> RunManifest:
         scenario_generator_version="0.1.0",
         scenario_seed=42,
         repetition=0,
-        model=ModelProfile(
-            name="local-test",
-            base_url="http://127.0.0.1:8000/v1",
-            temperature=0.6,
-            top_p=0.95,
-            max_output_tokens=1000,
-            context_window_tokens=8192,
-            request_timeout_seconds=60,
-        ),
+        model=model,
         budget=Budget(
             wall_clock_seconds=wall_clock_seconds,
             model_calls=2,
@@ -60,6 +64,11 @@ def _manifest(*, wall_clock_seconds: int = 5) -> RunManifest:
         dependency_lock_sha256="4" * 64,
         prompt_bundle_sha256="1" * 64,
         tool_catalog_sha256="2" * 64,
+        effective_request_policy_sha256=effective_request_policy(
+            model,
+            FrameworkLane.MAF_WORKFLOW,
+        )["policy_sha256"],
+        execution_provenance_sha256="7" * 64,
         world_manifest_sha256="3" * 64,
     )
 
@@ -98,6 +107,13 @@ def _command(mode: str, *, budget_field: str | None = None) -> list[str]:
     return command
 
 
+def _assert_bundle_valid(result) -> None:
+    validation = validate_bundle(result.paths.bundle)
+    assert validation.valid, [
+        (finding.level.value, finding.code, finding.message) for finding in validation.findings
+    ]
+
+
 def test_mock_runner_success_and_isolated_paths(tmp_path: Path) -> None:
     control_plane = ControlPlane(tmp_path)
     request = _request(control_plane, _manifest())
@@ -133,6 +149,7 @@ def test_mock_runner_wall_timeout_is_budget_exhaustion(tmp_path: Path) -> None:
     assert result.terminal.status is TerminalStatus.BUDGET_EXHAUSTED
     assert result.terminal.reason == "wall_clock_budget_exhausted"
     assert result.graceful_shutdown is True
+    _assert_bundle_valid(result)
 
 
 def test_mock_runner_approval_timeout_has_distinct_terminal_state(tmp_path: Path) -> None:
@@ -143,6 +160,7 @@ def test_mock_runner_approval_timeout_has_distinct_terminal_state(tmp_path: Path
 
     assert result.terminal.status is TerminalStatus.APPROVAL_TIMEOUT
     assert result.terminal.reason == "approval_deadline_exhausted"
+    _assert_bundle_valid(result)
 
 
 def test_mock_runner_model_timeout_is_model_failure(tmp_path: Path) -> None:
@@ -155,6 +173,7 @@ def test_mock_runner_model_timeout_is_model_failure(tmp_path: Path) -> None:
     assert result.terminal.reason == "model_request_timeout"
     assert result.terminal.used_model_calls == 1
     assert result.graceful_shutdown is True
+    _assert_bundle_valid(result)
 
 
 def test_control_plane_delivers_token_bound_approval_without_persisting_secret(
@@ -172,6 +191,7 @@ def test_control_plane_delivers_token_bound_approval_without_persisting_secret(
             decision=ApprovalDecision.EDIT,
             decided_by="control-plane-test-reviewer",
             decided_tick=7,
+            action_id_to_execute=MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY,
             action_to_execute="rollback checkout-api and cap retries",
             approval_token=approval_token,
         )
@@ -196,6 +216,7 @@ def test_control_plane_delivers_token_bound_approval_without_persisting_secret(
         "run.finished",
     ]
     assert events[2]["payload"] == {
+        "action_id_to_execute": "rollback_checkout_retry_policy",
         "action_to_execute": "rollback checkout-api and cap retries",
         "decided_by": "control-plane-test-reviewer",
         "decided_tick": 7,
@@ -203,6 +224,32 @@ def test_control_plane_delivers_token_bound_approval_without_persisting_secret(
         "request_id": "mit-control-plane-01",
     }
     assert approval_token not in result.stderr_path.read_text()
+
+
+def test_real_workflow_rejection_produces_a_valid_operational_bundle(tmp_path: Path) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+
+    async def reject(event):
+        return ApprovalRecord(
+            request_id=str(event.payload["request_id"]),
+            case_id="case-protocol-stub",
+            decision=ApprovalDecision.REJECT,
+            decided_by="control-plane-test-reviewer",
+            decided_tick=7,
+        )
+
+    result = asyncio.run(
+        control_plane.execute(
+            [sys.executable, "-m", "agent_lab.workflow_protocol_stub"],
+            request,
+            approval_handler=reject,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.APPROVAL_REJECTED
+    assert result.terminal.reason == "native_workflow_approval_rejected"
+    _assert_bundle_valid(result)
 
 
 def test_control_plane_rejects_mismatched_approval_record(tmp_path: Path) -> None:
@@ -244,6 +291,7 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
             decision=ApprovalDecision.EDIT,
             decided_by="protocol-session-test-reviewer",
             decided_tick=5,
+            action_id_to_execute=MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY,
             action_to_execute="rollback checkout-api and cap retries",
             approval_token=approval_token,
         )
@@ -368,6 +416,13 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
                 "run.finished",
             ],
         ),
+        (
+            "gate_failure",
+            TerminalStatus.RUNNER_FAILURE,
+            'evidence_gate_failed:["incident commander marked the evidence insufficient",'
+            '"commander synthesis must cite at least two specialist roles"]',
+            ["run.started", "error", "run.finished"],
+        ),
     ],
 )
 def test_real_workflow_protocol_classifies_operation_failures(
@@ -402,6 +457,7 @@ def test_real_workflow_protocol_classifies_operation_failures(
     assert [event["kind"] for event in events] == event_kinds
     assert events[-2]["payload"] == {"reason": reason}
     assert events[-1]["payload"]["status"] == status.value
+    _assert_bundle_valid(result)
 
 
 def test_real_workflow_protocol_preserves_interleaved_actor_parentage(
@@ -456,6 +512,52 @@ def test_mock_runner_crash_is_runner_failure(tmp_path: Path) -> None:
 
     assert result.terminal.status is TerminalStatus.RUNNER_FAILURE
     assert result.terminal.reason == "runner_exited_without_terminal:17"
+    _assert_bundle_valid(result)
+
+
+def test_oversized_protocol_line_is_terminalized_and_reaped(tmp_path: Path) -> None:
+    control_plane = ControlPlane(
+        tmp_path,
+        graceful_shutdown_seconds=0.2,
+        protocol_line_limit_bytes=1024,
+    )
+    request = _request(control_plane, _manifest())
+
+    result = asyncio.run(control_plane.execute(_command("oversized_line"), request))
+
+    assert result.terminal.status is TerminalStatus.RUNNER_FAILURE
+    assert result.terminal.reason == "runner_protocol_line_too_large"
+    assert result.terminal.event_stream_complete is False
+    assert result.graceful_shutdown is True
+    assert (result.paths.bundle / "terminal.json").is_file()
+    assert result.stderr_path.is_file()
+    _assert_bundle_valid(result)
+
+
+def test_prepare_send_failure_still_reaps_runner_and_writes_terminal(tmp_path: Path) -> None:
+    class PrepareSendFailureControlPlane(ControlPlane):
+        async def _send(self, process, command):
+            if isinstance(command, PrepareCommand):
+                raise BrokenPipeError("injected prepare failure")
+            await super()._send(process, command)
+
+    control_plane = PrepareSendFailureControlPlane(tmp_path, graceful_shutdown_seconds=0.1)
+    request = _request(control_plane, _manifest())
+
+    result = asyncio.run(
+        control_plane.execute(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            request,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.RUNNER_FAILURE
+    assert result.terminal.reason == "prepare_command_failed:BrokenPipeError"
+    assert result.terminal.execution_started is False
+    assert result.terminal.event_stream_complete is False
+    assert result.graceful_shutdown is False
+    assert result.stderr_path.is_file()
+    _assert_bundle_valid(result)
 
 
 def test_runner_launch_failure_is_terminalized(tmp_path: Path) -> None:
@@ -496,6 +598,7 @@ def test_mock_runner_external_cancellation(tmp_path: Path) -> None:
     assert result.terminal.status is TerminalStatus.CANCELLED
     assert result.terminal.reason == "control_plane_cancelled"
     assert result.graceful_shutdown is True
+    _assert_bundle_valid(result)
 
 
 @pytest.mark.parametrize(
@@ -531,6 +634,7 @@ def test_mock_runner_usage_limits_fail_closed(
         assert result.terminal.used_tool_calls == used
     elif field == "output_tokens":
         assert result.terminal.used_output_tokens == used
+    _assert_bundle_valid(result)
 
 
 def test_budget_terminal_does_not_require_success_finalization(tmp_path: Path) -> None:

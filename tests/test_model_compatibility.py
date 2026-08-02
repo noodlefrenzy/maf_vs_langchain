@@ -1,6 +1,6 @@
 import json
 
-from agent_lab.model_compat_contracts import ModelFixture
+from agent_lab.model_compat_contracts import MODEL_ACTOR_PROBES, ModelFixture
 from agent_lab.model_compat_suite import _advertised_model_ids, run_suite
 
 
@@ -22,7 +22,8 @@ def test_native_clients_pass_protocol_stub_compatibility_suite() -> None:
             {"name": "lookup_incident", "incident_id": "INC-42"}
         ]
         assert fixtures["multi_turn"]["usage"]["reasoning_tokens"] == 4
-        assert len(framework["wire_exchanges"]) == 8
+        assert set(framework["actor_probes"]) == set(MODEL_ACTOR_PROBES)
+        assert len(framework["wire_exchanges"]) == 8 + len(MODEL_ACTOR_PROBES)
 
     wire_exchanges = [
         exchange

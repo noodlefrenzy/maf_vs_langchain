@@ -11,7 +11,12 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.request import Request, urlopen
 
-from agent_lab.model_compat_contracts import MODEL_NAME, SUCCESS_FIXTURES, ModelFixture
+from agent_lab.model_compat_contracts import (
+    MODEL_ACTOR_PROBES,
+    MODEL_NAME,
+    SUCCESS_FIXTURES,
+    ModelFixture,
+)
 from agent_lab.model_compat_stub import CompatibilityStub
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -109,6 +114,13 @@ def _compare(
     errors: list[str] = []
     if reports["maf"]["settings"] != reports["langchain"]["settings"]:
         errors.append("native runners did not use identical explicit request settings")
+    for framework, report in reports.items():
+        probes = report.get("actor_probes", {})
+        if set(probes) != set(MODEL_ACTOR_PROBES):
+            errors.append(f"{framework} actor wire-probe coverage is incomplete")
+        for actor, result in probes.items():
+            if result["status"] != "passed":
+                errors.append(f"{framework}/{actor} actor wire probe failed")
     for fixture in SUCCESS_FIXTURES:
         results = {
             framework: report["fixtures"][fixture.value] for framework, report in reports.items()
@@ -127,6 +139,7 @@ def _compare(
                 errors.append(f"{framework}/malformed_tool was not classified as model_parser")
         expected_counts = {fixture.value: 1 for fixture in ModelFixture}
         expected_counts[ModelFixture.MULTI_TURN.value] = 2
+        expected_counts[ModelFixture.PLAIN.value] += len(MODEL_ACTOR_PROBES)
         for framework in reports:
             actual = {
                 fixture: sum(
@@ -141,6 +154,21 @@ def _compare(
                     f"{framework} request coverage mismatch: "
                     f"expected {expected_counts}, got {actual}"
                 )
+        for actor in MODEL_ACTOR_PROBES:
+            actor_records = {
+                framework: [
+                    record
+                    for record in records
+                    if record["framework"] == framework and record.get("actor") == actor
+                ]
+                for framework in reports
+            }
+            if any(len(values) != 1 for values in actor_records.values()):
+                errors.append(f"actor wire-probe count mismatch for {actor}")
+                continue
+            hashes = {values[0]["effective_request_sha256"] for values in actor_records.values()}
+            if len(hashes) != 1:
+                errors.append(f"matched effective request differs for actor {actor}")
         for record in records:
             if record["validation_errors"]:
                 errors.append(

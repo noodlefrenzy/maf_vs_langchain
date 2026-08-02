@@ -53,7 +53,26 @@ def _mock_event(
 def run(mode: str, *, budget_field: str) -> int:
     request: RunRequest | None = None
     terminal_sent = False
+    started = False
     usage = RunnerUsage()
+    event_sequence = 0
+
+    def emit_event(kind: EventKind, payload: dict[str, object]) -> None:
+        nonlocal event_sequence
+        if request is None:
+            raise RuntimeError("cannot emit an event before prepare")
+        _send(
+            EventMessage(
+                event=_mock_event(
+                    request,
+                    sequence=event_sequence,
+                    kind=kind,
+                    payload=payload,
+                )
+            )
+        )
+        event_sequence += 1
+
     for line in sys.stdin.buffer:
         try:
             command = decode_runner_command(line)
@@ -72,6 +91,10 @@ def run(mode: str, *, budget_field: str) -> int:
                         topology_sha256=topology,
                         effective_prompt_sha256=request.manifest.prompt_bundle_sha256,
                         tool_catalog_sha256=request.manifest.tool_catalog_sha256,
+                        effective_request_policy_sha256=(
+                            request.manifest.effective_request_policy_sha256
+                        ),
+                        execution_provenance_sha256=(request.manifest.execution_provenance_sha256),
                         framework_versions={"mock-runner": "0.1.0"},
                         checkpoint=CheckpointCapability(
                             resumable=True,
@@ -87,6 +110,12 @@ def run(mode: str, *, budget_field: str) -> int:
                 return 2
             if mode == "crash":
                 return 17
+            started = True
+            emit_event(EventKind.RUN_STARTED, {"execution_mode": mode})
+            if mode == "oversized_line":
+                sys.stdout.buffer.write(b"x" * 4096 + b"\n")
+                sys.stdout.buffer.flush()
+                continue
             if mode == "budget":
                 usage_values = {
                     "model_calls": 0,
@@ -95,16 +124,39 @@ def run(mode: str, *, budget_field: str) -> int:
                     "approval_requests": 0,
                 }
                 usage_values[budget_field] = getattr(request.manifest.budget, budget_field) + 1
+                usage = RunnerUsage(**usage_values)
                 _send(
                     UsageMessage(
                         run_id=command.run_id,
-                        usage=RunnerUsage(**usage_values),
+                        usage=usage,
                     )
                 )
+                event_kinds = {
+                    "model_calls": EventKind.MODEL_REQUESTED,
+                    "tool_calls": EventKind.TOOL_REQUESTED,
+                    "output_tokens": EventKind.MODEL_RESPONDED,
+                    "approval_requests": EventKind.APPROVAL_REQUESTED,
+                }
+                event_kind = event_kinds[budget_field]
+                event_count = usage_values[budget_field]
+                for index in range(event_count if budget_field != "output_tokens" else 1):
+                    payload: dict[str, object] = {"index": index}
+                    if budget_field == "output_tokens":
+                        payload["output_tokens"] = event_count
+                    emit_event(event_kind, payload)
                 continue
             if mode == "model_timeout":
                 usage = RunnerUsage(model_calls=1)
                 _send(UsageMessage(run_id=command.run_id, usage=usage))
+                emit_event(EventKind.MODEL_REQUESTED, {"model": "local-test"})
+                emit_event(EventKind.ERROR, {"reason": "model_request_timeout"})
+                emit_event(
+                    EventKind.RUN_FINISHED,
+                    {
+                        "status": TerminalStatus.MODEL_FAILURE.value,
+                        "execution_mode": mode,
+                    },
+                )
                 _send(
                     TerminalMessage(
                         run_id=command.run_id,
@@ -126,28 +178,12 @@ def run(mode: str, *, budget_field: str) -> int:
             if mode == "approval_success":
                 usage = RunnerUsage(approval_requests=1)
                 _send(UsageMessage(run_id=command.run_id, usage=usage))
-                _send(
-                    EventMessage(
-                        event=_mock_event(
-                            request,
-                            sequence=0,
-                            kind=EventKind.RUN_STARTED,
-                            payload={"execution_mode": "approval_success"},
-                        )
-                    )
-                )
-                _send(
-                    EventMessage(
-                        event=_mock_event(
-                            request,
-                            sequence=1,
-                            kind=EventKind.APPROVAL_REQUESTED,
-                            payload={
-                                "request_id": "mit-control-plane-01",
-                                "proposed_action": "rollback checkout-api",
-                            },
-                        )
-                    )
+                emit_event(
+                    EventKind.APPROVAL_REQUESTED,
+                    {
+                        "request_id": "mit-control-plane-01",
+                        "proposed_action": "rollback checkout-api",
+                    },
                 )
                 _send(
                     HeartbeatMessage(
@@ -163,6 +199,13 @@ def run(mode: str, *, budget_field: str) -> int:
                 approval_requests=1,
             )
             _send(UsageMessage(run_id=command.run_id, usage=usage))
+            emit_event(
+                EventKind.RUN_FINISHED,
+                {
+                    "status": TerminalStatus.COMPLETED.value,
+                    "execution_mode": mode,
+                },
+            )
             _send(
                 TerminalMessage(
                     run_id=command.run_id,
@@ -184,34 +227,27 @@ def run(mode: str, *, budget_field: str) -> int:
                     )
                 )
                 continue
-            _send(
-                EventMessage(
-                    event=_mock_event(
-                        request,
-                        sequence=2,
-                        kind=EventKind.APPROVAL_DECIDED,
-                        payload={
-                            "request_id": command.request_id,
-                            "decision": command.decision.value,
-                            "action_to_execute": command.action_to_execute,
-                            "decided_by": command.decided_by,
-                            "decided_tick": command.decided_tick,
-                        },
-                    )
-                )
+            emit_event(
+                EventKind.APPROVAL_DECIDED,
+                {
+                    "request_id": command.request_id,
+                    "decision": command.decision.value,
+                    "action_id_to_execute": (
+                        command.action_id_to_execute.value
+                        if command.action_id_to_execute is not None
+                        else None
+                    ),
+                    "action_to_execute": command.action_to_execute,
+                    "decided_by": command.decided_by,
+                    "decided_tick": command.decided_tick,
+                },
             )
-            _send(
-                EventMessage(
-                    event=_mock_event(
-                        request,
-                        sequence=3,
-                        kind=EventKind.RUN_FINISHED,
-                        payload={
-                            "status": TerminalStatus.COMPLETED.value,
-                            "execution_mode": "approval_success",
-                        },
-                    )
-                )
+            emit_event(
+                EventKind.RUN_FINISHED,
+                {
+                    "status": TerminalStatus.COMPLETED.value,
+                    "execution_mode": "approval_success",
+                },
             )
             _send(
                 TerminalMessage(
@@ -224,12 +260,21 @@ def run(mode: str, *, budget_field: str) -> int:
             terminal_sent = True
         elif isinstance(command, CancelCommand):
             if not terminal_sent:
+                if started:
+                    emit_event(EventKind.ERROR, {"reason": command.reason})
+                    emit_event(
+                        EventKind.RUN_FINISHED,
+                        {
+                            "status": command.status.value,
+                            "execution_mode": mode,
+                        },
+                    )
                 _send(
                     TerminalMessage(
                         run_id=command.run_id,
-                        status=TerminalStatus.CANCELLED,
+                        status=command.status,
                         reason=command.reason,
-                        usage=RunnerUsage(),
+                        usage=usage,
                     )
                 )
                 terminal_sent = True
@@ -249,6 +294,7 @@ def main() -> None:
             "model_timeout",
             "crash",
             "cancellation",
+            "oversized_line",
             "budget",
             "approval_success",
         ],

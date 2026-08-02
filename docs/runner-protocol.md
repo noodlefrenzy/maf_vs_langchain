@@ -81,6 +81,11 @@ plus one terminal bundle and owner-only world checkpoint per lane.
 The execution mode is always labeled `protocol_probe`. It invokes no model or
 MCP tool, produces no score, and is infrastructure evidence only. Actual task
 runs remain gated on the lane implementations and their checkpoint metadata.
+Protocol probes may run from a dirty Git worktree, but the preflight records the
+dirty status entries and hash and marks the run ineligible for measurement.
+`native_workflow` refuses to allocate a run unless the worktree is clean, then
+hashes the source state and complete inference-runtime attestation into the pair
+preflight and each runner's prepared-provenance handshake.
 
 ## Checkpoint restart gate
 
@@ -120,15 +125,39 @@ and a process exit without a terminal message become a persisted
 first use protocol commands, then process termination, and finally a kill only
 after the configured grace period.
 
+The cancellation command carries the control plane's authoritative non-success
+terminal status as well as its reason. While shutdown is in progress, the
+control plane continues draining usage, normalized events, and the runner's
+terminal acknowledgement. A runner that acknowledges cancellation therefore
+finishes with an exact event stream; a crash or forced kill is recorded in
+`terminal.json` as a bounded incomplete stream rather than being mislabeled as
+corrupt completed evidence.
+
+Runner stdout is read with an explicit 1 MiB per-line ceiling. Crossing that
+ceiling produces `runner_failure: runner_protocol_line_too_large`, preserves
+stderr, and follows the same bounded reaping path as every other protocol
+failure. Command writes fail immediately on a closed stdin pipe; prepare,
+start, approval, and finalization commands cannot be silently dropped.
+
+Native tracing finalizes its local ledger and atomically publishes
+`trace-link.json` before the runner sends its terminal acknowledgement. The
+control plane's default graceful shutdown window is five seconds, long enough
+to cover the configured one-second exporter timeout while remaining bounded.
+
 An exception escaping while a normalized model request is in flight becomes
 `model_failure`. An exception following a normalized failed tool boundary (or
 while that tool is still in flight) becomes `tool_service_failure`. The error
 and terminal events retain only the bounded exception class and classification,
 while detailed framework tracebacks stay in the runner-local stderr artifact.
+Deterministic evidence-gate failures use the stable
+`evidence_gate_failed:<json-reasons>` runner-failure subtype in both workflow
+lanes, preserving the concrete gate reasons without exposing model content or
+misreporting the failure as a missing approval checkpoint.
 
 The mock-runner matrix covers success, startup/launch failure, crash, wall
 timeout, approval timeout, model-request timeout classification, explicit
-cancellation, graceful shutdown, and all four usage budgets. Native MAF and
+cancellation, oversized protocol output, graceful shutdown, and all four usage
+budgets. Native MAF and
 LangGraph processes also implement the boundary in an explicit `protocol_probe`
 mode. They report installed framework
 versions and planned topology, emit canonical run lifecycle events, and prove

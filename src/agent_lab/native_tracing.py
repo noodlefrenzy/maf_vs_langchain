@@ -6,6 +6,7 @@ import hashlib
 import socket
 import sys
 from collections.abc import Callable, Sequence
+from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -48,6 +49,7 @@ class NativeTracingSession:
         self._remote_exporter: Any | None = None
         self._collector_reachable = False
         self._records: list[NativeSpanRecord] = []
+        self._records_lock = Lock()
         self._diagnostics: list[str] = []
 
     def start(self) -> None:
@@ -246,29 +248,33 @@ class NativeTracingSession:
     def _append_records(self, records: list[NativeSpanRecord]) -> None:
         if not records:
             return
-        ledger = self.paths.traces / "spans.jsonl"
-        with ledger.open("a", encoding="utf-8") as handle:
-            for record in records:
-                handle.write(record.model_dump_json() + "\n")
-        ledger.chmod(0o600)
-        self._records.extend(records)
+        with self._records_lock:
+            ledger = self.paths.traces / "spans.jsonl"
+            with ledger.open("a", encoding="utf-8") as handle:
+                for record in records:
+                    handle.write(record.model_dump_json() + "\n")
+            ledger.chmod(0o600)
+            self._records.extend(records)
 
     def _write_trace_link(self, events: list[NormalizedEvent]) -> None:
         enabled = self.profile.enabled
-        trace_ids = sorted({record.trace_id for record in self._records})
+        with self._records_lock:
+            records = list(self._records)
+            ledger = self.paths.traces / "spans.jsonl"
+            ledger_bytes = ledger.read_bytes() if records and ledger.is_file() else None
+        trace_ids = sorted({record.trace_id for record in records})
         root_trace_id = None
-        if self._records:
+        if records:
             root = next(
-                (record for record in self._records if record.operation.value == "run"),
+                (record for record in records if record.operation.value == "run"),
                 None,
             )
             root_trace_id = root.trace_id if root is not None else trace_ids[0]
-        ledger = self.paths.traces / "spans.jsonl"
         ledger_path = None
         ledger_sha256 = None
-        if self._records and ledger.is_file():
+        if ledger_bytes is not None:
             ledger_path = "native/traces/spans.jsonl"
-            ledger_sha256 = hashlib.sha256(ledger.read_bytes()).hexdigest()
+            ledger_sha256 = hashlib.sha256(ledger_bytes).hexdigest()
         collector_status = self._collector_status(enabled)
         phoenix_base = self.profile.phoenix_base_url if enabled else None
         trace_link = NativeTraceLink(
@@ -290,14 +296,18 @@ class NativeTracingSession:
             trace_ids=trace_ids,
             span_ledger_path=ledger_path,
             span_ledger_sha256=ledger_sha256,
-            span_count=len(self._records),
-            completeness=compute_trace_completeness(events, self._records),
+            span_count=len(records),
+            completeness=compute_trace_completeness(events, records),
             diagnostics=sorted(set(self._diagnostics)),
         )
         destination = self.paths.bundle / "native" / "trace-link.json"
-        with destination.open("x", encoding="utf-8") as handle:
+        temporary = destination.with_name(".trace-link.json.tmp")
+        if destination.exists():
+            raise FileExistsError(f"trace link already exists at {destination}")
+        with temporary.open("x", encoding="utf-8") as handle:
             handle.write(trace_link.model_dump_json(indent=2) + "\n")
-        destination.chmod(0o600)
+        temporary.chmod(0o600)
+        temporary.replace(destination)
 
     def _collector_status(self, enabled: bool) -> TraceCollectorStatus:
         if not enabled:

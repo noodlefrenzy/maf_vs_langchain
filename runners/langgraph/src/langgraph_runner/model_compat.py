@@ -14,18 +14,16 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from agent_lab.model_compat_contracts import (
-    MAX_OUTPUT_TOKENS,
+    MODEL_ACTOR_PROBES,
     MODEL_NAME,
-    REQUEST_TIMEOUT_SECONDS,
-    SEED,
-    TEMPERATURE,
-    TOP_P,
     ModelFixture,
     StructuredAnswer,
+    compatibility_model_profile,
     explicit_request_settings,
     fixture_prompt,
     openai_tool_schemas,
 )
+from agent_lab.model_request_policy import langchain_model_kwargs, model_request_headers
 
 _executed_tools: list[dict[str, str]] = []
 
@@ -169,20 +167,28 @@ async def _multi_turn(client: ChatOpenAI) -> dict[str, Any]:
         return _failed(exc, "framework_loop")
 
 
+async def _actor_probes(profile: Any) -> dict[str, Any]:
+    probes: dict[str, Any] = {}
+    for actor in MODEL_ACTOR_PROBES:
+        client = ChatOpenAI(
+            api_key="model-wire-test",
+            default_headers=model_request_headers("langchain", actor),
+            **langchain_model_kwargs(profile),
+        )
+        try:
+            response = await client.ainvoke(_messages(ModelFixture.PLAIN))
+            probes[actor] = _passed(str(response.text), response.usage_metadata)
+        except Exception as exc:
+            probes[actor] = _failed(exc, "client_serialization")
+    return probes
+
+
 async def run(base_url: str, model: str) -> dict[str, Any]:
+    profile = compatibility_model_profile(base_url, model)
     client = ChatOpenAI(
-        model=model,
         api_key="model-wire-test",
-        base_url=base_url,
-        temperature=TEMPERATURE,
-        top_p=TOP_P,
-        max_completion_tokens=MAX_OUTPUT_TOKENS,
-        seed=SEED,
-        timeout=REQUEST_TIMEOUT_SECONDS,
-        max_retries=0,
-        stream_usage=True,
         default_headers={"X-Agent-Lab-Framework": "langchain"},
-        model_kwargs={"user": "model-wire/langchain"},
+        **langchain_model_kwargs(profile),
     )
     fixtures: dict[str, Any] = {}
     for fixture in ModelFixture:
@@ -204,6 +210,7 @@ async def run(base_url: str, model: str) -> dict[str, Any]:
         "base_url": base_url,
         "settings": explicit_request_settings(),
         "fixtures": fixtures,
+        "actor_probes": await _actor_probes(profile),
     }
 
 

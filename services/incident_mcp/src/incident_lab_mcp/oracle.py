@@ -32,6 +32,7 @@ from agent_lab.contracts import (
     ToolErrorCode,
 )
 from agent_lab.evaluator import DeterministicScore, score_incident
+from agent_lab.model_request_policy import effective_request_policy
 from agent_lab.run_bundle import RunBundle
 from incident_lab_mcp.world import IncidentWorld, WorldToolError
 
@@ -70,6 +71,11 @@ def run_oracle(
         dependency_lock_sha256=_file_sha256(Path("services/incident_mcp/uv.lock")),
         prompt_bundle_sha256=hashes["prompt_bundle_sha256"],
         tool_catalog_sha256=hashes["tool_catalog_sha256"],
+        effective_request_policy_sha256=effective_request_policy(
+            model,
+            FrameworkLane.SCRIPTED_ORACLE,
+        )["policy_sha256"],
+        execution_provenance_sha256="0" * 64,
         world_manifest_sha256=sha256_payload(world.incident.model_dump(mode="json")),
         host_fingerprint={
             "hostname": platform.node(),
@@ -204,6 +210,7 @@ def run_oracle(
             "request_mitigation",
             "incident_commander",
             lambda: world.request_mitigation(
+                world.incident.correct_mitigation_id,
                 world.incident.correct_mitigation,
                 "Independent telemetry, change, and policy evidence support this action.",
                 evidence_ids,
@@ -264,6 +271,7 @@ def run_oracle(
             root_cause=root_cause,
             confidence=1.0,
             evidence=evidence,
+            mitigation_action_id=world.incident.correct_mitigation_id,
             mitigation=world.incident.correct_mitigation,
             mitigation_request_id=approval.request_id,
             approval_decision=approval.decision,

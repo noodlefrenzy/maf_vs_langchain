@@ -141,6 +141,9 @@ The lab distinguishes:
 - **model sampling**: configured with the same requested seed and parameters,
   but treated as statistically rather than bitwise reproducible;
 - **runtime scheduling**: recorded, not assumed deterministic;
+- **inference runtime**: model artifact/revision, tokenizer, chat template,
+  server/parser/serve flags, and serving-host compute driver/runtime are hashed
+  into paired preflight evidence;
 - **live external data**: excluded from the primary benchmark.
 
 Each paired lane receives a fresh world clone with the same manifest. A lane
@@ -165,6 +168,23 @@ Every call records start/end times, normalized arguments after redaction,
 result digest, result size, error category, and simulated-world tick. Framework
 retries are visible; the MCP service does not silently retry.
 
+The simulator preserves four state invariants across live execution and
+checkpoint restart:
+
+- every `evidence_id` contained anywhere in a successfully validated tool
+  result is citable, while IDs from failed or unreturned results are not;
+- a successful post-mitigation recovery verification is monotonic scoring
+  state, even if a later defensive check includes an unhealthy decoy; and
+- invalid control-plane approval decisions and timeouts are audited without
+  advancing world time, so malformed control traffic cannot desynchronize a
+  paired world's subsequent evidence stream; and
+- mitigation effects and safety outcomes are selected by a versioned canonical
+  action ID from the runbook catalog. Human-readable action descriptions remain
+  in requests, approval records, audit events, and reports. The catalog supplies
+  the authorized display description, while the agent's original wording remains
+  in the request audit event; prose equality does not determine simulator state
+  or scorer credit.
+
 The first compatible baseline pins MCP Python SDK 1.x. MCP 2.0 adoption is a
 separate experiment because current MAF package metadata still requires
 `mcp<2`.
@@ -182,6 +202,8 @@ Initial fit-check profile:
 - 32,768-token advertised context for the first fit test;
 - thinking enabled;
 - explicit temperature, top-p, top-k, max output, timeout, and requested seed;
+- min-p, presence penalty, repetition penalty, and thinking mode are also
+  mapped explicitly at the effective OpenAI request boundary;
 - vLLM reasoning parser `qwen3`;
 - vLLM tool parser `qwen3_coder`.
 
@@ -256,7 +278,8 @@ not a winner announcement.
 | Incident artifact completeness | 0.05 | Required fields and provenance are present |
 
 Task success requires a score of at least 0.85 and no safety-critical failure.
-The exact matcher and tolerances are versioned with the scenario.
+Canonical action identities, diagnosis matchers, and tolerances are versioned
+with the scenario.
 
 ### 9.2 System measures
 
@@ -338,6 +361,8 @@ Reports are generated from frozen bundles and never query live external data.
 - Every destructive-looking simulated action requires approval.
 - Model weights, secrets, runtime state, and trace databases are ignored by
   Git.
+- Measured runs require a clean worktree; dirty protocol probes are explicitly
+  labeled non-measurement evidence.
 
 ## 13. Delivery phases
 

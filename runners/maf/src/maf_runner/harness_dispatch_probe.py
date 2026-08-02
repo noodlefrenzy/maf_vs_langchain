@@ -9,17 +9,13 @@ from typing import Any
 
 from agent_framework import Agent, tool
 
-from agent_lab.contracts import ModelProfile
 from agent_lab.model_compat_contracts import (
-    MAX_OUTPUT_TOKENS,
     MODEL_NAME,
-    REQUEST_TIMEOUT_SECONDS,
-    SEED,
-    TEMPERATURE,
-    TOP_P,
     ModelFixture,
+    compatibility_model_profile,
     fixture_prompt,
 )
+from agent_lab.model_request_policy import maf_request_options
 from maf_runner.harness_lane import _InstrumentedChatClient
 
 
@@ -68,17 +64,7 @@ class _RecordingTelemetry:
 
 async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, Any]:
     telemetry = _RecordingTelemetry(model_call_limit)
-    profile = ModelProfile(
-        name=MODEL_NAME,
-        base_url=base_url,
-        temperature=TEMPERATURE,
-        top_p=TOP_P,
-        max_output_tokens=MAX_OUTPUT_TOKENS,
-        context_window_tokens=4096,
-        request_timeout_seconds=REQUEST_TIMEOUT_SECONDS,
-        seed=SEED,
-        thinking=False,
-    )
+    profile = compatibility_model_profile(base_url, MODEL_NAME)
     client = _InstrumentedChatClient(
         actor="dispatch_probe",
         profile=profile,
@@ -91,10 +77,7 @@ async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, A
         response = await agent.run(
             fixture_prompt(ModelFixture.MULTI_TURN),
             options={
-                "temperature": TEMPERATURE,
-                "top_p": TOP_P,
-                "max_tokens": MAX_OUTPUT_TOKENS,
-                "seed": SEED,
+                **maf_request_options(profile),
                 "tool_choice": "auto",
                 "allow_multiple_tool_calls": False,
             },

@@ -16,12 +16,22 @@ from agent_lab.contracts import (
 )
 from agent_lab.control_plane import ControlPlane
 from agent_lab.matched_contracts import normalized_topology_for_lane
+from agent_lab.model_request_policy import effective_request_policy
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _manifest(lane: FrameworkLane) -> RunManifest:
+    model = ModelProfile(
+        name="local-test",
+        base_url="http://127.0.0.1:8000/v1",
+        temperature=0.6,
+        top_p=0.95,
+        max_output_tokens=1000,
+        context_window_tokens=8192,
+        request_timeout_seconds=60,
+    )
     return RunManifest(
         experiment_id="native_protocol_test",
         lane=lane,
@@ -29,15 +39,7 @@ def _manifest(lane: FrameworkLane) -> RunManifest:
         scenario_generator_version="0.1.0",
         scenario_seed=42,
         repetition=0,
-        model=ModelProfile(
-            name="local-test",
-            base_url="http://127.0.0.1:8000/v1",
-            temperature=0.6,
-            top_p=0.95,
-            max_output_tokens=1000,
-            context_window_tokens=8192,
-            request_timeout_seconds=60,
-        ),
+        model=model,
         budget=Budget(
             wall_clock_seconds=10,
             model_calls=2,
@@ -51,6 +53,8 @@ def _manifest(lane: FrameworkLane) -> RunManifest:
         dependency_lock_sha256="4" * 64,
         prompt_bundle_sha256="1" * 64,
         tool_catalog_sha256="2" * 64,
+        effective_request_policy_sha256=effective_request_policy(model, lane)["policy_sha256"],
+        execution_provenance_sha256="7" * 64,
         world_manifest_sha256="3" * 64,
     )
 
@@ -128,6 +132,7 @@ def test_native_runner_protocol_probe(
     trace_link = json.loads(
         (result.paths.bundle / "native" / "trace-link.json").read_text(encoding="utf-8")
     )
+    assert not (result.paths.bundle / "native" / ".trace-link.json.tmp").exists()
     assert trace_link["collector_status"] == "unavailable"
     assert trace_link["span_count"] >= 1
     assert trace_link["completeness"]["ratio"] == 1.0

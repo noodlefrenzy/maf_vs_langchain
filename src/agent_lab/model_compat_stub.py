@@ -16,8 +16,13 @@ from typing import Any, Self
 
 from agent_lab.model_compat_contracts import (
     MAX_OUTPUT_TOKENS,
+    MIN_P,
+    PRESENCE_PENALTY,
+    REPETITION_PENALTY,
     SEED,
     TEMPERATURE,
+    THINKING,
+    TOP_K,
     TOP_P,
     ModelFixture,
 )
@@ -86,8 +91,13 @@ def _validation_errors(body: Mapping[str, Any]) -> list[str]:
     expected = {
         "temperature": TEMPERATURE,
         "top_p": TOP_P,
+        "top_k": TOP_K,
+        "min_p": MIN_P,
+        "presence_penalty": PRESENCE_PENALTY,
+        "repetition_penalty": REPETITION_PENALTY,
         "max_completion_tokens": MAX_OUTPUT_TOKENS,
         "seed": SEED,
+        "chat_template_kwargs": {"enable_thinking": THINKING},
     }
     errors = [
         f"{key}={body.get(key)!r}; expected {value!r}"
@@ -270,12 +280,14 @@ class _CompatibilityHandler(BaseHTTPRequestHandler):
         errors: list[str],
     ) -> None:
         framework = self.headers.get("X-Agent-Lab-Framework", "unknown")
+        actor = self.headers.get("X-Agent-Lab-Actor")
         redacted_body = _redact(body)
         effective_body, server_defaults = _expand_server_defaults(redacted_body)
         redacted_response = _redact(response)
         self.server.record(
             {
                 "framework": framework,
+                "actor": actor,
                 "fixture": fixture.value,
                 "request_index": sum(
                     1

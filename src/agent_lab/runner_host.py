@@ -21,6 +21,7 @@ from agent_lab.contracts import (
     NormalizedEvent,
     TerminalStatus,
 )
+from agent_lab.model_request_policy import effective_request_policy
 from agent_lab.native_tracing import FrameworkInstrumentor, NativeTracingSession
 from agent_lab.runner_protocol import (
     ApprovalCommand,
@@ -42,6 +43,7 @@ from agent_lab.runner_protocol import (
     decode_runner_command,
     encode_protocol_message,
 )
+from agent_lab.workflow_errors import EvidenceGateFailed
 from agent_lab.workflow_telemetry import WorkflowTelemetry
 
 ApprovalProvider = Callable[[ApprovalRequest], Awaitable[dict[str, Any]]]
@@ -54,6 +56,15 @@ WorkflowProtocolExecutor = Callable[
 class WorkflowBudgetExceeded(RuntimeError):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
+        self.reason = reason
+
+
+class WorkflowTerminated(RuntimeError):
+    """An outer control-plane terminal decision delivered through the protocol."""
+
+    def __init__(self, status: TerminalStatus, reason: str) -> None:
+        super().__init__(reason)
+        self.status = status
         self.reason = reason
 
 
@@ -242,7 +253,7 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         )
         command = await _read_command()
         if isinstance(command, CancelCommand):
-            raise asyncio.CancelledError(command.reason)
+            raise WorkflowTerminated(command.status, command.reason)
         if isinstance(command, ShutdownCommand):
             raise asyncio.CancelledError("control_plane_shutdown")
         if not isinstance(command, ApprovalCommand):
@@ -259,12 +270,22 @@ class WorkflowProtocolSession(WorkflowTelemetry):
                 "decision": command.decision.value,
                 "decided_by": command.decided_by,
                 "decided_tick": command.decided_tick,
+                "action_id_to_execute": (
+                    command.action_id_to_execute.value
+                    if command.action_id_to_execute is not None
+                    else None
+                ),
                 "action_to_execute": command.action_to_execute,
             },
         )
         return {
             "request_id": command.request_id,
             "decision": command.decision.value,
+            "action_id_to_execute": (
+                command.action_id_to_execute.value
+                if command.action_id_to_execute is not None
+                else None
+            ),
             "action_to_execute": command.action_to_execute,
             "approval_token": command.approval_token,
         }
@@ -298,7 +319,7 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         )
         command = await _read_command()
         if isinstance(command, CancelCommand):
-            raise asyncio.CancelledError(command.reason)
+            raise WorkflowTerminated(command.status, command.reason)
         if isinstance(command, ShutdownCommand):
             raise asyncio.CancelledError("control_plane_shutdown")
         if not isinstance(command, FinalizeCommand):
@@ -434,6 +455,11 @@ class NativeRunnerDescriptor(BaseModel):
             topology_sha256=hashlib.sha256(topology_payload).hexdigest(),
             effective_prompt_sha256=request.manifest.prompt_bundle_sha256,
             tool_catalog_sha256=request.manifest.tool_catalog_sha256,
+            effective_request_policy_sha256=effective_request_policy(
+                request.manifest.model,
+                lane,
+            )["policy_sha256"],
+            execution_provenance_sha256=request.manifest.execution_provenance_sha256,
             framework_versions=self.framework_versions,
             checkpoint=self.checkpoint[lane],
         )
@@ -466,6 +492,16 @@ async def run_workflow_protocol(
     start = await _read_command()
     if isinstance(start, ShutdownCommand):
         return 0
+    if isinstance(start, CancelCommand):
+        _send(
+            TerminalMessage(
+                run_id=request.manifest.run_id,
+                status=start.status,
+                reason=start.reason,
+                usage=RunnerUsage(),
+            )
+        )
+        return await _await_shutdown(request)
     if not isinstance(start, StartCommand):
         _send(
             ErrorMessage(
@@ -504,6 +540,14 @@ async def run_workflow_protocol(
         terminal_status = TerminalStatus.BUDGET_EXHAUSTED
         terminal_reason = exc.reason
         session.fail(terminal_status, terminal_reason)
+    except WorkflowTerminated as exc:
+        terminal_status = exc.status
+        terminal_reason = exc.reason
+        session.fail(terminal_status, terminal_reason)
+    except EvidenceGateFailed as exc:
+        terminal_status = TerminalStatus.RUNNER_FAILURE
+        terminal_reason = exc.reason
+        session.fail(terminal_status, terminal_reason)
     except asyncio.CancelledError as exc:
         terminal_status = TerminalStatus.CANCELLED
         terminal_reason = str(exc) or "native_workflow_cancelled"
@@ -518,9 +562,9 @@ async def run_workflow_protocol(
         }[terminal_status]
         terminal_reason = f"{reason_prefix}:{type(exc).__name__}"
         session.fail(terminal_status, terminal_reason)
-    session.terminal(terminal_status, terminal_reason)
     if tracing is not None:
         tracing.finish(session.events)
+    session.terminal(terminal_status, terminal_reason)
     return await _await_shutdown(request)
 
 
@@ -616,6 +660,8 @@ def run_protocol_probe(
             ]
             _send(EventMessage(event=events[0]))
             _send(EventMessage(event=events[1]))
+            if tracing is not None:
+                tracing.finish(events)
             _send(
                 TerminalMessage(
                     run_id=request.manifest.run_id,
@@ -624,8 +670,6 @@ def run_protocol_probe(
                     usage=usage,
                 )
             )
-            if tracing is not None:
-                tracing.finish(events)
             terminal_sent = True
         elif isinstance(command, ApprovalCommand):
             _send(
@@ -644,7 +688,7 @@ def run_protocol_probe(
                             kind=EventKind.RUN_FINISHED,
                             actor=descriptor.name,
                             payload={
-                                "status": TerminalStatus.CANCELLED.value,
+                                "status": command.status.value,
                                 "execution_mode": "protocol_probe",
                             },
                         )
@@ -653,7 +697,7 @@ def run_protocol_probe(
             _send(
                 TerminalMessage(
                     run_id=request.manifest.run_id,
-                    status=TerminalStatus.CANCELLED,
+                    status=command.status,
                     reason=command.reason,
                     usage=usage,
                 )

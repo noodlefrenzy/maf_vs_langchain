@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_lab.contracts import AgentRole, ApprovalDecision, ApprovalRequest
 from agent_lab.prompt_bundle import render_role_prompt
+from agent_lab.scenario import MitigationActionId
 from agent_lab.tool_catalog import MitigationResult, RecoveryCheckResult
 
 SPECIALIST_ROLES = frozenset(
@@ -37,6 +38,7 @@ class HarnessCommanderSynthesis(HarnessModel):
     root_cause: str = Field(min_length=1)
     chronology: list[str] = Field(min_length=2, max_length=6)
     evidence_ids: list[str] = Field(min_length=2, max_length=12)
+    proposed_mitigation_id: MitigationActionId
     proposed_mitigation: str = Field(min_length=1)
     recovery_checks: list[str] = Field(min_length=1, max_length=6)
     evidence_sufficient: bool
@@ -70,6 +72,7 @@ class HarnessEvidencePacket(HarnessModel):
 class HarnessApprovalResponse(HarnessModel):
     request_id: str
     decision: ApprovalDecision
+    action_id_to_execute: MitigationActionId | None = None
     action_to_execute: str | None = None
     approval_token: str | None = Field(default=None, repr=False, exclude=True)
 
@@ -79,6 +82,7 @@ class HarnessExecutionResult(HarnessModel):
     evidence: HarnessEvidencePacket
     approval_request: ApprovalRequest
     approval_decision: ApprovalDecision
+    action_id_to_execute: MitigationActionId | None = None
     action_to_execute: str | None = None
     mitigation: MitigationResult | None = None
     recovery: RecoveryCheckResult | None = None
@@ -91,10 +95,16 @@ class HarnessExecutionResult(HarnessModel):
                 ApprovalDecision.EDIT,
             }:
                 raise ValueError("completed execution requires an approved decision")
-            if not self.action_to_execute or self.mitigation is None or self.recovery is None:
+            if (
+                not self.action_id_to_execute
+                or not self.action_to_execute
+                or self.mitigation is None
+                or self.recovery is None
+            ):
                 raise ValueError("completed execution requires action, mitigation, and recovery")
         elif (
             self.approval_decision is not ApprovalDecision.REJECT
+            or self.action_id_to_execute is not None
             or self.action_to_execute is not None
             or self.mitigation is not None
             or self.recovery is not None
@@ -150,7 +160,9 @@ def harness_task_prompt(public_ticket: str) -> str:
         "role-scoped telemetry, change, and reliability specialists; do not perform their MCP "
         "work yourself and do not invent a finding for a specialist you did not call. Collect at "
         "least two independently sourced evidence identifiers, establish chronology, and choose "
-        "the least-destructive reversible mitigation. Return the HarnessProposal schema with "
+        "the least-destructive reversible mitigation. Use the canonical action ID from the "
+        "reversible-mitigation runbook as proposed_mitigation_id while retaining a readable "
+        "description in proposed_mitigation. Return the HarnessProposal schema with "
         "each consulted specialist's actual finding and one commander synthesis. Do not claim "
         "that approval, mitigation, or recovery has occurred; the outer control plane owns those "
         "steps."
