@@ -196,6 +196,7 @@ def _vllm_container_command_runner(command: list[str] | tuple[str, ...], _timeou
             ]
         )
     if command[:2] == ["docker", "exec"]:
+        assert command[3] == "/usr/bin/python3"
         return json.dumps(
             {"python": "3.12.12", "pytorch": "2.10.0", "cuda": "13.0", "vllm": "0.26.dev"}
         )

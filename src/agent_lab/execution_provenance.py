@@ -513,7 +513,7 @@ def _attest_container_process(
         "docker",
         "exec",
         container_name,
-        "python",
+        "/usr/bin/python3",
         "-c",
         (
             "import json,platform,torch,vllm;"

@@ -34,7 +34,7 @@ docker pull \
   vllm/vllm-openai@sha256:674c5aa666d38c07a0dc779f8c77a05c2b859617410d16dcdd8a8776166c92b9
 
 docker run --rm --pull never \
-  --entrypoint python \
+  --entrypoint /usr/bin/python3 \
   --volume "$AGENT_LAB_HF_CACHE:/root/.cache/huggingface" \
   vllm/vllm-openai@sha256:674c5aa666d38c07a0dc779f8c77a05c2b859617410d16dcdd8a8776166c92b9 \
   -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen3.5-9B', revision='c202236235762e1c871ad0ccb60c8ee5ba337b9a')"
