@@ -1,6 +1,10 @@
 import json
 
-from agent_lab.model_compat_contracts import MODEL_ACTOR_PROBES, ModelFixture
+from agent_lab.model_compat_contracts import (
+    MODEL_ACTOR_PROBES,
+    ModelFixture,
+    normalize_fixture_text,
+)
 from agent_lab.model_compat_suite import _advertised_model_ids, run_suite
 
 
@@ -53,3 +57,8 @@ def test_live_inventory_extracts_openai_model_ids() -> None:
     }
 
     assert _advertised_model_ids(payload) == ["aligned-model", "second-model"]
+
+
+def test_fixture_text_normalization_only_removes_boundary_whitespace() -> None:
+    assert normalize_fixture_text("\n\nmulti-turn complete \t") == "multi-turn complete"
+    assert normalize_fixture_text("multi turn complete") == "multi turn complete"
