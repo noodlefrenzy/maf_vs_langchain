@@ -14,6 +14,7 @@ from agent_lab.contracts import (
     CapabilityGroup,
     ToolError,
 )
+from agent_lab.scenario import MitigationActionId
 
 
 class StrictModel(BaseModel):
@@ -194,6 +195,7 @@ class HypothesisResult(StrictModel):
 
 
 class MitigationRequestInput(StrictModel):
+    proposed_action_id: MitigationActionId
     proposed_action: str
     rationale: str
     evidence_ids: list[str] = Field(min_length=2)
@@ -208,6 +210,7 @@ class MitigationResult(StrictModel):
     case_id: str
     request_id: str
     world_tick: int = Field(ge=0)
+    action_id: MitigationActionId
     action: str
     status: str
     effective: bool

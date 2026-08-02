@@ -26,7 +26,7 @@ from agent_lab.contracts import (
     ToolAuditEvent,
     WorldEvaluationState,
 )
-from agent_lab.evaluator import DeterministicScore
+from agent_lab.evaluator import DeterministicScore, score_incident
 from agent_lab.scenario import IncidentCase
 from agent_lab.trace_contracts import (
     NativeSpanRecord,
@@ -35,6 +35,8 @@ from agent_lab.trace_contracts import (
     TraceCollectorStatus,
     compute_trace_completeness,
 )
+
+_ARTIFACT_EVENT_PATH = re.compile(r"^artifacts/[A-Za-z0-9][A-Za-z0-9._-]*\.json$")
 
 
 class FindingLevel(StrEnum):
@@ -550,7 +552,7 @@ def _validate_artifacts(
             continue
         relative = event.payload.get("artifact")
         digest = event.payload.get("sha256")
-        if not isinstance(relative, str) or not relative.startswith("artifacts/"):
+        if not isinstance(relative, str) or _ARTIFACT_EVENT_PATH.fullmatch(relative) is None:
             _error(
                 findings,
                 "artifact_event_path_invalid",
@@ -742,6 +744,43 @@ def _validate_scorer_inputs(
                 f"Expected {manifest.world_manifest_sha256}, observed {observed_digest}.",
                 "artifacts/world-manifest.json",
             )
+
+    audit_log = parsed.get("command-audit.json")
+    world_state = parsed.get("evaluation-state.json")
+    recorded_score = parsed.get("scores.json")
+    if (
+        isinstance(world_manifest, IncidentCase)
+        and isinstance(report, IncidentReport)
+        and isinstance(audit_log, list)
+        and all(isinstance(event, ToolAuditEvent) for event in audit_log)
+        and isinstance(world_state, WorldEvaluationState)
+        and isinstance(recorded_score, DeterministicScore)
+    ):
+        try:
+            recomputed_score = score_incident(
+                world_manifest,
+                report,
+                audit_log,
+                world_state,
+            )
+        except ValueError as exc:
+            _error(
+                findings,
+                "score_recomputation_failed",
+                str(exc),
+                "scores.json",
+            )
+        else:
+            if canonical_json(recomputed_score.model_dump(mode="json")) != canonical_json(
+                recorded_score.model_dump(mode="json")
+            ):
+                _error(
+                    findings,
+                    "score_recomputation_mismatch",
+                    "scores.json differs from the deterministic score recomputed from "
+                    "validated bundle inputs.",
+                    "scores.json",
+                )
 
 
 def _validate_native_trace(

@@ -25,6 +25,7 @@ from agent_lab.contracts import (
     RunManifest,
     TerminalStatus,
 )
+from agent_lab.scenario import MitigationActionId
 
 PROTOCOL_VERSION = "0.1.0"
 
@@ -154,15 +155,26 @@ class ApprovalCommand(ProtocolModel):
     decision: ApprovalDecision
     decided_by: str = Field(min_length=1)
     decided_tick: int = Field(ge=0)
+    action_id_to_execute: MitigationActionId | None = None
     action_to_execute: str | None = None
     approval_token: str | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_decision(self) -> ApprovalCommand:
         if self.decision in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:
-            if not self.action_to_execute or not self.approval_token:
-                raise ValueError("approved or edited commands require an action and approval token")
-        elif self.action_to_execute is not None or self.approval_token is not None:
+            if (
+                not self.action_id_to_execute
+                or not self.action_to_execute
+                or not self.approval_token
+            ):
+                raise ValueError(
+                    "approved or edited commands require an action ID, description, and token"
+                )
+        elif (
+            self.action_id_to_execute is not None
+            or self.action_to_execute is not None
+            or self.approval_token is not None
+        ):
             raise ValueError("rejected commands cannot authorize an action")
         return self
 

@@ -204,6 +204,7 @@ def run_oracle(
             "request_mitigation",
             "incident_commander",
             lambda: world.request_mitigation(
+                world.incident.correct_mitigation_id,
                 world.incident.correct_mitigation,
                 "Independent telemetry, change, and policy evidence support this action.",
                 evidence_ids,
@@ -264,6 +265,7 @@ def run_oracle(
             root_cause=root_cause,
             confidence=1.0,
             evidence=evidence,
+            mitigation_action_id=world.incident.correct_mitigation_id,
             mitigation=world.incident.correct_mitigation,
             mitigation_request_id=approval.request_id,
             approval_decision=approval.decision,

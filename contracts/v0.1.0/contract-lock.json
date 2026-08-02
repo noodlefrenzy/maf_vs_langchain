@@ -1,8 +1,8 @@
 {
-  "artifact_schemas_sha256": "c14e2ad72607d98e76ffcfce1a06606f47fb1874abf6c7971439bc76104f2273",
-  "contract_bundle_sha256": "9f499ad34b80bffb908aab0b40d0b471d8f7ac9e3abdc74c91f04b653055502a",
+  "artifact_schemas_sha256": "5aad304dbab7d658d2e6f611ac9fea73c182e87f9b59ac50b047914fc7a0476a",
+  "contract_bundle_sha256": "820cf7bb4a57fd380a178c1dd53e9fec2fe2f6de032bbc910d44bad6e4b87664",
   "error_taxonomy_sha256": "745145a68ca360b4854ee30beb6e0a27cc17f94cf583b254123073aac76b7c51",
   "prompt_bundle_sha256": "864ed9ac2d825ff73b46747ed29039bc6da2b4505bca7a91b1bce34ac97ada9d",
   "schema_version": "0.1.0",
-  "tool_catalog_sha256": "d30ef7d18cc74a418a0c97d5c203a721385a69758dcc5318b68ad19a0b267f2e"
+  "tool_catalog_sha256": "62adb0edbbe48bc58ee9644ce444d36b9ab03172ba93ba3d97161cde978ba898"
 }

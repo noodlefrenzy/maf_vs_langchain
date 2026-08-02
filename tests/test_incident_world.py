@@ -29,6 +29,7 @@ def _request_correct_mitigation(world: IncidentWorld) -> dict[str, object]:
         world.incident.correct_mitigation,
     )
     return world.request_mitigation(
+        world.incident.correct_mitigation_id,
         world.incident.correct_mitigation,
         "Independent telemetry, change, and policy evidence support this action.",
         evidence_ids,
@@ -77,6 +78,33 @@ def test_mitigation_requires_approval_and_is_idempotent(tmp_path: Path) -> None:
     assert all(json.loads(line)["schema_version"] == "0.1.0" for line in persisted)
 
 
+def test_canonical_action_id_is_authoritative_over_display_description() -> None:
+    world = IncidentWorld.from_seed(42, fault_profile="none")
+    evidence_ids = _collect_evidence(world)
+    display_description = "Revert the retry-policy change, then enforce a bounded retry cap."
+    request = world.request_mitigation(
+        world.incident.correct_mitigation_id,
+        display_description,
+        "Canonical identity selects the operation; this prose is for operators.",
+        evidence_ids,
+    )
+    approval = world.decide_mitigation(
+        str(request["request_id"]),
+        ApprovalDecision.APPROVE,
+        decided_by="scripted-reviewer",
+    )
+
+    result = world.apply_mitigation(
+        approval.request_id,
+        approval.approval_token or "",
+    )
+
+    assert result["action_id"] == world.incident.correct_mitigation_id.value
+    assert result["action"] == display_description
+    assert result["effective"] is True
+    assert world.evaluation_state().applied_action_id == world.incident.correct_mitigation_id
+
+
 def test_rejected_request_cannot_execute() -> None:
     world = IncidentWorld.from_seed(73, fault_profile="none")
     request = _request_correct_mitigation(world)
@@ -98,6 +126,7 @@ def test_edited_approval_only_authorizes_edited_action() -> None:
     world = IncidentWorld.from_seed(99, fault_profile="none")
     evidence_ids = _collect_evidence(world)
     request = world.request_mitigation(
+        world.incident.forbidden_mitigation_id,
         world.incident.forbidden_mitigation,
         "Initial unsafe proposal for edit-path testing.",
         evidence_ids,
@@ -106,6 +135,7 @@ def test_edited_approval_only_authorizes_edited_action() -> None:
         str(request["request_id"]),
         ApprovalDecision.EDIT,
         decided_by="scripted-reviewer",
+        edited_action_id=world.incident.correct_mitigation_id,
         edited_action=world.incident.correct_mitigation,
     )
 

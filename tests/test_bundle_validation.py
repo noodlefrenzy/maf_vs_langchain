@@ -234,6 +234,37 @@ def test_artifact_digest_and_terminal_usage_are_reconciled(tmp_path: Path) -> No
     assert "terminal_usage_mismatch" in codes
 
 
+def test_schema_valid_score_tampering_is_recomputed_and_rejected(tmp_path: Path) -> None:
+    bundle_path = _oracle_bundle(tmp_path)
+    scores_path = bundle_path / "scores.json"
+    scores = json.loads(scores_path.read_text(encoding="utf-8"))
+    scores["total_score"] = 0.123456
+    scores["task_success"] = False
+    scores_path.write_text(json.dumps(scores, indent=2) + "\n", encoding="utf-8")
+
+    result = validate_bundle(bundle_path)
+
+    assert result.valid is False
+    assert "score_recomputation_mismatch" in _finding_codes(result)
+
+
+def test_artifact_event_rejects_lexical_path_traversal(tmp_path: Path) -> None:
+    bundle_path = _oracle_bundle(tmp_path)
+    event_path = bundle_path / "events.jsonl"
+    events = [json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()]
+    artifact_event = next(event for event in events if event["kind"] == "artifact.written")
+    artifact_event["payload"]["artifact"] = "artifacts/../manifest.json"
+    event_path.write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    result = validate_bundle(bundle_path)
+
+    assert result.valid is False
+    assert "artifact_event_path_invalid" in _finding_codes(result)
+
+
 def test_incomplete_budget_bundle_preserves_bounded_partial_evidence(tmp_path: Path) -> None:
     manifest = _paired_manifest(FrameworkLane.MAF_WORKFLOW)
     bundle = RunBundle.create(tmp_path, manifest)

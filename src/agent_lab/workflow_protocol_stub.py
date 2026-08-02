@@ -13,6 +13,7 @@ from agent_lab.runner_host import (
     run_workflow_protocol,
 )
 from agent_lab.runner_protocol import CheckpointCapability, RunRequest
+from agent_lab.scenario import MitigationActionId
 from agent_lab.workflow_errors import EvidenceGateFailed
 from agent_lab.workflow_telemetry import WorkflowTelemetry
 
@@ -69,6 +70,7 @@ async def _execute(
         ApprovalRequest(
             request_id="mit-protocol-stub-01",
             case_id="case-protocol-stub",
+            proposed_action_id=MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY,
             proposed_action="rollback checkout-api",
             rationale="hermetic protocol exercise",
             evidence_ids=["ev-protocol-01", "ev-protocol-02"],
@@ -82,6 +84,7 @@ async def _execute(
         "execution": {
             "status": ("approval_rejected" if approval["decision"] == "reject" else "completed"),
             "approval_decision": approval["decision"],
+            "action_id_to_execute": approval["action_id_to_execute"],
             "action_to_execute": approval["action_to_execute"],
         },
     }

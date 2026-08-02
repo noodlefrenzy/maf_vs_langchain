@@ -269,12 +269,22 @@ class WorkflowProtocolSession(WorkflowTelemetry):
                 "decision": command.decision.value,
                 "decided_by": command.decided_by,
                 "decided_tick": command.decided_tick,
+                "action_id_to_execute": (
+                    command.action_id_to_execute.value
+                    if command.action_id_to_execute is not None
+                    else None
+                ),
                 "action_to_execute": command.action_to_execute,
             },
         )
         return {
             "request_id": command.request_id,
             "decision": command.decision.value,
+            "action_id_to_execute": (
+                command.action_id_to_execute.value
+                if command.action_id_to_execute is not None
+                else None
+            ),
             "action_to_execute": command.action_to_execute,
             "approval_token": command.approval_token,
         }

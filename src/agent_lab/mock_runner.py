@@ -228,6 +228,11 @@ def run(mode: str, *, budget_field: str) -> int:
                 {
                     "request_id": command.request_id,
                     "decision": command.decision.value,
+                    "action_id_to_execute": (
+                        command.action_id_to_execute.value
+                        if command.action_id_to_execute is not None
+                        else None
+                    ),
                     "action_to_execute": command.action_to_execute,
                     "decided_by": command.decided_by,
                     "decided_tick": command.decided_tick,

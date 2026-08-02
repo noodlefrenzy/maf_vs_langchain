@@ -173,6 +173,7 @@ async def _run_maf_protocol(
             str(event.payload["request_id"]),
             ApprovalDecision.EDIT,
             decided_by="maf-live-compat-reviewer",
+            edited_action_id=world.incident.correct_mitigation_id,
             edited_action=SEED_42_RECOVERY_ACTION,
         )
 

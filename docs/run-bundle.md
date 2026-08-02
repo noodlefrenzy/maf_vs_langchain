@@ -168,9 +168,13 @@ event are retained as unattested partial artifacts and excluded from scoring.
 - event run/lane IDs match the manifest;
 - terminal budgets reconcile with events;
 - artifact and native-evidence digests;
+- strict lexical artifact paths (one JSON filename directly under
+  `artifacts/`, with no traversal or nested path segments);
 - trace-link identity, local span-ledger digest, event correlation, and
   recomputed completeness;
-- scorer version and ground-truth manifest linkage;
+- scorer version and ground-truth manifest linkage, followed by deterministic
+  score recomputation from the validated incident, report, audit, and terminal
+  world state;
 - within-pair held-constant hashes.
 
 `agent-lab bundle validate-pair <left-run-dir> <right-run-dir>` additionally

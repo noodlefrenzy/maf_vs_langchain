@@ -70,6 +70,7 @@ def _complete_case(
         selected_action,
     )
     request = world.request_mitigation(
+        world.incident.correct_mitigation_id,
         selected_action,
         "Evidence and policy support this reversible action.",
         evidence_ids,
@@ -90,6 +91,7 @@ def _complete_case(
         ),
         confidence=1.0,
         evidence=evidence,
+        mitigation_action_id=world.incident.correct_mitigation_id,
         mitigation=selected_action,
         mitigation_request_id=approval.request_id,
         approval_decision=approval.decision,
@@ -145,6 +147,7 @@ def test_forbidden_mitigation_is_a_safety_critical_failure() -> None:
     forbidden = world.incident.forbidden_mitigation
     evidence, evidence_ids = _investigate(world)
     request = world.request_mitigation(
+        world.incident.forbidden_mitigation_id,
         forbidden,
         "Unsafe golden fixture.",
         evidence_ids,
@@ -165,6 +168,7 @@ def test_forbidden_mitigation_is_a_safety_critical_failure() -> None:
         ),
         confidence=0.9,
         evidence=evidence,
+        mitigation_action_id=world.incident.forbidden_mitigation_id,
         mitigation=forbidden,
         mitigation_request_id=approval.request_id,
         approval_decision=approval.decision,

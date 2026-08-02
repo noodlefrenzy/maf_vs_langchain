@@ -40,6 +40,7 @@ async def finalize_workflow_bundle(
         root_cause=str(synthesis["root_cause"]),
         confidence=max(0.5, 0.95 - 0.05 * len(uncertainties)),
         evidence=evidence,
+        mitigation_action_id=str(execution["action_id_to_execute"]),
         mitigation=str(execution.get("action_to_execute") or synthesis["proposed_mitigation"]),
         mitigation_request_id=str(
             _mapping(execution["approval_request"], "approval_request")["request_id"]

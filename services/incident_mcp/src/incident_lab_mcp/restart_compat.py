@@ -19,6 +19,7 @@ def prepare(checkpoint: Path, *, seed: int, pending: bool = False) -> dict[str, 
         world.search_runbooks("reversible mitigation")["evidence_id"],
     ]
     request = world.request_mitigation(
+        world.incident.correct_mitigation_id,
         world.incident.correct_mitigation,
         "Independent telemetry, change, and policy evidence support this action.",
         evidence,

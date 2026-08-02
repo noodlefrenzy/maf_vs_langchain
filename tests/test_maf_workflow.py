@@ -53,6 +53,7 @@ def test_native_maf_investigation_synthesizes_before_evidence_gate() -> None:
         "root_cause": "correlated root cause",
         "chronology": ["change preceded symptoms", "telemetry confirmed impact"],
         "evidence_ids": ["ev-change", "ev-runbook", "ev-telemetry"],
+        "proposed_mitigation_id": "rollback_checkout_retry_policy",
         "proposed_mitigation": "apply the reversible runbook action",
         "recovery_checks": ["verify affected service health"],
         "evidence_sufficient": True,

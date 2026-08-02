@@ -371,6 +371,7 @@ class ControlPlane:
                                         decision=approval.decision,
                                         decided_by=approval.decided_by,
                                         decided_tick=approval.decided_tick,
+                                        action_id_to_execute=approval.action_id_to_execute,
                                         action_to_execute=approval.action_to_execute,
                                         approval_token=approval.approval_token,
                                     ),

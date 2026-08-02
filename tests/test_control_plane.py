@@ -29,6 +29,7 @@ from agent_lab.runner_protocol import (
     encode_protocol_message,
     redacted_request_payload,
 )
+from agent_lab.scenario import MitigationActionId
 
 
 def _manifest(*, wall_clock_seconds: int = 5) -> RunManifest:
@@ -183,6 +184,7 @@ def test_control_plane_delivers_token_bound_approval_without_persisting_secret(
             decision=ApprovalDecision.EDIT,
             decided_by="control-plane-test-reviewer",
             decided_tick=7,
+            action_id_to_execute=MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY,
             action_to_execute="rollback checkout-api and cap retries",
             approval_token=approval_token,
         )
@@ -207,6 +209,7 @@ def test_control_plane_delivers_token_bound_approval_without_persisting_secret(
         "run.finished",
     ]
     assert events[2]["payload"] == {
+        "action_id_to_execute": "rollback_checkout_retry_policy",
         "action_to_execute": "rollback checkout-api and cap retries",
         "decided_by": "control-plane-test-reviewer",
         "decided_tick": 7,
@@ -281,6 +284,7 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
             decision=ApprovalDecision.EDIT,
             decided_by="protocol-session-test-reviewer",
             decided_tick=5,
+            action_id_to_execute=MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY,
             action_to_execute="rollback checkout-api and cap retries",
             approval_token=approval_token,
         )

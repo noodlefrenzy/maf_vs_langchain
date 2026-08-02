@@ -31,6 +31,7 @@ from agent_lab.contracts import AgentRole, ApprovalDecision, ApprovalRequest, Mo
 from agent_lab.prompt_bundle import render_role_prompt
 from agent_lab.runner_host import ApprovalProvider
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
+from agent_lab.scenario import MitigationActionId
 from agent_lab.tool_catalog import (
     MitigationResult,
     RecoveryCheckResult,
@@ -79,6 +80,7 @@ class CommanderSynthesis(LaneModel):
     root_cause: str = Field(min_length=1)
     chronology: list[str] = Field(min_length=2, max_length=6)
     evidence_ids: list[str] = Field(min_length=MIN_EVIDENCE_IDS, max_length=12)
+    proposed_mitigation_id: MitigationActionId
     proposed_mitigation: str = Field(min_length=1)
     recovery_checks: list[str] = Field(min_length=1, max_length=6)
     evidence_sufficient: bool
@@ -110,12 +112,14 @@ class AuthorizedEnvelope(LaneModel):
     evidence: EvidencePacket
     request: ApprovalRequest
     decision: ApprovalDecision
+    action_id_to_execute: MitigationActionId
     action_to_execute: str
 
 
 class ApprovalResponse(LaneModel):
     request_id: str
     decision: ApprovalDecision
+    action_id_to_execute: MitigationActionId | None = None
     action_to_execute: str | None = None
     approval_token: str | None = Field(default=None, repr=False, exclude=True)
 
@@ -125,6 +129,7 @@ class WorkflowExecutionResult(LaneModel):
     evidence: EvidencePacket
     approval_request: ApprovalRequest
     approval_decision: ApprovalDecision
+    action_id_to_execute: MitigationActionId | None = None
     action_to_execute: str | None = None
     mitigation: MitigationResult | None = None
     recovery: RecoveryCheckResult | None = None
@@ -134,10 +139,16 @@ class WorkflowExecutionResult(LaneModel):
         if self.status == "completed":
             if self.approval_decision not in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:
                 raise ValueError("completed execution requires an approved decision")
-            if not self.action_to_execute or self.mitigation is None or self.recovery is None:
+            if (
+                not self.action_id_to_execute
+                or not self.action_to_execute
+                or self.mitigation is None
+                or self.recovery is None
+            ):
                 raise ValueError("completed execution requires action, mitigation, and recovery")
         elif (
             self.approval_decision is not ApprovalDecision.REJECT
+            or self.action_id_to_execute is not None
             or self.action_to_execute is not None
             or self.mitigation is not None
             or self.recovery is not None
@@ -341,13 +352,16 @@ class _Approval(Executor):
                 ).model_dump(mode="json")
             )
             return
-        if not decision.action_to_execute:
-            raise ValueError("approved mitigation requires the authorized action")
+        if not decision.action_id_to_execute or not decision.action_to_execute:
+            raise ValueError(
+                "approved mitigation requires the authorized action ID and description"
+            )
         await ctx.send_message(
             AuthorizedEnvelope(
                 evidence=envelope.evidence,
                 request=envelope.request,
                 decision=decision.decision,
+                action_id_to_execute=decision.action_id_to_execute,
                 action_to_execute=decision.action_to_execute,
             ).model_dump(mode="json")
         )
@@ -372,6 +386,7 @@ class _MitigateAndVerify(Executor):
                 evidence=envelope.evidence,
                 approval_request=envelope.request,
                 approval_decision=envelope.decision,
+                action_id_to_execute=envelope.action_id_to_execute,
                 action_to_execute=envelope.action_to_execute,
                 mitigation=mitigation,
                 recovery=recovery,
@@ -669,7 +684,9 @@ class MafCommanderAgent:
             "Synthesize the specialist findings below into one incident-command decision. "
             "Use only their claims and evidence identifiers. Cite evidence from at least two "
             "specialist roles, describe a chronology with at least two steps, propose the "
-            "least-destructive reversible mitigation, and name post-mitigation recovery checks. "
+            "least-destructive reversible mitigation, copy its canonical action ID from the "
+            "reliability runbook evidence into proposed_mitigation_id, and name post-mitigation "
+            "recovery checks. "
             "Set evidence_sufficient true only when those requirements are met. Do not call tools "
             "or claim that a mitigation has run.\n\n"
             f"Available evidence IDs: {json.dumps(available_ids)}\n"
@@ -721,6 +738,7 @@ class MafCommanderAgent:
         )
         result = await self._call_tool(
             "request_mitigation",
+            proposed_action_id=synthesis.proposed_mitigation_id.value,
             proposed_action=synthesis.proposed_mitigation,
             rationale=(
                 "The incident commander synthesized independently sourced specialist evidence."
@@ -729,7 +747,10 @@ class MafCommanderAgent:
         )
         self._update_tool_stats()
         return ApprovalRequest.model_validate(
-            _structured_payload(result, {"request_id", "proposed_action", "status"})
+            _structured_payload(
+                result,
+                {"request_id", "proposed_action_id", "proposed_action", "status"},
+            )
         )
 
     async def apply_and_verify(
@@ -748,7 +769,10 @@ class MafCommanderAgent:
         )
         self._update_tool_stats()
         mitigation = MitigationResult.model_validate(
-            _structured_payload(mitigation_result, {"request_id", "effective", "action"})
+            _structured_payload(
+                mitigation_result,
+                {"request_id", "effective", "action_id", "action"},
+            )
         )
         recovery = RecoveryCheckResult.model_validate(
             _structured_payload(recovery_result, {"case_id", "recovered", "checks"})
@@ -988,8 +1012,12 @@ async def run_live_approved(
         if response.request_id != envelope.request.request_id:
             raise ValueError("approval response request ID differs from the pending request")
         if response.decision in {ApprovalDecision.APPROVE, ApprovalDecision.EDIT}:
-            if not response.approval_token or not response.action_to_execute:
-                raise ValueError("approved response requires an action and an approval token")
+            if (
+                not response.approval_token
+                or not response.action_id_to_execute
+                or not response.action_to_execute
+            ):
+                raise ValueError("approved response requires an action ID, description, and token")
             approval_tokens[response.request_id] = response.approval_token
         resumed = await workflow.run(
             checkpoint_id=latest.checkpoint_id,
@@ -1051,6 +1079,7 @@ async def _deterministic_probe() -> dict[str, Any]:
             evidence_ids=sorted(
                 {evidence_id for finding in findings for evidence_id in finding.evidence_ids}
             ),
+            proposed_mitigation_id=MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY,
             proposed_mitigation="apply the reversible runbook action",
             recovery_checks=["verify affected service health"],
             evidence_sufficient=True,
@@ -1094,6 +1123,7 @@ async def _deterministic_approval_probe(
             evidence_ids=sorted(
                 {evidence_id for finding in findings for evidence_id in finding.evidence_ids}
             ),
+            proposed_mitigation_id=MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY,
             proposed_mitigation="apply the reversible runbook action",
             recovery_checks=["verify affected service health"],
             evidence_sufficient=True,
@@ -1103,6 +1133,7 @@ async def _deterministic_approval_probe(
         return ApprovalRequest(
             request_id="mit-deterministic-01",
             case_id="case-deterministic",
+            proposed_action_id=evidence.synthesis.proposed_mitigation_id,
             proposed_action=evidence.synthesis.proposed_mitigation,
             rationale="grounded deterministic evidence",
             evidence_ids=evidence.synthesis.evidence_ids,
@@ -1117,6 +1148,7 @@ async def _deterministic_approval_probe(
             case_id="case-deterministic",
             request_id="mit-deterministic-01",
             world_tick=2,
+            action_id=MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY,
             action="apply the reversible runbook action",
             status="applied",
             effective=True,
@@ -1164,6 +1196,9 @@ async def _deterministic_approval_probe(
             "decision": decision.value,
         }
         if decision is not ApprovalDecision.REJECT:
+            response["action_id_to_execute"] = (
+                MitigationActionId.ROLLBACK_CHECKOUT_RETRY_POLICY.value
+            )
             response["action_to_execute"] = "apply the reversible runbook action"
         resumed = await workflow.run(
             checkpoint_id=latest.checkpoint_id,

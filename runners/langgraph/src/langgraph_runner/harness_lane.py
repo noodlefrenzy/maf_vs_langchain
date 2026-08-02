@@ -398,8 +398,12 @@ async def run_live_approved(
             approval_decision=approval.decision,
         )
     else:
-        if not approval.approval_token or not approval.action_to_execute:
-            raise ValueError("approved response requires an action and approval token")
+        if (
+            not approval.approval_token
+            or not approval.action_id_to_execute
+            or not approval.action_to_execute
+        ):
+            raise ValueError("approved response requires an action ID, description, and token")
         mitigation, recovery = await command_agent.apply_and_verify(
             approval.request_id,
             approval.approval_token,
@@ -409,6 +413,7 @@ async def run_live_approved(
             evidence=evidence,
             approval_request=approval_request,
             approval_decision=approval.decision,
+            action_id_to_execute=approval.action_id_to_execute,
             action_to_execute=approval.action_to_execute,
             mitigation=mitigation,
             recovery=recovery,
