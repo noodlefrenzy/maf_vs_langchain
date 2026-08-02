@@ -7,6 +7,7 @@ readonly IMAGE="vllm/vllm-openai@sha256:674c5aa666d38c07a0dc779f8c77a05c2b859617
 readonly MODEL="Qwen/Qwen3.5-9B"
 readonly REVISION="c202236235762e1c871ad0ccb60c8ee5ba337b9a"
 readonly PORT="8001"
+readonly MAX_BATCHED_TOKENS="8192"
 
 if [[ $# -ne 3 ]]; then
   echo "usage: $0 <8192|16384|32768> <before_restart|after_restart> <output.json>" >&2
@@ -76,10 +77,11 @@ docker run --detach --pull never \
   --host 0.0.0.0 \
   --port "$PORT" \
   --dtype bfloat16 \
-  --load-format safetensors \
+  --load-format bitsandbytes \
+  --quantization bitsandbytes \
   --tensor-parallel-size 1 \
   --max-model-len "$CONTEXT_TOKENS" \
-  --max-num-batched-tokens "$CONTEXT_TOKENS" \
+  --max-num-batched-tokens "$MAX_BATCHED_TOKENS" \
   --max-num-seqs 2 \
   --gpu-memory-utilization 0.75 \
   --seed 1729 \

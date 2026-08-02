@@ -373,6 +373,8 @@ def _attest_vllm_runtime(
         "model_id": served_id,
         "revision": revision,
         "format": "safetensors",
+        "load_format": flags["--load-format"],
+        "quantization": flags.get("--quantization"),
     }
     parser = {
         "reasoning": flags["--reasoning-parser"],
@@ -501,6 +503,8 @@ def _attest_container_process(
         raise ValueError("vLLM container process command is incomplete")
     process_tokens = [process_path, *arguments]
     redacted = _redact_process_tokens(process_tokens)
+    serve_flags = _selected_serve_flags(arguments)
+    uses_bitsandbytes = serve_flags.get("--quantization") == "bitsandbytes"
     ports = network.get("Ports")
     if not isinstance(ports, dict):
         raise ValueError("vLLM container published-port metadata is missing")
@@ -509,6 +513,8 @@ def _attest_container_process(
         for key, value in ports.items()
         if isinstance(key, str) and isinstance(value, list)
     }
+    bitsandbytes_import = ",bitsandbytes" if uses_bitsandbytes else ""
+    bitsandbytes_field = ",'bitsandbytes':bitsandbytes.__version__" if uses_bitsandbytes else ""
     stack_command = [
         "docker",
         "exec",
@@ -516,22 +522,25 @@ def _attest_container_process(
         "/usr/bin/python3",
         "-c",
         (
-            "import json,platform,torch,vllm;"
+            f"import json,platform,torch,vllm{bitsandbytes_import};"
             "print(json.dumps({'python':platform.python_version(),"
             "'pytorch':torch.__version__,'cuda':torch.version.cuda,"
-            "'vllm':vllm.__version__},sort_keys=True))"
+            f"'vllm':vllm.__version__{bitsandbytes_field}"
+            "},sort_keys=True))"
         ),
     ]
     stack = json.loads(runner(stack_command, timeout))
+    required_stack_keys = ("python", "pytorch", "cuda", "vllm") + (
+        ("bitsandbytes",) if uses_bitsandbytes else ()
+    )
     if not isinstance(stack, dict) or not all(
-        isinstance(stack.get(key), str) and stack[key]
-        for key in ("python", "pytorch", "cuda", "vllm")
+        isinstance(stack.get(key), str) and stack[key] for key in required_stack_keys
     ):
         raise ValueError("vLLM container Python/CUDA runtime metadata is incomplete")
     serve_process = {
         "executable": process_path,
         "command_sha256": sha256_payload(redacted),
-        "flags": _selected_serve_flags(arguments),
+        "flags": serve_flags,
         "container": {
             "name": container_name,
             "image_reference": image_reference,
@@ -694,11 +703,9 @@ def _require_vllm_serve_contract(
         "--dtype": "bfloat16",
         "--served-model-name": model.name,
         "--max-model-len": str(max_model_len),
-        "--max-num-batched-tokens": str(max_model_len),
         "--max-num-seqs": "2",
         "--port": str(endpoint_port),
         "--generation-config": "vllm",
-        "--load-format": "safetensors",
         "--tensor-parallel-size": "1",
         "--tokenizer": model.name,
     }
@@ -709,9 +716,18 @@ def _require_vllm_serve_contract(
             {
                 "--reasoning-parser": "qwen3",
                 "--tool-call-parser": "qwen3_coder",
+                "--load-format": "bitsandbytes",
+                "--quantization": "bitsandbytes",
+                "--max-num-batched-tokens": str(min(max_model_len, 8192)),
             }
         )
     else:
+        required_values.update(
+            {
+                "--load-format": "safetensors",
+                "--max-num-batched-tokens": str(max_model_len),
+            }
+        )
         for key in ("--reasoning-parser", "--tool-call-parser"):
             if not isinstance(flags.get(key), str) or not flags[key]:
                 raise ValueError(f"vLLM serve contract requires an explicit {key}")
@@ -728,6 +744,8 @@ def _require_vllm_serve_contract(
         raise ValueError("vLLM serve contract requires --gpu-memory-utilization") from exc
     if not 0 < gpu_memory_utilization <= 1:
         raise ValueError("vLLM --gpu-memory-utilization must be in (0, 1]")
+    if model.name == "Qwen/Qwen3.5-9B" and gpu_memory_utilization != 0.75:
+        raise ValueError("Qwen3.5-9B vLLM --gpu-memory-utilization must be 0.75")
     for key in (
         "--enable-auto-tool-choice",
         "--enable-chunked-prefill",
