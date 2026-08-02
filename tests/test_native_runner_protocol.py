@@ -128,6 +128,7 @@ def test_native_runner_protocol_probe(
     trace_link = json.loads(
         (result.paths.bundle / "native" / "trace-link.json").read_text(encoding="utf-8")
     )
+    assert not (result.paths.bundle / "native" / ".trace-link.json.tmp").exists()
     assert trace_link["collector_status"] == "unavailable"
     assert trace_link["span_count"] >= 1
     assert trace_link["completeness"]["ratio"] == 1.0

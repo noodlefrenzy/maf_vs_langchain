@@ -9,6 +9,7 @@ import os
 import random
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextlib import suppress
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -105,13 +106,17 @@ class ControlPlane:
         self,
         runs_root: Path,
         *,
-        graceful_shutdown_seconds: float = 1.0,
+        graceful_shutdown_seconds: float = 5.0,
+        protocol_line_limit_bytes: int = 1024 * 1024,
         environment: Mapping[str, str] | None = None,
     ) -> None:
         if graceful_shutdown_seconds <= 0:
             raise ValueError("graceful_shutdown_seconds must be positive")
+        if protocol_line_limit_bytes < 1024:
+            raise ValueError("protocol_line_limit_bytes must be at least 1024")
         self.runs_root = runs_root.resolve()
         self.graceful_shutdown_seconds = graceful_shutdown_seconds
+        self.protocol_line_limit_bytes = protocol_line_limit_bytes
         self.environment = dict(environment) if environment is not None else _safe_environment()
 
     def allocate_run(self, manifest: RunManifest) -> tuple[RunBundle, RunPaths]:
@@ -182,6 +187,7 @@ class ControlPlane:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=self.protocol_line_limit_bytes,
                 env={
                     **self.environment,
                     "AGENT_LAB_RUN_ID": str(request.manifest.run_id),
@@ -231,16 +237,27 @@ class ControlPlane:
         runner_terminal: TerminalMessage | None = None
         execution_started = False
         event_stream_complete = False
+        stdout_line_failed = False
         deadline = started + request.manifest.budget.wall_clock_seconds
 
-        await self._send(process, PrepareCommand(request=request))
+        try:
+            await self._send(process, PrepareCommand(request=request))
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            terminal_status = TerminalStatus.RUNNER_FAILURE
+            terminal_reason = f"prepare_command_failed:{type(exc).__name__}"
         try:
             while terminal_status is None:
-                wait_result, line = await self._next_line(
-                    process,
-                    deadline=deadline,
-                    cancel_event=cancel_event,
-                )
+                try:
+                    wait_result, line = await self._next_line(
+                        process,
+                        deadline=deadline,
+                        cancel_event=cancel_event,
+                    )
+                except ValueError:
+                    terminal_status = TerminalStatus.RUNNER_FAILURE
+                    terminal_reason = "runner_protocol_line_too_large"
+                    stdout_line_failed = True
+                    break
                 if wait_result == "timeout":
                     if awaiting_approval:
                         terminal_status = TerminalStatus.APPROVAL_TIMEOUT
@@ -291,10 +308,15 @@ class ControlPlane:
                         prepared.model_dump_json(indent=2) + "\n",
                         encoding="utf-8",
                     )
-                    await self._send(
-                        process,
-                        StartCommand(run_id=request.manifest.run_id),
-                    )
+                    try:
+                        await self._send(
+                            process,
+                            StartCommand(run_id=request.manifest.run_id),
+                        )
+                    except (BrokenPipeError, ConnectionResetError) as exc:
+                        terminal_status = TerminalStatus.RUNNER_FAILURE
+                        terminal_reason = f"start_command_failed:{type(exc).__name__}"
+                        break
                     execution_started = True
                 elif isinstance(message, UsageMessage):
                     if prepared is None:
@@ -417,49 +439,59 @@ class ControlPlane:
                         awaiting_approval = True
                     continue
 
-            drain_task = asyncio.create_task(
-                self._drain_runner_output(
+            if stdout_line_failed:
+                raw_drain_task = asyncio.create_task(process.stdout.read())
+                graceful = await self._stop_process(
                     process,
-                    request=request,
-                    usage=usage,
-                    expected_event_sequence=expected_event_sequence,
-                    prepared=prepared,
-                    runner_terminal=runner_terminal,
+                    run_id=request.manifest.run_id,
+                    cancel_status=terminal_status,
+                    cancel_reason=terminal_reason,
                 )
-            )
-            graceful = await self._stop_process(
-                process,
-                run_id=request.manifest.run_id,
-                cancel_status=(
-                    None
-                    if terminal_status
-                    in {
-                        TerminalStatus.COMPLETED,
-                        TerminalStatus.APPROVAL_REJECTED,
-                    }
-                    else terminal_status
-                ),
-                cancel_reason=(
-                    None
-                    if terminal_status
-                    in {
-                        TerminalStatus.COMPLETED,
-                        TerminalStatus.APPROVAL_REJECTED,
-                    }
-                    else terminal_reason
-                ),
-            )
-            usage, _, prepared, runner_terminal, stream_error = await drain_task
-            event_stream_complete = runner_terminal is not None and stream_error is None
-            if stream_error is not None:
-                terminal_status = TerminalStatus.INVALID_PROVENANCE
-                terminal_reason = f"runner_shutdown_stream_invalid:{stream_error}"
-            elif runner_terminal is not None and (
-                runner_terminal.status is not terminal_status
-                or runner_terminal.reason != terminal_reason
-            ):
-                terminal_status = TerminalStatus.INVALID_PROVENANCE
-                terminal_reason = "runner_terminal_disagrees_with_control_plane"
+                await asyncio.gather(raw_drain_task, return_exceptions=True)
+            else:
+                drain_task = asyncio.create_task(
+                    self._drain_runner_output(
+                        process,
+                        request=request,
+                        usage=usage,
+                        expected_event_sequence=expected_event_sequence,
+                        prepared=prepared,
+                        runner_terminal=runner_terminal,
+                    )
+                )
+                graceful = await self._stop_process(
+                    process,
+                    run_id=request.manifest.run_id,
+                    cancel_status=(
+                        None
+                        if terminal_status
+                        in {
+                            TerminalStatus.COMPLETED,
+                            TerminalStatus.APPROVAL_REJECTED,
+                        }
+                        else terminal_status
+                    ),
+                    cancel_reason=(
+                        None
+                        if terminal_status
+                        in {
+                            TerminalStatus.COMPLETED,
+                            TerminalStatus.APPROVAL_REJECTED,
+                        }
+                        else terminal_reason
+                    ),
+                )
+                usage, _, prepared, runner_terminal, stream_error = await drain_task
+                event_stream_complete = runner_terminal is not None and stream_error is None
+                if stream_error is not None:
+                    terminal_status = TerminalStatus.INVALID_PROVENANCE
+                    terminal_reason = f"runner_shutdown_stream_invalid:{stream_error}"
+                elif runner_terminal is not None and (
+                    runner_terminal.status is not terminal_status
+                    or runner_terminal.reason != terminal_reason
+                ):
+                    terminal_status = TerminalStatus.INVALID_PROVENANCE
+                    terminal_reason = "runner_terminal_disagrees_with_control_plane"
         finally:
             if process.returncode is None:
                 process.kill()
@@ -616,7 +648,7 @@ class ControlPlane:
 
     async def _send(self, process: asyncio.subprocess.Process, command: BaseModel) -> None:
         if process.stdin is None or process.stdin.is_closing():
-            return
+            raise BrokenPipeError("runner command stream is closed")
         process.stdin.write(encode_protocol_message(command))
         await process.stdin.drain()
 
@@ -633,11 +665,13 @@ class ControlPlane:
         if cancel_reason is not None:
             if cancel_status is None:
                 raise ValueError("cancel status is required with a cancellation reason")
-            await self._send(
-                process,
-                CancelCommand(run_id=run_id, status=cancel_status, reason=cancel_reason),
-            )
-        await self._send(process, ShutdownCommand(run_id=run_id))
+            with suppress(BrokenPipeError, ConnectionResetError):
+                await self._send(
+                    process,
+                    CancelCommand(run_id=run_id, status=cancel_status, reason=cancel_reason),
+                )
+        with suppress(BrokenPipeError, ConnectionResetError):
+            await self._send(process, ShutdownCommand(run_id=run_id))
         if process.stdin is not None:
             process.stdin.close()
         try:

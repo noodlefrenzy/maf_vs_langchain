@@ -99,6 +99,10 @@ completeness matrix. `native/traces/spans.jsonl` is not a raw OTLP dump: it is a
 content-free structural projection with span identity, timing, status,
 instrumentation scope, operation family, and a small attribute allowlist.
 Prompts, messages, tool arguments, and tool results are excluded.
+Concurrent local span exports are serialized, and `trace-link.json` is written
+through an owner-only temporary file plus atomic rename before the runner's
+terminal protocol message. Validators therefore never observe a partially
+written trace link as a completed runner outcome.
 `native/tracing-profile.json` and its digest keep the held-constant tracing and
 capture inputs immutable without changing the frozen v0.1 run-manifest schema.
 

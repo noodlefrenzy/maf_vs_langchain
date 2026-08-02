@@ -504,6 +504,51 @@ def test_mock_runner_crash_is_runner_failure(tmp_path: Path) -> None:
     _assert_bundle_valid(result)
 
 
+def test_oversized_protocol_line_is_terminalized_and_reaped(tmp_path: Path) -> None:
+    control_plane = ControlPlane(
+        tmp_path,
+        graceful_shutdown_seconds=0.2,
+        protocol_line_limit_bytes=1024,
+    )
+    request = _request(control_plane, _manifest())
+
+    result = asyncio.run(control_plane.execute(_command("oversized_line"), request))
+
+    assert result.terminal.status is TerminalStatus.RUNNER_FAILURE
+    assert result.terminal.reason == "runner_protocol_line_too_large"
+    assert result.terminal.event_stream_complete is False
+    assert result.graceful_shutdown is True
+    assert (result.paths.bundle / "terminal.json").is_file()
+    assert result.stderr_path.is_file()
+    _assert_bundle_valid(result)
+
+
+def test_prepare_send_failure_still_reaps_runner_and_writes_terminal(tmp_path: Path) -> None:
+    class PrepareSendFailureControlPlane(ControlPlane):
+        async def _send(self, process, command):
+            if isinstance(command, PrepareCommand):
+                raise BrokenPipeError("injected prepare failure")
+            await super()._send(process, command)
+
+    control_plane = PrepareSendFailureControlPlane(tmp_path, graceful_shutdown_seconds=0.1)
+    request = _request(control_plane, _manifest())
+
+    result = asyncio.run(
+        control_plane.execute(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            request,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.RUNNER_FAILURE
+    assert result.terminal.reason == "prepare_command_failed:BrokenPipeError"
+    assert result.terminal.execution_started is False
+    assert result.terminal.event_stream_complete is False
+    assert result.graceful_shutdown is False
+    assert result.stderr_path.is_file()
+    _assert_bundle_valid(result)
+
+
 def test_runner_launch_failure_is_terminalized(tmp_path: Path) -> None:
     control_plane = ControlPlane(tmp_path)
     request = _request(control_plane, _manifest())

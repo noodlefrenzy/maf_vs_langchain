@@ -128,6 +128,17 @@ finishes with an exact event stream; a crash or forced kill is recorded in
 `terminal.json` as a bounded incomplete stream rather than being mislabeled as
 corrupt completed evidence.
 
+Runner stdout is read with an explicit 1 MiB per-line ceiling. Crossing that
+ceiling produces `runner_failure: runner_protocol_line_too_large`, preserves
+stderr, and follows the same bounded reaping path as every other protocol
+failure. Command writes fail immediately on a closed stdin pipe; prepare,
+start, approval, and finalization commands cannot be silently dropped.
+
+Native tracing finalizes its local ledger and atomically publishes
+`trace-link.json` before the runner sends its terminal acknowledgement. The
+control plane's default graceful shutdown window is five seconds, long enough
+to cover the configured one-second exporter timeout while remaining bounded.
+
 An exception escaping while a normalized model request is in flight becomes
 `model_failure`. An exception following a normalized failed tool boundary (or
 while that tool is still in flight) becomes `tool_service_failure`. The error
@@ -140,7 +151,8 @@ misreporting the failure as a missing approval checkpoint.
 
 The mock-runner matrix covers success, startup/launch failure, crash, wall
 timeout, approval timeout, model-request timeout classification, explicit
-cancellation, graceful shutdown, and all four usage budgets. Native MAF and
+cancellation, oversized protocol output, graceful shutdown, and all four usage
+budgets. Native MAF and
 LangGraph processes also implement the boundary in an explicit `protocol_probe`
 mode. They report installed framework
 versions and planned topology, emit canonical run lifecycle events, and prove

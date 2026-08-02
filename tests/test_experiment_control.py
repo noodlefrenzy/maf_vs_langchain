@@ -1,11 +1,14 @@
+import asyncio
 import json
 import os
 import stat
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from agent_lab.async_cleanup import shutdown_server
 from agent_lab.bundle_validation import validate_bundle
 from agent_lab.contract_bundle import contract_bundle_hashes, sha256_payload
 from agent_lab.contracts import Budget, FrameworkLane, ModelProfile
@@ -14,6 +17,32 @@ from agent_lab.runner_host import NativeRunnerDescriptor
 from agent_lab.runner_protocol import CheckpointCapability
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_incident_server_shutdown_is_bounded_and_closes_listener() -> None:
+    class Listener:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    async def exercise() -> tuple[object, asyncio.Task, Listener]:
+        server = SimpleNamespace(should_exit=False)
+        server_task = asyncio.create_task(asyncio.sleep(60))
+        listener = Listener()
+        await shutdown_server(
+            server,
+            server_task,
+            listener,
+            timeout_seconds=0.01,
+        )
+        return server, server_task, listener
+
+    server, server_task, listener = asyncio.run(exercise())
+
+    assert server.should_exit is True
+    assert server_task.cancelled()
+    assert listener.closed is True
 
 
 def _experiment(path: Path) -> Path:

@@ -108,6 +108,10 @@ def run(mode: str, *, budget_field: str) -> int:
                 return 17
             started = True
             emit_event(EventKind.RUN_STARTED, {"execution_mode": mode})
+            if mode == "oversized_line":
+                sys.stdout.buffer.write(b"x" * 4096 + b"\n")
+                sys.stdout.buffer.flush()
+                continue
             if mode == "budget":
                 usage_values = {
                     "model_calls": 0,
@@ -281,6 +285,7 @@ def main() -> None:
             "model_timeout",
             "crash",
             "cancellation",
+            "oversized_line",
             "budget",
             "approval_success",
         ],

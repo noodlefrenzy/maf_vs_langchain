@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 import uvicorn
 
+from agent_lab.async_cleanup import shutdown_server
 from agent_lab.bundle_validation import validate_bundle, validate_pair
 from agent_lab.config import load_experiment, load_model_profile
 from agent_lab.contract_bundle import contract_bundle_hashes
@@ -331,9 +332,7 @@ async def _run_experiment(
                     }
                 blocks.append(block)
             finally:
-                server.should_exit = True
-                await server_task
-                listener.close()
+                await shutdown_server(server, server_task, listener)
 
     summary = {
         "schema_version": "0.1.0",

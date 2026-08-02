@@ -546,9 +546,9 @@ async def run_workflow_protocol(
         }[terminal_status]
         terminal_reason = f"{reason_prefix}:{type(exc).__name__}"
         session.fail(terminal_status, terminal_reason)
-    session.terminal(terminal_status, terminal_reason)
     if tracing is not None:
         tracing.finish(session.events)
+    session.terminal(terminal_status, terminal_reason)
     return await _await_shutdown(request)
 
 
@@ -644,6 +644,8 @@ def run_protocol_probe(
             ]
             _send(EventMessage(event=events[0]))
             _send(EventMessage(event=events[1]))
+            if tracing is not None:
+                tracing.finish(events)
             _send(
                 TerminalMessage(
                     run_id=request.manifest.run_id,
@@ -652,8 +654,6 @@ def run_protocol_probe(
                     usage=usage,
                 )
             )
-            if tracing is not None:
-                tracing.finish(events)
             terminal_sent = True
         elif isinstance(command, ApprovalCommand):
             _send(
