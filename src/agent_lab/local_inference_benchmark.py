@@ -520,14 +520,21 @@ def verify_cancellation(
     profile: ModelProfile,
     messages: list[dict[str, str]],
     *,
+    prompt_tokens: int,
     metrics_reader: Callable[[ModelProfile], dict[str, float]] = read_vllm_metrics,
     timeout_seconds: float = 10,
 ) -> dict[str, Any]:
+    output_cap = min(
+        profile.max_output_tokens,
+        profile.context_window_tokens - prompt_tokens,
+    )
+    if output_cap <= 0:
+        raise ValueError("cancellation prompt leaves no room for generated tokens")
     before = metrics_reader(profile)
     request_result = stream_completion(
         profile,
         messages,
-        max(512, profile.max_output_tokens),
+        output_cap,
         cancel_after_first=True,
     )
     deadline = time.monotonic() + timeout_seconds
@@ -549,6 +556,8 @@ def verify_cancellation(
     drained = _metrics_are_idle(after)
     return {
         "passed": request_result["status"] == "client_cancelled" and drained and health_ok,
+        "prompt_tokens": prompt_tokens,
+        "output_cap": output_cap,
         "request": request_result,
         "server_drained": drained,
         "server_healthy": health_ok,
@@ -825,12 +834,16 @@ def run_characterization(
                 )
                 matrix.append(result)
         cancel_target = min(2048, context_tokens - 1024)
-        cancellation_messages, _ = calibrate_prompt(
+        cancellation_messages, cancellation_prompt_tokens = calibrate_prompt(
             effective_profile,
             cancel_target,
             marker=f"context-{context_tokens}-cancellation",
         )
-        cancellation = verify_cancellation(effective_profile, cancellation_messages)
+        cancellation = verify_cancellation(
+            effective_profile,
+            cancellation_messages,
+            prompt_tokens=cancellation_prompt_tokens,
+        )
         malformed_tool_recovery = verify_malformed_tool_recovery(effective_profile)
     finally:
         sampler.stop()

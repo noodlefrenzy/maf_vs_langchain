@@ -56,6 +56,9 @@ The first benchmark request then exposed that this vLLM build streams thinking
 under the OpenAI delta field `reasoning`, while the initial measurement client
 recognized only `reasoning_content`. The client now treats either field as a
 generated-token event for TTFT and throughput without retaining its text.
+The next run also showed that the cancellation probe's configured 8,192-token
+cap was added to its calibrated 2,048-token prompt at the 8K slice. Cancellation
+now records and caps generation to the exact remaining served context.
 
 The launcher preserves the complete vLLM log beside each report as
 `*-server.log` before removing only its named container. Reports and logs use
