@@ -11,6 +11,7 @@ from agent_lab.local_inference_benchmark import (
     parse_vllm_metrics,
     stream_completion,
     tokenize_messages,
+    verify_cancellation,
     verify_malformed_tool_recovery,
 )
 
@@ -151,6 +152,41 @@ def test_stream_completion_accepts_reasoning_only_output() -> None:
     assert result["completion_tokens"] == 1
     assert result["visible_stream_events"] == 1
     assert "thinking" not in json.dumps(result)
+
+
+def test_cancellation_caps_output_at_remaining_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def stream(
+        _profile: ModelProfile,
+        _messages: list[dict[str, str]],
+        output_cap: int,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        captured.update({"output_cap": output_cap, **kwargs})
+        return {"status": "client_cancelled"}
+
+    monkeypatch.setattr("agent_lab.local_inference_benchmark.stream_completion", stream)
+    monkeypatch.setattr("agent_lab.local_inference_benchmark._get_text", lambda *_args: "ok")
+    metrics = {
+        "num_requests_running": 0.0,
+        "num_requests_waiting": 0.0,
+        "request_abort_total": 1.0,
+    }
+
+    result = verify_cancellation(
+        _profile().model_copy(update={"context_window_tokens": 8192}),
+        [{"role": "user", "content": "cancel"}],
+        prompt_tokens=2048,
+        metrics_reader=lambda _profile: metrics,
+    )
+
+    assert captured == {"output_cap": 6144, "cancel_after_first": True}
+    assert result["passed"] is True
+    assert result["prompt_tokens"] == 2048
+    assert result["output_cap"] == 6144
 
 
 def test_prompt_calibration_uses_the_served_chat_tokenizer() -> None:
