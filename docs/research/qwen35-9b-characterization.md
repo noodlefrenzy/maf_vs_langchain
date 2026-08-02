@@ -1,6 +1,6 @@
 # Qwen3.5-9B RTX 4090 characterization runbook
 
-Status: implementation ready; measurements pending local artifact acquisition.
+Status: artifacts acquired; revised 0.75 GPU-reservation measurements pending.
 
 This runbook is the execution contract for issue 13. It deliberately uses port
 `8001`; port `8000` remains available for the `lonestar` SSH tunnel.
@@ -20,6 +20,24 @@ The selected vLLM manifest is the linux/amd64 child of multi-architecture tag
 reported its compressed size as 8,738,929,920 bytes. Hugging Face reported the
 model repository at 19,319,118,862 bytes. A measured run uses `--pull never`,
 `HF_HUB_OFFLINE=1`, and `TRANSFORMERS_OFFLINE=1`; missing artifacts fail closed.
+
+## Initial fit observation
+
+The first 8K startup attempt on 2026-08-02 used vLLM's 0.90 GPU-memory
+reservation. The immutable image and model loaded successfully, with 16.8 GiB
+reported for model loading. During compilation and warmup, observed whole-GPU
+allocation peaked at approximately 23.2 GiB while unrelated processes retained
+approximately 4.14 GiB after the container exited. The server exited with code
+1 before becoming healthy, so no benchmark report was produced. The original
+ephemeral-container launcher removed the final server log, preventing a more
+specific failure classification.
+
+That 0.90 operating point is rejected for this shared RTX 4090 environment; it
+is not a rejection of the model. The frozen serving contract now reserves 0.75
+of GPU memory to retain headroom for the observed system allocation. The
+launcher also preserves the complete vLLM log beside each report as
+`*-server.log` before removing only its named container. Reports and logs use
+mode-0600 creation permissions and are never overwritten.
 
 ## One-time artifact acquisition
 
@@ -48,8 +66,8 @@ than 72 hours.
 
 Start from a clean, committed worktree. Each invocation creates a fresh server,
 waits for health, verifies the execution-provenance contract, runs one context
-slice, writes a mode-0600 report without overwriting prior evidence, and stops
-only its named container:
+slice, writes mode-0600 evidence without overwriting prior files, preserves the
+server log, and stops and removes only its named container:
 
 ```bash
 export AGENT_LAB_HF_CACHE=/absolute/path/to/huggingface-cache
@@ -106,7 +124,8 @@ recovery, and the exact effective request policy against the 32K server.
 ## Serving contract
 
 The script and preflight require BF16 safetensors, one tensor-parallel worker,
-two maximum sequences, explicit batched-token/context ceilings, generation
+two maximum sequences, a 0.75 GPU-memory reservation, explicit
+batched-token/context ceilings, generation
 defaults disabled (`--generation-config vllm`), Qwen `qwen3` reasoning and
 `qwen3_coder` tool parsers, text-only serving, chunked prefill, automatic tool
 choice, prefix caching, usage details, per-request timing metrics, tokenizer
