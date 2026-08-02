@@ -62,7 +62,8 @@ attestation before either lane starts. For llama.cpp this binds the requested
 model to the advertised model ID, immutable Hugging Face snapshot revision and
 GGUF artifact, tokenizer metadata, chat-template hash and capabilities, server
 build, parser modes, endpoint and process serve flags, context/slot settings,
-and raw endpoint-payload hashes. Compute identity is collected on the configured
+and identity-bearing endpoint-payload hashes. Volatile response timestamps and
+sleep state are excluded from held-constant hashes. Compute identity is collected on the configured
 serving host, not the machine owning an SSH tunnel; the lonestar profiles record
 its kernel plus Vulkan device, RADV/Mesa driver, and Vulkan runtime. Missing or
 ambiguous identity, a model mismatch, or a served context smaller than the
