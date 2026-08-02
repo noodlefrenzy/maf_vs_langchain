@@ -101,6 +101,111 @@ GPU1:
     raise AssertionError(f"unexpected command: {command}")
 
 
+def _vllm_command_runner(command: list[str] | tuple[str, ...], _timeout: float) -> str:
+    revision = "b" * 40
+    if command[:2] == ["uname", "-a"]:
+        return "Linux tower 7.0 x86_64\n"
+    if command[:3] == ["ps", "-eo", "pid=,args="]:
+        return (
+            "456 /opt/vllm/bin/vllm serve Qwen/Qwen3.5-9B "
+            "--served-model-name Qwen/Qwen3.5-9B "
+            f"--revision {revision} --tokenizer-revision {revision} "
+            "--tokenizer Qwen/Qwen3.5-9B --max-model-len 32768 "
+            "--max-num-batched-tokens 32768 --max-num-seqs 2 "
+            "--host 127.0.0.1 --port 8001 --dtype bfloat16 "
+            "--load-format safetensors --tensor-parallel-size 1 "
+            "--gpu-memory-utilization 0.9 --seed 1729 "
+            "--generation-config vllm --reasoning-parser qwen3 "
+            "--tool-call-parser qwen3_coder --enable-auto-tool-choice "
+            "--enable-chunked-prefill --enable-prefix-caching "
+            "--enable-tokenizer-info-endpoint "
+            "--enable-force-include-usage --enable-per-request-metrics "
+            "--enable-prompt-tokens-details "
+            "--language-model-only\n"
+        )
+    if command[:2] == ["nvidia-smi", "--query-gpu=name,uuid,driver_version,memory.total"]:
+        return "NVIDIA GeForce RTX 4090, GPU-test, 610.74, 24564\n"
+    if command == ["nvidia-smi"]:
+        return "NVIDIA-SMI 610.53 Driver Version: 610.74 CUDA Version: 13.3\n"
+    raise AssertionError(f"unexpected command: {command}")
+
+
+def _vllm_container_command_runner(command: list[str] | tuple[str, ...], _timeout: float) -> str:
+    revision = "b" * 40
+    image_digest = "sha256:" + "c" * 64
+    if command[:2] == ["uname", "-a"]:
+        return "Linux tower 7.0 x86_64\n"
+    if command[:2] == ["docker", "inspect"]:
+        return json.dumps(
+            [
+                {
+                    "State": {"Running": True, "Pid": 456},
+                    "Config": {"Image": f"vllm/vllm-openai@{image_digest}"},
+                    "Image": "sha256:" + "d" * 64,
+                    "Path": "/usr/local/bin/vllm",
+                    "Args": [
+                        "serve",
+                        "Qwen/Qwen3.5-9B",
+                        "--served-model-name",
+                        "Qwen/Qwen3.5-9B",
+                        "--revision",
+                        revision,
+                        "--tokenizer-revision",
+                        revision,
+                        "--tokenizer",
+                        "Qwen/Qwen3.5-9B",
+                        "--max-model-len",
+                        "32768",
+                        "--max-num-batched-tokens",
+                        "32768",
+                        "--max-num-seqs",
+                        "2",
+                        "--host",
+                        "0.0.0.0",
+                        "--port",
+                        "8001",
+                        "--dtype",
+                        "bfloat16",
+                        "--load-format",
+                        "safetensors",
+                        "--tensor-parallel-size",
+                        "1",
+                        "--gpu-memory-utilization",
+                        "0.9",
+                        "--seed",
+                        "1729",
+                        "--generation-config",
+                        "vllm",
+                        "--reasoning-parser",
+                        "qwen3",
+                        "--tool-call-parser",
+                        "qwen3_coder",
+                        "--enable-auto-tool-choice",
+                        "--enable-chunked-prefill",
+                        "--enable-prefix-caching",
+                        "--enable-tokenizer-info-endpoint",
+                        "--enable-force-include-usage",
+                        "--enable-per-request-metrics",
+                        "--enable-prompt-tokens-details",
+                        "--language-model-only",
+                    ],
+                    "NetworkSettings": {
+                        "Ports": {"8001/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8001"}]}
+                    },
+                }
+            ]
+        )
+    if command[:2] == ["docker", "exec"]:
+        return json.dumps(
+            {"python": "3.12.12", "pytorch": "2.10.0", "cuda": "13.0", "vllm": "0.26.dev"}
+        )
+    if command[:2] == ["nvidia-smi", "--query-gpu=name,uuid,driver_version,memory.total"]:
+        return "NVIDIA GeForce RTX 4090, GPU-test, 610.74, 24564\n"
+    if command == ["nvidia-smi"]:
+        return "NVIDIA-SMI 610.53 Driver Version: 610.74 CUDA Version: 13.3\n"
+    raise AssertionError(f"unexpected command: {command}")
+
+
 def test_model_runtime_attestation_hashes_exact_endpoint_and_compute_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -168,6 +273,156 @@ def test_model_runtime_attestation_excludes_volatile_endpoint_state(
 
     assert first["attestation_sha256"] == second["attestation_sha256"]
     assert first["endpoint_identity_sha256"] == second["endpoint_identity_sha256"]
+
+
+def test_vllm_runtime_attestation_hashes_pinned_model_tokenizer_and_serve_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    models = {"data": [{"id": "Qwen/Qwen3.5-9B", "created": 1}]}
+    tokenizer_info = {
+        "tokenizer_class": "Qwen2TokenizerFast",
+        "chat_template": "{% for message in messages %}{{ message.content }}{% endfor %}",
+        "model_max_length": 262144,
+    }
+
+    def fetch(url: str, _timeout: float) -> dict[str, Any]:
+        if url.endswith("/models"):
+            return models
+        if url.endswith("/version"):
+            return {"version": "0.24.0+test"}
+        if url.endswith("/tokenizer_info"):
+            return tokenizer_info
+        raise AssertionError(f"unexpected URL: {url}")
+
+    def post(url: str, payload: dict[str, Any], _timeout: float) -> dict[str, Any]:
+        assert url == "http://127.0.0.1:8001/tokenize"
+        assert payload["model"] == "Qwen/Qwen3.5-9B"
+        return {"count": 4, "max_model_len": 32768, "tokens": [1, 2, 3, 4]}
+
+    monkeypatch.setattr("agent_lab.execution_provenance._fetch_json", fetch)
+    monkeypatch.setattr("agent_lab.execution_provenance._post_json", post)
+    profile = _profile().model_copy(
+        update={
+            "name": "Qwen/Qwen3.5-9B",
+            "base_url": "http://127.0.0.1:8001/v1",
+            "context_window_tokens": 32768,
+        }
+    )
+
+    result = attest_model_runtime(
+        profile,
+        InferenceRuntimeProfile(
+            server_kind="vllm",
+            compute_backend="nvidia",
+            process_name="vllm",
+        ),
+        command_runner=_vllm_command_runner,
+    )
+
+    assert result["artifact"]["revision"] == "b" * 40
+    assert result["tokenizer"]["revision"] == "b" * 40
+    assert result["server"]["kind"] == "vllm"
+    assert result["server"]["build"] == "0.24.0+test"
+    assert result["server"]["parser"] == {
+        "reasoning": "qwen3",
+        "tool_call": "qwen3_coder",
+        "auto_tool_choice": True,
+    }
+    assert result["server"]["serve_process"]["flags"]["--port"] == "8001"
+    assert result["compute_runtime"]["backend"] == "nvidia"
+    assert len(result["chat_template"]["sha256"]) == 64
+    assert len(result["attestation_sha256"]) == 64
+
+
+def test_vllm_runtime_attestation_rejects_missing_required_serve_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "agent_lab.execution_provenance._fetch_json",
+        lambda url, _timeout: (
+            {"data": [{"id": "Qwen/Qwen3.5-9B"}]}
+            if url.endswith("/models")
+            else {"version": "0.24.0"}
+            if url.endswith("/version")
+            else {"tokenizer_class": "Qwen2TokenizerFast", "chat_template": "template"}
+        ),
+    )
+    monkeypatch.setattr(
+        "agent_lab.execution_provenance._post_json",
+        lambda _url, _payload, _timeout: {"count": 4, "max_model_len": 32768},
+    )
+
+    def missing_prefix_cache(command: list[str] | tuple[str, ...], timeout: float) -> str:
+        return _vllm_command_runner(command, timeout).replace("--enable-prefix-caching ", "")
+
+    profile = _profile().model_copy(
+        update={
+            "name": "Qwen/Qwen3.5-9B",
+            "base_url": "http://127.0.0.1:8001/v1",
+            "context_window_tokens": 32768,
+        }
+    )
+    with pytest.raises(ValueError, match="enable-prefix-caching"):
+        attest_model_runtime(
+            profile,
+            InferenceRuntimeProfile(
+                server_kind="vllm",
+                compute_backend="nvidia",
+                process_name="vllm",
+            ),
+            command_runner=missing_prefix_cache,
+        )
+
+
+def test_vllm_container_attestation_binds_manifest_stack_and_loopback_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "agent_lab.execution_provenance._fetch_json",
+        lambda url, _timeout: (
+            {"data": [{"id": "Qwen/Qwen3.5-9B"}]}
+            if url.endswith("/models")
+            else {"version": "0.26.0.dev"}
+            if url.endswith("/version")
+            else {"tokenizer_class": "Qwen2TokenizerFast", "chat_template": "template"}
+        ),
+    )
+    monkeypatch.setattr(
+        "agent_lab.execution_provenance._post_json",
+        lambda _url, _payload, _timeout: {"count": 4, "max_model_len": 32768},
+    )
+    profile = _profile().model_copy(
+        update={
+            "name": "Qwen/Qwen3.5-9B",
+            "base_url": "http://127.0.0.1:8001/v1",
+            "context_window_tokens": 32768,
+        }
+    )
+
+    result = attest_model_runtime(
+        profile,
+        InferenceRuntimeProfile(
+            server_kind="vllm",
+            compute_backend="nvidia",
+            process_name="vllm",
+            container_name="agent-lab-qwen35-9b-vllm",
+            container_image_digest="sha256:" + "c" * 64,
+        ),
+        command_runner=_vllm_container_command_runner,
+    )
+
+    container = result["server"]["serve_process"]["container"]
+    assert container["image_manifest_digest"] == "sha256:" + "c" * 64
+    assert container["image_content_digest"] == "sha256:" + "d" * 64
+    assert container["published_ports"] == {
+        "8001/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8001"}]
+    }
+    assert result["compute_runtime"]["server_runtime"] == {
+        "python": "3.12.12",
+        "pytorch": "2.10.0",
+        "cuda": "13.0",
+        "vllm": "0.26.dev",
+    }
 
 
 def test_dirty_worktree_is_labeled_for_protocol_probe_and_rejected_for_measurement(

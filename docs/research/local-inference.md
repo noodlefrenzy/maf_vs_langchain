@@ -171,6 +171,11 @@ Model selection should use a two-stage gate:
 
 ## Required characterization matrix
 
+The executable, pinned protocol for the fit-check is in
+[`qwen35-9b-characterization.md`](qwen35-9b-characterization.md). It separates
+artifact acquisition from offline measured runs and reserves port 8001 so the
+lonestar development tunnel on port 8000 is unaffected.
+
 | Dimension | Values |
 | --- | --- |
 | Model | Qwen3.5-9B BF16; 35B-A3B GPTQ Int4 if viable |

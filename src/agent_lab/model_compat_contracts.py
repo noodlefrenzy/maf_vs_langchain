@@ -76,9 +76,23 @@ def fixture_prompt(fixture: ModelFixture) -> str:
     return f"[model-wire-fixture:{fixture.value}] {instructions[fixture]}"
 
 
-def explicit_request_settings() -> dict[str, Any]:
+def explicit_request_settings(profile: ModelProfile | None = None) -> dict[str, Any]:
     """Return the sampling and ceiling settings shared by both runners."""
 
+    if profile is not None:
+        return {
+            "temperature": float(profile.temperature),
+            "top_p": float(profile.top_p),
+            "top_k": profile.top_k,
+            "min_p": profile.min_p,
+            "presence_penalty": float(profile.presence_penalty),
+            "repetition_penalty": float(profile.repetition_penalty),
+            "max_completion_tokens": profile.max_output_tokens,
+            "context_window_tokens": profile.context_window_tokens,
+            "seed": profile.seed,
+            "thinking": profile.thinking,
+            "request_timeout_seconds": float(profile.request_timeout_seconds),
+        }
     return {
         "temperature": TEMPERATURE,
         "top_p": TOP_P,
@@ -94,7 +108,12 @@ def explicit_request_settings() -> dict[str, Any]:
     }
 
 
-def compatibility_model_profile(base_url: str, model: str) -> ModelProfile:
+def compatibility_model_profile(
+    base_url: str,
+    model: str,
+    *,
+    request_timeout_seconds: float = REQUEST_TIMEOUT_SECONDS,
+) -> ModelProfile:
     """Build the non-default profile exercised by both native wire probes."""
 
     return ModelProfile(
@@ -108,7 +127,7 @@ def compatibility_model_profile(base_url: str, model: str) -> ModelProfile:
         repetition_penalty=REPETITION_PENALTY,
         max_output_tokens=MAX_OUTPUT_TOKENS,
         context_window_tokens=CONTEXT_WINDOW_TOKENS,
-        request_timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+        request_timeout_seconds=request_timeout_seconds,
         seed=SEED,
         thinking=THINKING,
     )

@@ -11,11 +11,14 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.request import Request, urlopen
 
+from agent_lab.config import load_model_profile
+from agent_lab.contracts import ModelProfile
 from agent_lab.model_compat_contracts import (
     MODEL_ACTOR_PROBES,
     MODEL_NAME,
     SUCCESS_FIXTURES,
     ModelFixture,
+    compatibility_model_profile,
 )
 from agent_lab.model_compat_stub import CompatibilityStub
 
@@ -66,7 +69,7 @@ def _endpoint_inventory(base_url: str, requested_model: str) -> dict[str, Any]:
     }
 
 
-def _run_native(framework: str, base_url: str, model: str) -> dict[str, Any]:
+def _run_native(framework: str, profile: ModelProfile) -> dict[str, Any]:
     project, module = _RUNNERS[framework]
     result = subprocess.run(
         [
@@ -78,16 +81,14 @@ def _run_native(framework: str, base_url: str, model: str) -> dict[str, Any]:
             "python",
             "-m",
             module,
-            "--base-url",
-            base_url,
-            "--model",
-            model,
+            "--profile-json",
+            profile.model_dump_json(),
         ],
         cwd=REPOSITORY_ROOT,
         check=False,
         capture_output=True,
         text=True,
-        timeout=45,
+        timeout=max(60, int(profile.request_timeout_seconds * 10)),
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -195,6 +196,7 @@ def run_suite(
     base_url: str | None = None,
     model: str = MODEL_NAME,
     server_kind: ServerKind = "openai_compatible",
+    profile: ModelProfile | None = None,
 ) -> dict[str, Any]:
     """Run both native clients against the stub or a supplied loopback endpoint."""
 
@@ -204,9 +206,12 @@ def run_suite(
         endpoint_inventory = (
             None if stub is not None else _endpoint_inventory(effective_base_url, model)
         )
-        reports = {
-            framework: _run_native(framework, effective_base_url, model) for framework in _RUNNERS
-        }
+        effective_profile = (
+            compatibility_model_profile(effective_base_url, model)
+            if profile is None
+            else profile.model_copy(update={"base_url": effective_base_url, "name": model})
+        )
+        reports = {framework: _run_native(framework, effective_profile) for framework in _RUNNERS}
         records = stub.records if stub is not None else []
     for framework, report in reports.items():
         report["wire_exchanges"] = [
@@ -244,7 +249,8 @@ def main() -> None:
     parser.add_argument(
         "--base-url", help="Existing loopback OpenAI-compatible /v1 URL; omit for protocol stub"
     )
-    parser.add_argument("--model", default=MODEL_NAME)
+    parser.add_argument("--model")
+    parser.add_argument("--model-profile", type=Path)
     parser.add_argument(
         "--server-kind",
         choices=("openai_compatible", "llama_cpp", "vllm"),
@@ -252,7 +258,15 @@ def main() -> None:
     )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    report = run_suite(base_url=args.base_url, model=args.model, server_kind=args.server_kind)
+    profile = load_model_profile(args.model_profile) if args.model_profile else None
+    base_url = profile.base_url if profile is not None and args.base_url is None else args.base_url
+    model = args.model or (profile.name if profile is not None else MODEL_NAME)
+    report = run_suite(
+        base_url=base_url,
+        model=model,
+        server_kind=args.server_kind,
+        profile=profile,
+    )
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

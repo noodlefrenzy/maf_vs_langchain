@@ -208,10 +208,21 @@ class InferenceRuntimeProfile(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    server_kind: Literal["llama_cpp", "vllm"] = "llama_cpp"
     host: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]+$")
     compute_backend: Literal["auto", "nvidia", "vulkan"] = "auto"
     process_name: str = Field(default="llama-server", pattern=r"^[A-Za-z0-9._-]+$")
+    container_name: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]+$")
+    container_image_digest: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")
     command_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+
+    @model_validator(mode="after")
+    def validate_container_pin(self) -> InferenceRuntimeProfile:
+        if (self.container_name is None) != (self.container_image_digest is None):
+            raise ValueError("container name and image digest must be configured together")
+        if self.container_name is not None and self.server_kind != "vllm":
+            raise ValueError("container attestation is currently supported only for vLLM")
+        return self
 
 
 class ExperimentSpec(BaseModel):
