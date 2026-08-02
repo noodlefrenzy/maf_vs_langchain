@@ -199,6 +199,8 @@ Initial fit-check profile:
 - 32,768-token advertised context for the first fit test;
 - thinking enabled;
 - explicit temperature, top-p, top-k, max output, timeout, and requested seed;
+- min-p, presence penalty, repetition penalty, and thinking mode are also
+  mapped explicitly at the effective OpenAI request boundary;
 - vLLM reasoning parser `qwen3`;
 - vLLM tool parser `qwen3_coder`.
 

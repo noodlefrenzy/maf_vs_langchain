@@ -21,6 +21,7 @@ from agent_lab.contracts import (
     NormalizedEvent,
     TerminalStatus,
 )
+from agent_lab.model_request_policy import effective_request_policy
 from agent_lab.native_tracing import FrameworkInstrumentor, NativeTracingSession
 from agent_lab.runner_protocol import (
     ApprovalCommand,
@@ -454,6 +455,10 @@ class NativeRunnerDescriptor(BaseModel):
             topology_sha256=hashlib.sha256(topology_payload).hexdigest(),
             effective_prompt_sha256=request.manifest.prompt_bundle_sha256,
             tool_catalog_sha256=request.manifest.tool_catalog_sha256,
+            effective_request_policy_sha256=effective_request_policy(
+                request.manifest.model,
+                lane,
+            )["policy_sha256"],
             framework_versions=self.framework_versions,
             checkpoint=self.checkpoint[lane],
         )

@@ -69,6 +69,7 @@ def _paired_manifest(lane: FrameworkLane) -> RunManifest:
         dependency_lock_sha256=("a" if lane is FrameworkLane.MAF_WORKFLOW else "b") * 64,
         prompt_bundle_sha256="1" * 64,
         tool_catalog_sha256="2" * 64,
+        effective_request_policy_sha256="6" * 64,
         world_manifest_sha256="3" * 64,
     )
 

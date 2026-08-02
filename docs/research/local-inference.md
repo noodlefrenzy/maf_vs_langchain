@@ -42,11 +42,20 @@ uv run python -m agent_lab.model_compat_suite \
 The command starts a loopback-only deterministic Chat Completions stub and runs
 the installed `OpenAIChatCompletionClient` and `ChatOpenAI` clients through the
 same plain, structured, streaming, one-tool, parallel-tool, multi-turn, and
-malformed-tool fixtures. The report contains redacted request and response
+malformed-tool fixtures, plus plain dispatch probes for workflow specialists,
+workflow commanders, harness specialists, and harness commanders. The report
+contains redacted request and response
 shapes, wire and effective-request SHA-256 hashes, server-default expansion,
-explicit sampling/output/timeout settings, normalized usage including reasoning
-tokens, and package versions. It classifies failures at the model parser,
-client serialization, framework tool loop, or transport layer.
+explicit temperature, top-p, top-k, min-p, presence and repetition penalties,
+thinking mode, seed, output/context ceilings, timeout settings, normalized usage
+including reasoning tokens, and package versions. It classifies failures at the
+model parser, client serialization, framework tool loop, or transport layer.
+
+`agent_lab.model_request_policy` is the only supported profile-to-request
+mapping. Both adapter families consume it directly. A complete per-actor policy
+and its canonical SHA-256 are written into pair preflight evidence; the same hash
+is frozen into each manifest and acknowledged by the runner before execution.
+Adding a `ModelProfile` field without mapping it in both adapters fails closed.
 
 The stub is the CI path and does not install or resolve dependencies. Live mode
 first reads `/v1/models` and refuses to send fixture prompts unless the exact

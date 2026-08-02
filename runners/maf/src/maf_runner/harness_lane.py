@@ -29,6 +29,7 @@ from agent_lab.harness_contracts import (
     harness_specialist_prompt,
     harness_task_prompt,
 )
+from agent_lab.model_request_policy import maf_request_options, model_request_headers
 from agent_lab.prompt_bundle import get_role_definition, render_role_prompt
 from agent_lab.runner_host import ApprovalProvider
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
@@ -97,7 +98,7 @@ class _InstrumentedChatClient(OpenAIChatCompletionClient):
             base_url=profile.base_url,
             timeout=profile.request_timeout_seconds,
             max_retries=0,
-            default_headers={"X-Agent-Lab-Framework": "maf-harness"},
+            default_headers=model_request_headers("maf-harness", actor),
         )
         super().__init__(
             model=profile.name,
@@ -208,19 +209,14 @@ class _HarnessRoleRuntime:
             agent_instructions=harness_specialist_prompt(role),
             tools=[self.mcp],
             max_context_window_tokens=profile.context_window_tokens,
-            max_output_tokens=min(profile.max_output_tokens, 2048),
+            max_output_tokens=profile.max_output_tokens,
             file_memory_store=FileSystemAgentFileStore(workspace / "memory" / role.value),
             file_access_store=FileSystemAgentFileStore(workspace / "shared"),
             file_access_disable_readonly_tool_approval=True,
             file_access_disable_write_tool_approval=True,
             disable_web_search=True,
             disable_tool_auto_approval=True,
-            default_options={
-                "temperature": profile.temperature,
-                "top_p": profile.top_p,
-                "presence_penalty": profile.presence_penalty,
-                "seed": profile.seed,
-            },
+            default_options=maf_request_options(profile),
         )
 
     async def __aenter__(self) -> _HarnessRoleRuntime:
@@ -288,7 +284,7 @@ async def run_live_approved(
             description=render_role_prompt(AgentRole.INCIDENT_COMMANDER),
             agent_instructions=render_role_prompt(AgentRole.INCIDENT_COMMANDER),
             max_context_window_tokens=request.manifest.model.context_window_tokens,
-            max_output_tokens=min(request.manifest.model.max_output_tokens, 4096),
+            max_output_tokens=request.manifest.model.max_output_tokens,
             file_memory_store=FileSystemAgentFileStore(workspace / "memory" / "commander"),
             file_access_store=FileSystemAgentFileStore(workspace / "shared"),
             file_access_disable_readonly_tool_approval=True,
@@ -296,12 +292,7 @@ async def run_live_approved(
             background_agents=[runtime.agent for runtime in roles.values()],
             disable_web_search=True,
             disable_tool_auto_approval=True,
-            default_options={
-                "temperature": request.manifest.model.temperature,
-                "top_p": request.manifest.model.top_p,
-                "presence_penalty": request.manifest.model.presence_penalty,
-                "seed": request.manifest.model.seed,
-            },
+            default_options=maf_request_options(request.manifest.model),
         )
         await stack.enter_async_context(commander)
         session = commander.create_session()
@@ -338,11 +329,7 @@ async def run_live_approved(
             "commander synthesis must cite exact IDs from at least two included roles.",
             session=session,
             options={
-                "temperature": request.manifest.model.temperature,
-                "top_p": request.manifest.model.top_p,
-                "presence_penalty": request.manifest.model.presence_penalty,
-                "max_tokens": min(request.manifest.model.max_output_tokens, 4096),
-                "seed": request.manifest.model.seed,
+                **maf_request_options(request.manifest.model),
                 "response_format": HarnessProposal,
                 "tool_choice": "none",
             },
@@ -358,11 +345,7 @@ async def run_live_approved(
                 f"their roles:\n{evidence_allowlist}",
                 session=session,
                 options={
-                    "temperature": request.manifest.model.temperature,
-                    "top_p": request.manifest.model.top_p,
-                    "presence_penalty": request.manifest.model.presence_penalty,
-                    "max_tokens": min(request.manifest.model.max_output_tokens, 4096),
-                    "seed": request.manifest.model.seed,
+                    **maf_request_options(request.manifest.model),
                     "response_format": HarnessProposal,
                     "tool_choice": "none",
                 },

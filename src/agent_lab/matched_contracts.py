@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from agent_lab.contract_bundle import sha256_payload
 from agent_lab.contracts import Budget, FrameworkLane, ModelProfile
+from agent_lab.model_request_policy import matched_effective_request_policy
 
 _SPECIALIST_ROLES = [
     "telemetry_investigator",
@@ -84,6 +85,8 @@ def preflight_pair_contract(
         if descriptor.normalized_topology[lane] != expected_topology:
             raise ValueError(f"{lane.value} runner normalized topology differs within {track}")
 
+    request_policy = matched_effective_request_policy(model, left_lane, right_lane)
+
     snapshot = {
         "schema_version": "0.1.0",
         "track": track,
@@ -105,5 +108,7 @@ def preflight_pair_contract(
         "role_prompts_sha256": expected_contract_hashes["prompt_bundle_sha256"],
         "tool_schemas_sha256": expected_contract_hashes["tool_catalog_sha256"],
         "completion_schema_sha256": expected_contract_hashes["artifact_schemas_sha256"],
+        "effective_request_policy": request_policy,
+        "effective_request_policy_sha256": request_policy["policy_sha256"],
     }
     return {**snapshot, "snapshot_sha256": sha256_payload(snapshot)}

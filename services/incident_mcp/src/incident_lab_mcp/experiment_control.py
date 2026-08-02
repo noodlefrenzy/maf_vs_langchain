@@ -199,6 +199,7 @@ async def _run_experiment(
                     run = registry.get(receipt.run_id)
                     descriptor = descriptors[lane]
                     project, module = _RUNNER_PROJECT[lane]
+                    preflight = contract_preflights[track]
                     manifest = RunManifest(
                         run_id=run.run_id,
                         experiment_id=f"{experiment.experiment_id}_{execution_mode}",
@@ -215,6 +216,9 @@ async def _run_experiment(
                         dependency_lock_sha256=_file_sha256(repository_root / project / "uv.lock"),
                         prompt_bundle_sha256=hashes["prompt_bundle_sha256"],
                         tool_catalog_sha256=hashes["tool_catalog_sha256"],
+                        effective_request_policy_sha256=preflight["effective_request_policy"][
+                            "lane_policy_sha256"
+                        ][lane.value],
                         world_manifest_sha256=receipt.world_manifest_sha256,
                         host_fingerprint={
                             "hostname": platform.node(),
@@ -224,7 +228,6 @@ async def _run_experiment(
                         },
                     )
                     _bundle, paths = control_plane.allocate_run(manifest)
-                    preflight = contract_preflights[track]
                     _write_json_exclusive(
                         paths.bundle / "native" / "pair-contract-preflight.json",
                         preflight,

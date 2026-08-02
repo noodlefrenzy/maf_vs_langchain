@@ -244,6 +244,7 @@ class RunManifest(BaseModel):
     dependency_lock_sha256: Sha256Hex
     prompt_bundle_sha256: Sha256Hex
     tool_catalog_sha256: Sha256Hex
+    effective_request_policy_sha256: Sha256Hex
     world_manifest_sha256: Sha256Hex
     started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     host_fingerprint: dict[str, str] = Field(default_factory=dict)

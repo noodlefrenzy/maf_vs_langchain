@@ -19,6 +19,7 @@ from agent_lab.contracts import (
     TerminalStatus,
 )
 from agent_lab.control_plane import ControlPlane, resolve_lane_order
+from agent_lab.model_request_policy import effective_request_policy
 from agent_lab.run_bundle import RunBundle
 from agent_lab.runner_protocol import (
     FinalizationResult,
@@ -33,6 +34,15 @@ from agent_lab.scenario import MitigationActionId
 
 
 def _manifest(*, wall_clock_seconds: int = 5) -> RunManifest:
+    model = ModelProfile(
+        name="local-test",
+        base_url="http://127.0.0.1:8000/v1",
+        temperature=0.6,
+        top_p=0.95,
+        max_output_tokens=1000,
+        context_window_tokens=8192,
+        request_timeout_seconds=60,
+    )
     return RunManifest(
         experiment_id="control_plane_test",
         lane=FrameworkLane.MAF_WORKFLOW,
@@ -40,15 +50,7 @@ def _manifest(*, wall_clock_seconds: int = 5) -> RunManifest:
         scenario_generator_version="0.1.0",
         scenario_seed=42,
         repetition=0,
-        model=ModelProfile(
-            name="local-test",
-            base_url="http://127.0.0.1:8000/v1",
-            temperature=0.6,
-            top_p=0.95,
-            max_output_tokens=1000,
-            context_window_tokens=8192,
-            request_timeout_seconds=60,
-        ),
+        model=model,
         budget=Budget(
             wall_clock_seconds=wall_clock_seconds,
             model_calls=2,
@@ -62,6 +64,10 @@ def _manifest(*, wall_clock_seconds: int = 5) -> RunManifest:
         dependency_lock_sha256="4" * 64,
         prompt_bundle_sha256="1" * 64,
         tool_catalog_sha256="2" * 64,
+        effective_request_policy_sha256=effective_request_policy(
+            model,
+            FrameworkLane.MAF_WORKFLOW,
+        )["policy_sha256"],
         world_manifest_sha256="3" * 64,
     )
 

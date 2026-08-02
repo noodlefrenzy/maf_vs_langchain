@@ -1069,6 +1069,10 @@ def _validate_pair_manifests(
             left.tool_catalog_sha256,
             right.tool_catalog_sha256,
         ),
+        "effective_request_policy_sha256": (
+            left.effective_request_policy_sha256,
+            right.effective_request_policy_sha256,
+        ),
         "world_manifest_sha256": (
             left.world_manifest_sha256,
             right.world_manifest_sha256,

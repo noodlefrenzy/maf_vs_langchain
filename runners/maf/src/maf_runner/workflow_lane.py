@@ -28,6 +28,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_lab.contracts import AgentRole, ApprovalDecision, ApprovalRequest, ModelProfile
+from agent_lab.model_request_policy import maf_request_options, model_request_headers
 from agent_lab.prompt_bundle import render_role_prompt
 from agent_lab.runner_host import ApprovalProvider
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
@@ -482,7 +483,7 @@ class MafRoleAgent:
             base_url=profile.base_url,
             timeout=profile.request_timeout_seconds,
             max_retries=0,
-            default_headers={"X-Agent-Lab-Framework": "maf"},
+            default_headers=model_request_headers("maf", role.value),
         )
         client = OpenAIChatCompletionClient(
             model=profile.name,
@@ -551,11 +552,7 @@ class MafRoleAgent:
         response = await self.agent.run(
             prompt,
             options={
-                "temperature": self.profile.temperature,
-                "top_p": self.profile.top_p,
-                "presence_penalty": self.profile.presence_penalty,
-                "max_tokens": min(self.profile.max_output_tokens, 2048),
-                "seed": self.profile.seed,
+                **maf_request_options(self.profile),
                 "response_format": SpecialistFinding,
                 "tool_choice": "none",
             },
@@ -641,7 +638,10 @@ class MafCommanderAgent:
             base_url=profile.base_url,
             timeout=profile.request_timeout_seconds,
             max_retries=0,
-            default_headers={"X-Agent-Lab-Framework": "maf"},
+            default_headers=model_request_headers(
+                "maf",
+                AgentRole.INCIDENT_COMMANDER.value,
+            ),
         )
         client = OpenAIChatCompletionClient(model=profile.name, async_client=sdk)
         self.agent = Agent(
@@ -700,11 +700,7 @@ class MafCommanderAgent:
         response = await self.agent.run(
             prompt,
             options={
-                "temperature": self.profile.temperature,
-                "top_p": self.profile.top_p,
-                "presence_penalty": self.profile.presence_penalty,
-                "max_tokens": min(self.profile.max_output_tokens, 2048),
-                "seed": self.profile.seed,
+                **maf_request_options(self.profile),
                 "response_format": CommanderSynthesis,
                 "tool_choice": "none",
             },

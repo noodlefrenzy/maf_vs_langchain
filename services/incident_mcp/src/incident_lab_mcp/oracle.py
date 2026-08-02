@@ -32,6 +32,7 @@ from agent_lab.contracts import (
     ToolErrorCode,
 )
 from agent_lab.evaluator import DeterministicScore, score_incident
+from agent_lab.model_request_policy import effective_request_policy
 from agent_lab.run_bundle import RunBundle
 from incident_lab_mcp.world import IncidentWorld, WorldToolError
 
@@ -70,6 +71,10 @@ def run_oracle(
         dependency_lock_sha256=_file_sha256(Path("services/incident_mcp/uv.lock")),
         prompt_bundle_sha256=hashes["prompt_bundle_sha256"],
         tool_catalog_sha256=hashes["tool_catalog_sha256"],
+        effective_request_policy_sha256=effective_request_policy(
+            model,
+            FrameworkLane.SCRIPTED_ORACLE,
+        )["policy_sha256"],
         world_manifest_sha256=sha256_payload(world.incident.model_dump(mode="json")),
         host_fingerprint={
             "hostname": platform.node(),

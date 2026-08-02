@@ -22,6 +22,7 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_lab.contracts import AgentRole, ApprovalDecision, ApprovalRequest, ModelProfile
+from agent_lab.model_request_policy import langchain_model_kwargs, model_request_headers
 from agent_lab.prompt_bundle import render_role_prompt
 from agent_lab.runner_host import ApprovalProvider
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
@@ -399,18 +400,9 @@ class LangGraphRoleAgent:
         )
         self._tools: dict[str, BaseTool] = {}
         client = ChatOpenAI(
-            model=profile.name,
             api_key="agent-lab-local",
-            base_url=profile.base_url,
-            temperature=profile.temperature,
-            top_p=profile.top_p,
-            presence_penalty=profile.presence_penalty,
-            max_completion_tokens=min(profile.max_output_tokens, 2048),
-            seed=profile.seed,
-            timeout=profile.request_timeout_seconds,
-            max_retries=0,
-            stream_usage=True,
-            default_headers={"X-Agent-Lab-Framework": "langgraph"},
+            default_headers=model_request_headers("langgraph", role.value),
+            **langchain_model_kwargs(profile),
         )
         self._structured_client = client.with_structured_output(
             SpecialistFinding,
@@ -551,18 +543,12 @@ class LangGraphCommanderAgent:
         self._tools: dict[str, BaseTool] = {}
         self._called_tools: list[str] = []
         client = ChatOpenAI(
-            model=profile.name,
             api_key="agent-lab-local",
-            base_url=profile.base_url,
-            temperature=profile.temperature,
-            top_p=profile.top_p,
-            presence_penalty=profile.presence_penalty,
-            max_completion_tokens=min(profile.max_output_tokens, 2048),
-            seed=profile.seed,
-            timeout=profile.request_timeout_seconds,
-            max_retries=0,
-            stream_usage=True,
-            default_headers={"X-Agent-Lab-Framework": "langgraph"},
+            default_headers=model_request_headers(
+                "langgraph",
+                AgentRole.INCIDENT_COMMANDER.value,
+            ),
+            **langchain_model_kwargs(profile),
         )
         self._structured_client = client.with_structured_output(
             CommanderSynthesis,

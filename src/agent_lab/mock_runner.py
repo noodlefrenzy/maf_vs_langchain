@@ -91,6 +91,9 @@ def run(mode: str, *, budget_field: str) -> int:
                         topology_sha256=topology,
                         effective_prompt_sha256=request.manifest.prompt_bundle_sha256,
                         tool_catalog_sha256=request.manifest.tool_catalog_sha256,
+                        effective_request_policy_sha256=(
+                            request.manifest.effective_request_policy_sha256
+                        ),
                         framework_versions={"mock-runner": "0.1.0"},
                         checkpoint=CheckpointCapability(
                             resumable=True,

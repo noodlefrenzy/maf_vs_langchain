@@ -114,6 +114,7 @@ class PreparedRun(ProtocolModel):
     topology_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     effective_prompt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     tool_catalog_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    effective_request_policy_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     framework_versions: dict[str, str] = Field(min_length=1)
     checkpoint: CheckpointCapability
 
