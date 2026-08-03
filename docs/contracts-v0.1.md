@@ -10,7 +10,8 @@ Its canonical sources are:
 - `agent_lab.contracts` for evidence, approval, incident-report, audit, event,
   and terminal models;
 - `agent_lab.workflow_contracts` for explicit-workflow schemas, observation
-  policy, dynamic instructions, evidence gating, result parsing, and accounting;
+  and bounded retry policy, dynamic instructions, evidence gating, result
+  parsing, and accounting;
 - `agent_lab.harness_contracts` for opinionated-harness delegation, provenance,
   correction, phase-limit, prompt, active-role, native-compaction, and
   completion-schema policy;
@@ -62,4 +63,6 @@ tool and requires a request identifier plus that valid approval token. Effects
 and safety checks use the canonical ID. The catalog supplies the description
 shown for approval and execution; the agent's submitted wording remains in the
 audit log. The tool service performs no hidden retry; only
-`transient_timeout` is retryable under the frozen error taxonomy.
+`transient_timeout` is retryable under the frozen error taxonomy. Both explicit
+workflow adapters make at most one visible, metered application retry for that
+normalized error.

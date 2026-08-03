@@ -49,13 +49,13 @@ from agent_lab.workflow_contracts import (
     commander_synthesis_prompt,
     evaluate_evidence,
     evidence_ids_from_text,
-    invoke_tool_once,
+    invoke_tool_with_policy,
     observation_calls,
     render_tool_result,
     specialist_observation_prompt,
     structured_tool_payload,
 )
-from agent_lab.workflow_errors import EvidenceGateFailed
+from agent_lab.workflow_errors import EvidenceGateFailed, WorkflowToolFailure
 from agent_lab.workflow_telemetry import NOOP_WORKFLOW_TELEMETRY, WorkflowTelemetry
 from maf_runner.chat_telemetry import (
     ProviderMetricsOpenAIChatCompletionClient,
@@ -95,6 +95,45 @@ class _TrackingMCPStreamableHTTPTool(MCPStreamableHTTPTool):
     async def call_tool(self, tool_name: str, **kwargs: Any) -> Any:
         self.called_tools.append(tool_name)
         return await super().call_tool(tool_name, **kwargs)
+
+
+class _ActiveInvestigationTasks:
+    """Track MAF fan-out handlers so an escaped sibling failure can drain them."""
+
+    def __init__(self) -> None:
+        self._tasks: set[asyncio.Task[Any]] = set()
+
+    def wrap(self, investigator: Investigator) -> Investigator:
+        async def tracked(task: InvestigationTask) -> SpecialistFinding:
+            current = asyncio.current_task()
+            if current is None:
+                raise RuntimeError("MAF investigator is not running inside an asyncio task")
+            self._tasks.add(current)
+            try:
+                return await investigator(task)
+            finally:
+                self._tasks.discard(current)
+
+        return tracked
+
+    async def cancel_and_drain(self) -> None:
+        pending = list(self._tasks)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def _run_initial_workflow(
+    workflow: Workflow,
+    payload: dict[str, Any],
+    active_investigations: _ActiveInvestigationTasks,
+) -> Any:
+    try:
+        return await workflow.run(payload)
+    except BaseException:
+        await active_investigations.cancel_and_drain()
+        raise
 
 
 class _Dispatcher(Executor):
@@ -492,23 +531,22 @@ class MafRoleAgent:
         return finding
 
     async def _call_tool(self, tool_name: str, **arguments: Any) -> Any:
-        self.stats = self.stats.tool_dispatched()
-        await self.telemetry.tool_started(actor=self.role.value, tool_name=tool_name)
-        try:
-            result = await invoke_tool_once(lambda: self._mcp.call_tool(tool_name, **arguments))
-        except Exception:
+        async def attempt_started() -> None:
+            self.stats = self.stats.tool_dispatched()
+            await self.telemetry.tool_started(actor=self.role.value, tool_name=tool_name)
+
+        async def attempt_finished(succeeded: bool) -> None:
             await self.telemetry.tool_finished(
                 actor=self.role.value,
                 tool_name=tool_name,
-                succeeded=False,
+                succeeded=succeeded,
             )
-            raise
-        await self.telemetry.tool_finished(
-            actor=self.role.value,
-            tool_name=tool_name,
-            succeeded=True,
+
+        return await invoke_tool_with_policy(
+            lambda: self._mcp.call_tool(tool_name, **arguments),
+            attempt_started=attempt_started,
+            attempt_finished=attempt_finished,
         )
-        return result
 
 
 class MafCommanderAgent:
@@ -661,23 +699,23 @@ class MafCommanderAgent:
 
     async def _call_tool(self, tool_name: str, **arguments: Any) -> Any:
         actor = AgentRole.INCIDENT_COMMANDER.value
-        self.stats = self.stats.tool_dispatched()
-        await self.telemetry.tool_started(actor=actor, tool_name=tool_name)
-        try:
-            result = await invoke_tool_once(lambda: self._mcp.call_tool(tool_name, **arguments))
-        except Exception:
+
+        async def attempt_started() -> None:
+            self.stats = self.stats.tool_dispatched()
+            await self.telemetry.tool_started(actor=actor, tool_name=tool_name)
+
+        async def attempt_finished(succeeded: bool) -> None:
             await self.telemetry.tool_finished(
                 actor=actor,
                 tool_name=tool_name,
-                succeeded=False,
+                succeeded=succeeded,
             )
-            raise
-        await self.telemetry.tool_finished(
-            actor=actor,
-            tool_name=tool_name,
-            succeeded=True,
+
+        return await invoke_tool_with_policy(
+            lambda: self._mcp.call_tool(tool_name, **arguments),
+            attempt_started=attempt_started,
+            attempt_finished=attempt_finished,
         )
-        return result
 
 
 def _optional_usage(usage: dict[str, Any], key: str) -> int | None:
@@ -703,12 +741,15 @@ async def run_live_investigation(request: RunRequest) -> dict[str, Any]:
                 request.role_endpoints[AgentRole.INCIDENT_COMMANDER], request.manifest.model
             )
         )
+        active_investigations = _ActiveInvestigationTasks()
         workflow = build_investigation_workflow(
-            {role: agent.investigate for role, agent in agents.items()},
+            {role: active_investigations.wrap(agent.investigate) for role, agent in agents.items()},
             commander_agent.synthesize,
         )
-        result = await workflow.run(
-            InvestigationTask(public_ticket=request.public_ticket).model_dump(mode="json")
+        result = await _run_initial_workflow(
+            workflow,
+            InvestigationTask(public_ticket=request.public_ticket).model_dump(mode="json"),
+            active_investigations,
         )
         outputs = [EvidencePacket.model_validate(output) for output in result.get_outputs()]
         if len(outputs) != 1:
@@ -768,15 +809,18 @@ async def run_live_approved(
                 raise RuntimeError("approved mitigation token was not available in process memory")
             return await commander_agent.apply_and_verify(request_id, token)
 
+        active_investigations = _ActiveInvestigationTasks()
         workflow = build_approved_workflow(
-            {role: agent.investigate for role, agent in agents.items()},
+            {role: active_investigations.wrap(agent.investigate) for role, agent in agents.items()},
             commander_agent.synthesize,
             commander_agent.prepare_mitigation,
             execute,
             storage,
         )
-        initial = await workflow.run(
-            InvestigationTask(public_ticket=request.public_ticket).model_dump(mode="json")
+        initial = await _run_initial_workflow(
+            workflow,
+            InvestigationTask(public_ticket=request.public_ticket).model_dump(mode="json"),
+            active_investigations,
         )
         requests = initial.get_request_info_events()
         if len(requests) != 1:
@@ -1010,6 +1054,58 @@ async def _deterministic_approval_probe(
         return outputs[0].model_dump(mode="json")
 
 
+async def _deterministic_failure_drain_probe() -> dict[str, Any]:
+    started: set[AgentRole] = set()
+    cancelled: set[AgentRole] = set()
+    all_started = asyncio.Event()
+
+    async def investigate(role: AgentRole) -> SpecialistFinding:
+        started.add(role)
+        if len(started) == len(SPECIALIST_ROLES):
+            all_started.set()
+        try:
+            await all_started.wait()
+            if role is AgentRole.TELEMETRY_INVESTIGATOR:
+                raise WorkflowToolFailure(
+                    code="transient_timeout",
+                    retryable=True,
+                    detail="deterministic fan-out failure",
+                )
+            await asyncio.sleep(60)
+            raise AssertionError("sibling investigator was not cancelled")
+        except asyncio.CancelledError:
+            cancelled.add(role)
+            raise
+
+    active_investigations = _ActiveInvestigationTasks()
+    investigators = {
+        role: active_investigations.wrap(lambda _task, role=role: investigate(role))
+        for role in SPECIALIST_ROLES
+    }
+
+    async def unreachable_commander(
+        _findings: list[SpecialistFinding],
+    ) -> CommanderSynthesis:
+        raise AssertionError("commander must not run after a specialist failure")
+
+    workflow = build_investigation_workflow(investigators, unreachable_commander)
+    try:
+        await _run_initial_workflow(
+            workflow,
+            InvestigationTask(public_ticket="deterministic failure probe").model_dump(mode="json"),
+            active_investigations,
+        )
+    except WorkflowToolFailure as exc:
+        return {
+            "code": exc.code,
+            "retryable": exc.retryable,
+            "started_roles": sorted(role.value for role in started),
+            "cancelled_roles": sorted(role.value for role in cancelled),
+            "active_tasks": len(active_investigations._tasks),
+        }
+    raise AssertionError("deterministic fan-out failure did not escape")
+
+
 def _deterministic_checkpoint_selection_probe() -> dict[str, str]:
     request_id = "mit-deterministic-01"
     approval_checkpoint = WorkflowCheckpoint(
@@ -1036,6 +1132,7 @@ def main() -> None:
     mode.add_argument("--deterministic-approved-probe", action="store_true")
     mode.add_argument("--deterministic-rejected-probe", action="store_true")
     mode.add_argument("--deterministic-checkpoint-selection-probe", action="store_true")
+    mode.add_argument("--deterministic-failure-drain-probe", action="store_true")
     mode.add_argument("--live-investigation", action="store_true")
     mode.add_argument("--live-approved-run", action="store_true")
     args = parser.parse_args()
@@ -1047,6 +1144,8 @@ def main() -> None:
         payload = asyncio.run(_deterministic_approval_probe(ApprovalDecision.REJECT))
     elif args.deterministic_checkpoint_selection_probe:
         payload = _deterministic_checkpoint_selection_probe()
+    elif args.deterministic_failure_drain_probe:
+        payload = asyncio.run(_deterministic_failure_drain_probe())
     elif args.live_approved_run:
         request_line = sys.stdin.buffer.readline()
         if not request_line:

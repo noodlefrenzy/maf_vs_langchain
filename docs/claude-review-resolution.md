@@ -10,8 +10,8 @@ review and does not claim that post-fix empirical milestones have run.
 
 | Finding | Resolution |
 | --- | --- |
-| F-1 | MAF's non-configurable native connection-loss reconnect is preregistered as framework behavior; the shared prompt no longer claims the transport never reconnects. |
-| F-2–F-4 | Tool errors, accounting, and MCP result parsing moved into the frozen shared explicit-workflow contract. |
+| F-1 | MAF's non-configurable native connection-loss reconnect is preregistered as framework behavior; the shared prompt distinguishes it from the symmetric bounded application retry. |
+| F-2–F-4 | Tool errors, per-dispatch accounting, MCP result parsing, and the one-retry structured-error policy moved into the frozen shared explicit-workflow contract. |
 | F-5 | All harness actors consume the same shared model request/output policy. |
 | F-6–F-9 | Both harness adapters import one hashed delegation, strict tool/evidence provenance, one-correction, phase-limit, and explicit-failure policy. |
 | F-10 | Deep streaming is disabled/funneled through `_agenerate`; a hermetic tool-loop plus public-stream fallback probe verifies per-dispatch accounting and pre-dispatch budget failure. |
@@ -130,8 +130,12 @@ implemented. Current milestone status is:
    seed 400 replaces the duplicate retry-storm seed 404. Every experiment
    profile passes the no-service execution planner in CI, and actual execution
    exclusively records the resolved case/ordering/contract plan before starting
-   services. The quality-tier model gate is now closed; the empirical pilot and
-   the other documented P1 readiness gates remain.
+   services. The first 27B explicit pilot launch at source `23617ff` is retained
+   as diagnostic-only evidence: the old zero-retry contract made the standard
+   fault cadence guarantee failure, and undrained MAF fan-out siblings produced
+   six invalid late-span bundles. ADR 0013 adds one symmetric, metered retry and
+   drains escaped fan-out failures; a clean gate and replacement pilot are
+   required before sample sizing.
 9. Run evidence now carries monotonic normalized-event timestamps, separately
    timed control-plane phases, per-call model JSONL with optional
    cached/reasoning usage, and fixed-cadence host/GPU JSONL with measured

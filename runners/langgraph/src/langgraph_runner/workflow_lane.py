@@ -42,7 +42,7 @@ from agent_lab.workflow_contracts import (
     commander_synthesis_prompt,
     evaluate_evidence,
     evidence_ids_from_text,
-    invoke_tool_once,
+    invoke_tool_with_policy,
     observation_calls,
     render_tool_result,
     specialist_observation_prompt,
@@ -376,24 +376,26 @@ class LangGraphRoleAgent:
         return finding
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        self._called_tools.append(name)
-        self.stats = self.stats.tool_dispatched()
-        await self.telemetry.tool_started(actor=self.role.value, tool_name=name)
-        try:
-            result = await invoke_tool_once(lambda: self._tools[name].ainvoke(arguments))
-        except Exception:
+        async def call() -> Any:
+            self._called_tools.append(name)
+            return await self._tools[name].ainvoke(arguments)
+
+        async def attempt_started() -> None:
+            self.stats = self.stats.tool_dispatched()
+            await self.telemetry.tool_started(actor=self.role.value, tool_name=name)
+
+        async def attempt_finished(succeeded: bool) -> None:
             await self.telemetry.tool_finished(
                 actor=self.role.value,
                 tool_name=name,
-                succeeded=False,
+                succeeded=succeeded,
             )
-            raise
-        await self.telemetry.tool_finished(
-            actor=self.role.value,
-            tool_name=name,
-            succeeded=True,
+
+        return await invoke_tool_with_policy(
+            call,
+            attempt_started=attempt_started,
+            attempt_finished=attempt_finished,
         )
-        return result
 
 
 class LangGraphCommanderAgent:
@@ -545,24 +547,27 @@ class LangGraphCommanderAgent:
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         actor = AgentRole.INCIDENT_COMMANDER.value
-        self._called_tools.append(name)
-        self.stats = self.stats.tool_dispatched()
-        await self.telemetry.tool_started(actor=actor, tool_name=name)
-        try:
-            result = await invoke_tool_once(lambda: self._tools[name].ainvoke(arguments))
-        except Exception:
+
+        async def call() -> Any:
+            self._called_tools.append(name)
+            return await self._tools[name].ainvoke(arguments)
+
+        async def attempt_started() -> None:
+            self.stats = self.stats.tool_dispatched()
+            await self.telemetry.tool_started(actor=actor, tool_name=name)
+
+        async def attempt_finished(succeeded: bool) -> None:
             await self.telemetry.tool_finished(
                 actor=actor,
                 tool_name=name,
-                succeeded=False,
+                succeeded=succeeded,
             )
-            raise
-        await self.telemetry.tool_finished(
-            actor=actor,
-            tool_name=name,
-            succeeded=True,
+
+        return await invoke_tool_with_policy(
+            call,
+            attempt_started=attempt_started,
+            attempt_finished=attempt_finished,
         )
-        return result
 
 
 class _Usage(TypedDict):

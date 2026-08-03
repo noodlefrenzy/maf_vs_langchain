@@ -49,9 +49,10 @@ The byte-stable snapshot and its digest are stored as
 - Count a model call at request dispatch, including failed attempts.
 - Count a tool call at MCP request receipt, including invalid calls.
 - Do not add hidden retries in the control plane or MCP service.
-- The explicit-workflow adapter does not retry structured tool failures. MAF's
-  native connection-loss reconnect is preregistered as framework behavior under
-  test; service audit is authoritative for any replay. See
+- Both explicit-workflow adapters make at most one application retry after an
+  explicitly retryable structured tool failure; every attempt is metered and
+  traced. MAF's native connection-loss reconnect is separately preregistered as
+  framework behavior under test; service audit is authoritative for any replay. See
   [explicit-workflow parity](explicit-workflow-parity.md).
 - Apply the same scripted approval policy in unattended trials.
 - For interactive demos, record the human decision and exclude those runs from

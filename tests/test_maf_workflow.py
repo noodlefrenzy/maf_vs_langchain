@@ -139,6 +139,39 @@ def test_native_maf_resume_selects_checkpoint_by_pending_request() -> None:
     assert json.loads(result.stdout) == {"selected_checkpoint_id": "approval-checkpoint"}
 
 
+def test_native_maf_failure_cancels_and_drains_fanout_siblings() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(REPOSITORY_ROOT / "runners/maf"),
+            "--no-sync",
+            "python",
+            "-m",
+            "maf_runner.workflow_lane",
+            "--deterministic-failure-drain-probe",
+        ],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert json.loads(result.stdout) == {
+        "active_tasks": 0,
+        "cancelled_roles": ["change_investigator", "reliability_reviewer"],
+        "code": "transient_timeout",
+        "retryable": True,
+        "started_roles": [
+            "change_investigator",
+            "reliability_reviewer",
+            "telemetry_investigator",
+        ],
+    }
+
+
 @pytest.mark.skipif(
     os.getenv("AGENT_LAB_RUN_LIVE_MODEL_TESTS") != "1",
     reason="requires an explicit tunnel to the aligned lonestar model",

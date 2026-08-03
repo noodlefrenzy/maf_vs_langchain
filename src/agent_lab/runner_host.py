@@ -45,7 +45,7 @@ from agent_lab.runner_protocol import (
     decode_runner_command,
     encode_protocol_message,
 )
-from agent_lab.workflow_errors import EvidenceGateFailed
+from agent_lab.workflow_errors import EvidenceGateFailed, WorkflowToolFailure
 from agent_lab.workflow_telemetry import WorkflowTelemetry
 
 ApprovalProvider = Callable[[ApprovalRequest], Awaitable[dict[str, Any]]]
@@ -599,6 +599,10 @@ async def run_workflow_protocol(
     except EvidenceGateFailed as exc:
         terminal_status = TerminalStatus.RUNNER_FAILURE
         terminal_reason = exc.reason
+        session.fail(terminal_status, terminal_reason)
+    except WorkflowToolFailure as exc:
+        terminal_status = TerminalStatus.TOOL_SERVICE_FAILURE
+        terminal_reason = f"native_tool_service_failed:{type(exc).__name__}"
         session.fail(terminal_status, terminal_reason)
     except asyncio.CancelledError as exc:
         terminal_status = TerminalStatus.CANCELLED

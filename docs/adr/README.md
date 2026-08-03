@@ -18,6 +18,7 @@ decision requires a superseding ADR rather than rewriting its history.
 | [0010](0010-symmetric-harness-contract.md) | Freeze a symmetric two-phase harness adapter contract |
 | [0011](0011-cosmos-checkpoint-backend.md) | Select Cosmos DB for production-intended workflow checkpoints |
 | [0012](0012-promote-qwen35-27b-llamacpp.md) | Promote the pinned Qwen3.5-27B Q4_K_M llama.cpp operating point to measured pilots |
+| [0013](0013-bounded-explicit-tool-retry.md) | Apply one symmetric retry to explicitly retryable structured tool failures |
 
 ADR 0012 supersedes ADR 0008 for measured-pilot runtime selection while
 preserving the earlier fit-check and development-smoke evidence as separate
