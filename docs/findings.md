@@ -705,7 +705,9 @@ pair ID; see
 
 1. Select and characterize a different quality-tier candidate or serving
    topology; Qwen3.5-9B failed the paired task-quality gate and the 35B-A3B
-   GPTQ-Int4 candidate failed the single-4090 runtime-fit gate.
+   GPTQ-Int4 candidate failed the single-4090 runtime-fit gate. A pinned local
+   Qwen3.5-27B Q4_K_M llama.cpp candidate is now specified and awaiting its
+   restart-separated runtime, compatibility, and paired task gates.
 2. Only after both gate lanes succeed on an accepted candidate, run the
    implemented five-seed explicit,
    harness, compute-matched single-agent, and unrestricted single-agent

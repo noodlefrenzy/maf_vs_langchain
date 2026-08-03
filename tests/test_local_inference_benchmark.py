@@ -11,9 +11,11 @@ from agent_lab.local_inference_benchmark import (
     _post_json,
     _write_json_exclusive,
     calibrate_prompt,
+    parse_llama_cpp_metrics,
     parse_vllm_metrics,
     stream_completion,
     tokenize_messages,
+    tokenize_messages_llama_cpp,
     verify_cancellation,
     verify_malformed_tool_recovery,
 )
@@ -120,6 +122,26 @@ def test_stream_completion_measures_first_token_and_usage_without_retaining_text
     assert result["system_fingerprint"] == "vllm-test"
     assert "private reasoning" not in json.dumps(result)
     assert "answer" not in json.dumps(result)
+
+
+def test_llama_cpp_tokenization_applies_the_served_chat_template(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[tuple[str, dict[str, Any]]] = []
+
+    def post(url: str, payload: dict[str, Any], _timeout: float) -> dict[str, Any]:
+        requests.append((url, payload))
+        if url.endswith("/apply-template"):
+            return {"prompt": "<|im_start|>user\nhello<|im_end|>"}
+        return {"tokens": [1, 2, 3, 4]}
+
+    monkeypatch.setattr("agent_lab.local_inference_benchmark._post_json", post)
+
+    result = tokenize_messages_llama_cpp(_profile(), [{"role": "user", "content": "hello"}])
+
+    assert result == {"count": 4, "max_model_len": 32768}
+    assert requests[0][1]["chat_template_kwargs"] == {"enable_thinking": True}
+    assert requests[1][1]["content"].startswith("<|im_start|>")
 
 
 def test_stream_completion_closes_after_first_visible_delta_for_cancellation() -> None:
@@ -269,6 +291,28 @@ irrelevant_metric 9000
         "generation_tokens_total": 99.0,
         "request_success_total": 4.0,
         "request_abort_total": 2.0,
+    }
+
+
+def test_llama_cpp_metrics_normalize_for_shared_characterization_checks() -> None:
+    metrics = parse_llama_cpp_metrics(
+        """
+# HELP llamacpp:requests_processing processing
+llamacpp:requests_processing 1
+llamacpp:requests_deferred 2
+llamacpp:prompt_tokens_total 100
+llamacpp:tokens_predicted_total 25
+llamacpp:n_tokens_max 4096
+irrelevant_metric 9000
+"""
+    )
+
+    assert metrics == {
+        "num_requests_running": 1.0,
+        "num_requests_waiting": 2.0,
+        "prompt_tokens_total": 100.0,
+        "generation_tokens_total": 25.0,
+        "max_context_tokens_observed": 4096.0,
     }
 
 

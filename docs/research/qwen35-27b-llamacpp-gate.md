@@ -1,0 +1,107 @@
+# Qwen3.5-27B llama.cpp quality-tier gate
+
+Status: selected and artifact acquisition in progress; no acceptance result yet
+
+Qwen3.5-9B fit the RTX 4090 but failed to produce two successful lanes in
+either clean task-quality pair. Qwen3.5-35B-A3B GPTQ Int4 then failed inside
+vLLM because its Triton path could not operate on CPU-offloaded tensors. This
+gate changes both candidate and serving topology without changing the paired
+task contract.
+
+## Candidate decision
+
+The candidate is the text portion of official `Qwen/Qwen3.5-27B`, served from
+an immutable `Q4_K_M` GGUF conversion by Bartowski. Qwen's model card reports
+that the dense 27B model exceeds the 35B-A3B model on most listed instruction,
+reasoning, coding, and general-agent benchmarks, while llama.cpp supports the
+model's chat template and local OpenAI-compatible serving:
+
+- official model and benchmark table:
+  <https://huggingface.co/Qwen/Qwen3.5-27B>;
+- quantization repository:
+  <https://huggingface.co/bartowski/Qwen_Qwen3.5-27B-GGUF>;
+- original unquantized model named by the converter:
+  <https://huggingface.co/Qwen/Qwen3.5-27B>.
+
+This is a third-party imatrix quantization, not an official Qwen weight file.
+That provenance and the quantization itself are part of the candidate under
+test. They must not be generalized to BF16 or another quant. The artifact is
+17,984,872,928 bytes, leaving materially more 4090 headroom than the 22.29 GB
+35B-A3B Q4_K_M conversion. The repository and selected file were already more
+than 72 hours old when selected on 2026-08-03.
+
+Frozen identities:
+
+- repository revision: `d7b113c40283f4d99f4eb0ec20d126ad653cc736`;
+- selected file commit time: 2026-05-19 23:29:18 UTC;
+- file: `Qwen_Qwen3.5-27B-Q4_K_M.gguf`;
+- file/LFS SHA-256:
+  `81657841d62f1821c748d0fea6c260b7d3508844fe4e9250253ef81c4e4d9edf`;
+- local llama.cpp revision: `35c9b1f39ebe5a7bb83986d64415a079218be78d`;
+- `llama-server` SHA-256:
+  `afcd673634be6b8c46bce6b8326d65e9953cd541271649d5464ed7cea88dab25`.
+
+The Hugging Face file record reported VirusTotal 0/74 while its other hosted
+scanner jobs were queued. The gate therefore relies on the content digest,
+GGUF-only loader surface, loopback binding, and an unprivileged local server;
+it does not claim that every hosted scanner had completed.
+
+## Frozen first operating point
+
+- one RTX 4090 under WSL, CUDA llama.cpp build b9333;
+- 16,384 tokens per request and two server slots;
+- all 99 available layers requested on GPU;
+- Q8 K/V caches, Flash Attention, continuous batching, and no context shift;
+- Jinja tool parsing with thinking enabled and reasoning extracted into the
+  OpenAI-compatible reasoning field;
+- loopback port 8002, metrics and read-only slot inspection enabled, UI off;
+- Qwen's documented thinking defaults: temperature 1.0, top-p 0.95, top-k 20,
+  min-p 0, and presence penalty 1.5;
+- two restart-separated characterization launches before any promotion.
+
+The generic characterization command now understands both vLLM and llama.cpp.
+For llama.cpp it applies the served chat template before token counting,
+normalizes the server's Prometheus counters, verifies cancellation drain, and
+retains the same resource, malformed-tool recovery, concurrency, and output-cap
+matrix used for vLLM.
+
+## Acquisition and execution
+
+Download the exact revision to a path containing the immutable snapshot ID:
+
+```bash
+mkdir -p \
+  /home/noodle/models/hf/hub/models--bartowski--Qwen_Qwen3.5-27B-GGUF/snapshots/d7b113c40283f4d99f4eb0ec20d126ad653cc736
+curl -fL --retry 5 --continue-at - \
+  --output /home/noodle/models/hf/hub/models--bartowski--Qwen_Qwen3.5-27B-GGUF/snapshots/d7b113c40283f4d99f4eb0ec20d126ad653cc736/Qwen_Qwen3.5-27B-Q4_K_M.gguf \
+  https://huggingface.co/bartowski/Qwen_Qwen3.5-27B-GGUF/resolve/d7b113c40283f4d99f4eb0ec20d126ad653cc736/Qwen_Qwen3.5-27B-Q4_K_M.gguf
+```
+
+After committing the gate source so measured execution sees a clean tree, set
+the two explicit local paths and run fresh launches:
+
+```bash
+export AGENT_LAB_GGUF_MODEL=/home/noodle/models/hf/hub/models--bartowski--Qwen_Qwen3.5-27B-GGUF/snapshots/d7b113c40283f4d99f4eb0ec20d126ad653cc736/Qwen_Qwen3.5-27B-Q4_K_M.gguf
+export AGENT_LAB_LLAMA_SERVER=/home/noodle/dev/tools/llama.cpp/build/bin/llama-server
+
+scripts/run-qwen35-27b-llamacpp-gate.sh \
+  before_restart runs/model-characterization/qwen35-27b-before runs
+scripts/run-qwen35-27b-llamacpp-gate.sh \
+  after_restart runs/model-characterization/qwen35-27b-after runs
+```
+
+The launcher verifies both large-file and server-binary digests before every
+launch, refuses an existing output directory or ambiguous serving process,
+starts a fresh server, captures its log, and reaps it on every exit path. The
+second launch runs the complete client compatibility suite and only then runs
+the one-seed paired explicit-workflow task gate.
+
+## Acceptance rule
+
+Promotion remains fail closed. Both restart characterizations must be eligible,
+the compatibility suite must pass, source and runtime attestation must be
+complete, both paired task lanes must validate and achieve `task_success`, and
+runtime/VRAM must leave a credible path to the repeated pilot. A load, parser,
+budget, provenance, or one-lane quality failure rejects this operating point;
+it does not justify weakening the task threshold or silently changing the
+quantization.

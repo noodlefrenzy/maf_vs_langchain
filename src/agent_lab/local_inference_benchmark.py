@@ -1,4 +1,4 @@
-"""Dependency-free vLLM characterization against one clean, attested local server."""
+"""Dependency-free characterization against one clean, attested local server."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ PINNED_VLLM_AMD64_IMAGE_DIGEST = (
     "sha256:674c5aa666d38c07a0dc779f8c77a05c2b859617410d16dcdd8a8776166c92b9"
 )
 _PROMETHEUS_VALUE = re.compile(r"^(?P<name>[^\s{]+)(?P<labels>\{[^}]*\})?\s+(?P<value>\S+)")
-_METRICS = {
+_VLLM_METRICS = {
     "vllm:num_requests_running",
     "vllm:num_requests_waiting",
     "vllm:prompt_tokens_total",
@@ -42,6 +42,13 @@ _METRICS = {
     "vllm:prefix_cache_queries_total",
     "vllm:prefix_cache_hits_total",
     "vllm:request_success_total",
+}
+_LLAMA_CPP_METRICS = {
+    "llamacpp:prompt_tokens_total",
+    "llamacpp:tokens_predicted_total",
+    "llamacpp:requests_processing",
+    "llamacpp:requests_deferred",
+    "llamacpp:n_tokens_max",
 }
 _VISIBLE_DELTA_KEYS = ("content", "reasoning", "reasoning_content", "tool_calls")
 
@@ -94,6 +101,40 @@ def tokenize_messages(profile: ModelProfile, messages: list[dict[str, str]]) -> 
     if not isinstance(max_model_len, int) or isinstance(max_model_len, bool):
         raise ValueError("vLLM /tokenize did not return max_model_len")
     return {"count": count, "max_model_len": max_model_len}
+
+
+def tokenize_messages_llama_cpp(
+    profile: ModelProfile,
+    messages: list[dict[str, str]],
+) -> dict[str, int]:
+    """Apply the served llama.cpp template, then tokenize the exact prompt."""
+
+    root = _server_root_url(profile.base_url)
+    templated = _post_json(
+        f"{root}/apply-template",
+        {
+            "messages": messages,
+            "add_generation_prompt": True,
+            "chat_template_kwargs": {"enable_thinking": profile.thinking},
+        },
+        min(profile.request_timeout_seconds, 30),
+    )
+    prompt = templated.get("prompt")
+    if not isinstance(prompt, str) or not prompt:
+        raise ValueError("llama.cpp /apply-template did not return a prompt")
+    tokenized = _post_json(
+        f"{root}/tokenize",
+        {"content": prompt, "add_special": False, "parse_special": True},
+        min(profile.request_timeout_seconds, 30),
+    )
+    tokens = tokenized.get("tokens")
+    if (
+        not isinstance(tokens, list)
+        or not tokens
+        or any(not isinstance(item, int) for item in tokens)
+    ):
+        raise ValueError("llama.cpp /tokenize did not return a non-empty integer token list")
+    return {"count": len(tokens), "max_model_len": profile.context_window_tokens}
 
 
 def calibrate_prompt(
@@ -300,7 +341,7 @@ def parse_vllm_metrics(text: str) -> dict[str, float]:
         if not line or line.startswith("#"):
             continue
         match = _PROMETHEUS_VALUE.match(line)
-        if match is None or match.group("name") not in _METRICS:
+        if match is None or match.group("name") not in _VLLM_METRICS:
             continue
         name = match.group("name").removeprefix("vllm:")
         labels = match.group("labels") or ""
@@ -319,6 +360,42 @@ def parse_vllm_metrics(text: str) -> dict[str, float]:
 
 def read_vllm_metrics(profile: ModelProfile) -> dict[str, float]:
     return parse_vllm_metrics(
+        _get_text(
+            f"{_server_root_url(profile.base_url)}/metrics",
+            min(profile.request_timeout_seconds, 10),
+        )
+    )
+
+
+def parse_llama_cpp_metrics(text: str) -> dict[str, float]:
+    """Normalize llama.cpp counters to the characterization metric vocabulary."""
+
+    normalized_names = {
+        "prompt_tokens_total": "prompt_tokens_total",
+        "tokens_predicted_total": "generation_tokens_total",
+        "requests_processing": "num_requests_running",
+        "requests_deferred": "num_requests_waiting",
+        "n_tokens_max": "max_context_tokens_observed",
+    }
+    values: dict[str, float] = {}
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        match = _PROMETHEUS_VALUE.match(line)
+        if match is None or match.group("name") not in _LLAMA_CPP_METRICS:
+            continue
+        name = normalized_names[match.group("name").removeprefix("llamacpp:")]
+        try:
+            value = float(match.group("value"))
+        except ValueError:
+            continue
+        if math.isfinite(value):
+            values[name] = values.get(name, 0.0) + value
+    return values
+
+
+def read_llama_cpp_metrics(profile: ModelProfile) -> dict[str, float]:
+    return parse_llama_cpp_metrics(
         _get_text(
             f"{_server_root_url(profile.base_url)}/metrics",
             min(profile.request_timeout_seconds, 10),
@@ -711,20 +788,21 @@ def run_characterization(
     output_caps: tuple[int, ...] = (512, 2048, 8192),
     concurrencies: tuple[int, ...] = (1, 2),
     repository_root: Path = REPOSITORY_ROOT,
+    server_kind: Literal["llama_cpp", "vllm"] = "vllm",
     process_name: str = "vllm",
     server_pid: int | None = None,
     container_name: str | None = PINNED_VLLM_CONTAINER_NAME,
     container_image_digest: str | None = PINNED_VLLM_AMD64_IMAGE_DIGEST,
     restart_phase: Literal["before_restart", "after_restart"] = "before_restart",
 ) -> dict[str, Any]:
-    """Run one server-context slice; relaunch vLLM for each 8K/16K/32K slice."""
+    """Run one server-context slice against a fresh local serving process."""
 
     if context_tokens <= 0 or any(value <= 0 for value in (*output_caps, *concurrencies)):
         raise ValueError("context, output caps, and concurrencies must be positive")
     effective_profile = profile.model_copy(update={"context_window_tokens": context_tokens})
     source_commit, source_tree_sha256 = _source_identity(repository_root)
     runtime_profile = InferenceRuntimeProfile(
-        server_kind="vllm",
+        server_kind=server_kind,
         compute_backend="nvidia",
         process_name=process_name,
         container_name=container_name,
@@ -752,7 +830,9 @@ def run_characterization(
         if container_name is not None
         else discover_process_pid(process_name)
     )
-    metrics_before = read_vllm_metrics(effective_profile)
+    metrics_reader = read_vllm_metrics if server_kind == "vllm" else read_llama_cpp_metrics
+    tokenizer = tokenize_messages if server_kind == "vllm" else tokenize_messages_llama_cpp
+    metrics_before = metrics_reader(effective_profile)
     cold_precondition = (
         metrics_before.get("generation_tokens_total", 0) == 0
         and metrics_before.get("request_success_total", 0) == 0
@@ -773,6 +853,7 @@ def run_characterization(
             effective_profile,
             state_target,
             marker=f"context-{context_tokens}-prefix-a",
+            tokenizer=tokenizer,
         )
         for state, messages in (
             ("cold_first_request", state_messages),
@@ -782,6 +863,7 @@ def run_characterization(
                     effective_profile,
                     state_target,
                     marker=f"context-{context_tokens}-prefix-b",
+                    tokenizer=tokenizer,
                 )[0],
             ),
             ("warm_prefix_cache", state_messages),
@@ -810,6 +892,7 @@ def run_characterization(
                 effective_profile,
                 prompt_target,
                 marker=f"context-{context_tokens}-output-{output_cap}",
+                tokenizer=tokenizer,
             )
             for concurrency in concurrencies:
                 result = _run_batch(effective_profile, messages, output_cap, concurrency)
@@ -828,11 +911,13 @@ def run_characterization(
             effective_profile,
             cancel_target,
             marker=f"context-{context_tokens}-cancellation",
+            tokenizer=tokenizer,
         )
         cancellation = verify_cancellation(
             effective_profile,
             cancellation_messages,
             prompt_tokens=cancellation_prompt_tokens,
+            metrics_reader=metrics_reader,
         )
         malformed_tool_recovery = verify_malformed_tool_recovery(effective_profile)
     finally:
@@ -842,7 +927,7 @@ def run_characterization(
         result["resources"] = sampler.summary(
             result["started_monotonic_ns"], result["finished_monotonic_ns"]
         )
-    metrics_after = read_vllm_metrics(effective_profile)
+    metrics_after = metrics_reader(effective_profile)
     report = {
         "schema_version": "local-inference-characterization/v1",
         "generated_at": datetime.now(UTC).isoformat(),
@@ -854,13 +939,14 @@ def run_characterization(
         "cold_precondition": cold_precondition,
         "server_pid": resolved_pid,
         "server_container": container_name,
+        "server_kind": server_kind,
         "telemetry_scope": {
             "gpu": "whole NVIDIA device",
             "host_memory": "whole host used memory",
             "server_memory": (
                 "Docker container memory usage"
                 if container_name is not None
-                else "vLLM root process and descendants RSS"
+                else "server root process and descendants RSS"
             ),
         },
         "baseline_resources": sampler.samples[0] if sampler.samples else None,
@@ -899,6 +985,7 @@ def main() -> None:
     parser.add_argument("--output-caps", type=int, nargs="+", default=(512, 2048, 8192))
     parser.add_argument("--concurrencies", type=int, nargs="+", default=(1, 2))
     parser.add_argument("--repository-root", type=Path, default=REPOSITORY_ROOT)
+    parser.add_argument("--server-kind", choices=("llama_cpp", "vllm"), default="vllm")
     parser.add_argument("--process-name", default="vllm")
     parser.add_argument("--server-pid", type=int)
     parser.add_argument(
@@ -906,23 +993,29 @@ def main() -> None:
         choices=("before_restart", "after_restart"),
         required=True,
     )
-    parser.add_argument("--container-name", default=PINNED_VLLM_CONTAINER_NAME)
+    parser.add_argument("--container-name")
     parser.add_argument(
         "--container-image-digest",
-        default=PINNED_VLLM_AMD64_IMAGE_DIGEST,
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    container_name = args.container_name
+    container_image_digest = args.container_image_digest
+    if args.server_kind == "vllm" and container_name is None:
+        container_name = PINNED_VLLM_CONTAINER_NAME
+    if args.server_kind == "vllm" and container_image_digest is None:
+        container_image_digest = PINNED_VLLM_AMD64_IMAGE_DIGEST
     report = run_characterization(
         profile=load_model_profile(args.model_profile),
         context_tokens=args.context_tokens,
         output_caps=tuple(args.output_caps),
         concurrencies=tuple(args.concurrencies),
         repository_root=args.repository_root.resolve(),
+        server_kind=args.server_kind,
         process_name=args.process_name,
         server_pid=args.server_pid,
-        container_name=args.container_name or None,
-        container_image_digest=args.container_image_digest or None,
+        container_name=container_name,
+        container_image_digest=container_image_digest,
         restart_phase=args.restart_phase,
     )
     _write_json_exclusive(args.output, report)

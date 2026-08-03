@@ -48,7 +48,7 @@ harness result requires a new pair under the current
 | Finding | Resolution |
 | --- | --- |
 | T-1 | Added the Deep Harness dispatch/budget/stream-fallback probe and shared harness-policy unit tests. |
-| T-2 | CI validates all five experiment profiles and all three model profiles. |
+| T-2 | CI plans every experiment profile and validates every model and study profile. |
 | T-3 | Every identified nested `uv run` test/probe uses `--no-sync`. |
 | T-4 | CI enforces branch coverage with a 55% floor (60% at introduction); coverage artifacts and mypy cache paths are ignored; GitHub Actions are commit-SHA pinned. |
 

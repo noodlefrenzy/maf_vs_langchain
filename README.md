@@ -106,8 +106,11 @@ control-path cost: median paired increases of 134 ms for MAF and 423 ms for
 LangGraph, including only 6--7 ms of explicit trace flush. Native tracing stays
 enabled for measured pilots; the full method and limits are in the
 [tracing study](docs/research/native-tracing-overhead.md).
-The next empirical milestone is a quality-tier model that clears the one-seed
-paired gate. Cosmos DB is now the selected production-intended checkpoint
+The next quality-tier candidate is a pinned Qwen3.5-27B Q4_K_M GGUF on local
+llama.cpp; its restart, compatibility, and one-seed paired gate are specified
+but not yet accepted. See the
+[candidate gate](docs/research/qwen35-27b-llamacpp-gate.md). Cosmos DB is now
+the selected production-intended checkpoint
 substrate for both explicit lanes; both provider adapters passed a pinned
 emulator restart gate, while real Azure deployment acceptance remains separate.
 See [production-checkpoints.md](docs/production-checkpoints.md).

@@ -38,16 +38,23 @@ _VULKAN_FIELDS = {
 _SERVE_FLAGS_WITH_VALUES = {
     "-hf",
     "-ngl",
+    "--alias",
+    "--batch-size",
     "--cache-reuse",
+    "--cache-type-k",
+    "--cache-type-v",
+    "--chat-template-kwargs",
     "--chat-template",
     "--ctx-size",
     "--cpu-offload-gb",
     "--host",
+    "--flash-attn",
     "--model",
     "--n-gpu-layers",
     "--parallel",
     "--port",
     "--reasoning-format",
+    "--reasoning",
     "--reasoning-parser",
     "--revision",
     "--served-model-name",
@@ -66,6 +73,9 @@ _SERVE_FLAGS_WITH_VALUES = {
     "--max-num-batched-tokens",
     "--load-format",
     "--seed",
+    "--threads",
+    "--threads-batch",
+    "--ubatch-size",
 }
 _SERVE_BOOLEAN_FLAGS = {
     "--enable-auto-tool-choice",
@@ -78,7 +88,9 @@ _SERVE_BOOLEAN_FLAGS = {
     "--jinja",
     "--language-model-only",
     "--metrics",
+    "--cont-batching",
     "--no-context-shift",
+    "--no-ui",
     "--slots",
 }
 _SENSITIVE_SERVE_FLAGS = {
