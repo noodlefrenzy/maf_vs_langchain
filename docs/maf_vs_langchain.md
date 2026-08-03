@@ -597,13 +597,13 @@ engineering risks—not to select a universal winner.
 1. Select and characterize a different quality-tier model or serving topology;
    Qwen3.5-9B failed the paired task-quality gate and the 35B-A3B GPTQ-Int4
    candidate failed the single-4090 runtime-fit gate.
-2. Rerun the one-seed paired task-quality gate at one clean source tree.
-3. Only after both gate lanes succeed, run the five-seed explicit, harness,
-   compute-matched, and unrestricted single-agent profiles.
-4. Repeat tracing on/off on completed model-driven workflows.
-5. Execute the frozen provenance-correction and prompt-paraphrase profiles.
-6. Select and test intended production checkpoint/resume backends.
-7. Publish paired raw points, operational failures, effect sizes, uncertainty,
+2. Only after both gate lanes succeed on an accepted candidate, run the
+   five-seed explicit, harness, compute-matched, and unrestricted single-agent
+   profiles.
+3. Repeat tracing on/off on completed model-driven workflows.
+4. Execute the frozen provenance-correction and prompt-paraphrase profiles.
+5. Select and test intended production checkpoint/resume backends.
+6. Publish paired raw points, operational failures, effect sizes, uncertainty,
    and metric audit samples.
 
 ---

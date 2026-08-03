@@ -86,12 +86,13 @@ implemented. Current milestone status is:
    completed successfully at 0.916667 while LangChain failed its evidence gate.
    The unrestricted and five-seed profiles remain unmeasured.
 3. The corrected Qwen3.5-9B 32K gate at `bb61e34` produced one successful
-   LangGraph run (0.916667) and one valid MAF evidence-gate failure. The pinned
-   Qwen3.5-35B-A3B GPTQ-Int4 follow-up then loaded at both 16K/8 GiB offload and
-   8K/2 GiB offload, but the pinned vLLM stack failed engine initialization
-   when its Triton kernels received CPU tensors. No-offload loading cannot
-   preserve useful KV-cache headroom on this host, so Qwen3.5-9B remains the
-   fit-check model and no larger pilot profile was promoted.
+   LangGraph run (0.916667) and one valid MAF evidence-gate failure. A second
+   clean gate at `6bc7815` reversed the split: MAF succeeded at 0.916667 while
+   LangGraph completed at 0.6 without effective containment or recovery. Since
+   neither pair had two successful lanes, Qwen3.5-9B remains the fit-check model.
+   The pinned Qwen3.5-35B-A3B GPTQ-Int4 follow-up loaded at both tested CPU-
+   offload points but failed engine initialization, so no larger pilot profile
+   was promoted.
 4. The symmetric canonical/paraphrase-A and zero/one/two-turn harness ablation
    controls and profiles are implemented and protocol-probed, but unmeasured.
 5. Production-intended checkpoint backends remain unselected and unvalidated;
@@ -115,7 +116,9 @@ implemented. Current milestone status is:
    cached/reasoning usage, and fixed-cadence host/GPU JSONL with measured
    sampling overhead. Validation fails closed on identity, schema, clock,
    sample-count, phase-shape, or usage reconciliation drift. Provider-specific
-   The pinned vLLM response's request ID and queue/TTFT/generation extension is
-   preserved symmetrically by both adapters, while detailed usage provides
-   per-request cached tokens. The profile separately preregisters warm/cold
-   server and prefix-cache policy.
+   request IDs and the pinned vLLM queue/TTFT/generation extension are preserved
+   symmetrically by both adapters, while detailed usage provides per-request
+   cached tokens. The profile separately preregisters warm/cold server and
+   prefix-cache policy. A clean live pair validated exact reconciliation,
+   complete GPU collection, measured cadence misses, and seven-phase control
+   timing; see `research/run-observability-validation.md`.

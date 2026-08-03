@@ -93,10 +93,15 @@ pinned loopback Phoenix deployment, and record validated operation-level trace
 completeness without making collector availability run-critical. These smoke
 runs exercise the system but do not constitute a benchmark result. Clean-source
 harness and compute-matched baseline smoke pairs have now been retained, along
-with a corrected Qwen3.5-9B task-quality gate. That gate contained one
-LangGraph task success and one valid MAF evidence-gate failure, so Qwen3.5-9B
-remains a fit-check model and none of the larger profiles were promoted. The
-next empirical milestone is a quality-tier model that clears the one-seed
+with two corrected Qwen3.5-9B task-quality gates. The first contained one
+LangGraph task success and one valid MAF evidence-gate failure; the second
+reversed the split, with MAF succeeding while LangGraph completed without
+effective containment or recovery. Neither pair had two successful lanes, so
+Qwen3.5-9B remains a fit-check model and none of the larger profiles were
+promoted. The clean second pair also validates the versioned per-call,
+host/GPU, and control-plane ledgers documented in the
+[native run-observability validation](docs/research/run-observability-validation.md).
+The next empirical milestone is a quality-tier model that clears the one-seed
 paired gate; production checkpoint-backend selection remains a separate
 deployment decision.
 Run bundles can already be checked with `agent-lab bundle validate` and

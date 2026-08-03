@@ -644,6 +644,12 @@ than a promoted pilot:
   success at 0.916667 and a valid MAF failure because the commander cited only
   one specialist role. The pair stayed inference-eligible and the failure
   remains in the denominator.
+- The clean `6bc7815` repeat reversed that split: MAF completed successfully at
+  0.916667 and LangGraph completed at 0.6 without effective containment or
+  recovery. Both bundles and their pair remained inference-eligible. The same
+  execution validated exact per-request timing/usage reconciliation, complete
+  host/GPU ledgers, and control-phase timing; see
+  [run-observability-validation.md](research/run-observability-validation.md).
 
 Qwen3.5-9B therefore remains the fit-check model; it did not clear the paired
 task-quality operating point, so the five-seed pilots and their ablations were
@@ -668,19 +674,18 @@ measurement.
 1. Select and characterize a different quality-tier candidate or serving
    topology; Qwen3.5-9B failed the paired task-quality gate and the 35B-A3B
    GPTQ-Int4 candidate failed the single-4090 runtime-fit gate.
-2. Rerun the one-seed task-quality gate at one clean source tree, with the
-   corrected adapters, contracts, server flags, and scorer frozen.
-3. Only after both gate lanes succeed, run the implemented five-seed explicit,
+2. Only after both gate lanes succeed on an accepted candidate, run the
+   implemented five-seed explicit,
    harness, compute-matched single-agent, and unrestricted single-agent
    profiles with the standard fault schedule and balanced lane order.
-4. Repeat the full-workflow tracing on/off ablation; report absolute deltas,
+3. Repeat the full-workflow tracing on/off ablation; report absolute deltas,
    span volume, and model/tool latency separately.
-5. After the same gate, execute the implemented symmetric
+4. After the same gate, execute the implemented symmetric
    harness-policy ablations for zero/one/two provenance-correction turns and
    the matched paraphrase-A prompt variant.
-6. Validate restart/resume using production-intended checkpoint backends; do
+5. Validate restart/resume using production-intended checkpoint backends; do
    not generalize from the compatibility file savers.
-7. Run the implemented offline paired report builder on the clean-source pilot
+6. Run the implemented offline paired report builder on the clean-source pilot
    indices. It retains raw paired points and operational failures, computes
    paired effects and deterministic bootstrap intervals, reports component
    discrimination, and preserves bundle links for audit.
