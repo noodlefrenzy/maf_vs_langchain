@@ -10,6 +10,7 @@ import pytest
 
 from agent_lab.async_cleanup import shutdown_server
 from agent_lab.bundle_validation import validate_bundle
+from agent_lab.config import load_experiment
 from agent_lab.contract_bundle import contract_bundle_hashes, sha256_payload
 from agent_lab.contracts import (
     Budget,
@@ -23,6 +24,25 @@ from agent_lab.runner_host import NativeRunnerDescriptor
 from agent_lab.runner_protocol import CheckpointCapability
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_full_workflow_tracing_ablation_profiles_change_only_tracing() -> None:
+    enabled = load_experiment(
+        REPOSITORY_ROOT / "configs/experiments/qwen35-9b-explicit-tracing-enabled-ablation.toml"
+    )
+    disabled = load_experiment(
+        REPOSITORY_ROOT / "configs/experiments/qwen35-9b-explicit-tracing-disabled-ablation.toml"
+    )
+
+    assert enabled.tracing.enabled is True
+    assert disabled.tracing.enabled is False
+    assert enabled.model_dump(exclude={"experiment_id", "tracing"}) == disabled.model_dump(
+        exclude={"experiment_id", "tracing"}
+    )
+    assert enabled.tracing.model_dump(exclude={"enabled"}) == disabled.tracing.model_dump(
+        exclude={"enabled"}
+    )
+    assert enabled.resource_metrics.enabled is True
 
 
 def test_incident_server_shutdown_is_bounded_and_closes_listener() -> None:

@@ -60,7 +60,11 @@ sampling overhead.
 
 A measured-study preflight should repeat the same tracing on/off comparison on
 representative completed native workflows and report absolute paired deltas.
-That follow-up was not run here because the configured model endpoint at
-`127.0.0.1:8000` was refusing connections at measurement time. The checked-in
-disabled profile and immutable trace-profile sidecars make that follow-up
-reproducible once inference is available.
+The matched Qwen3.5-9B profiles
+`qwen35-9b-explicit-tracing-enabled-ablation.toml` and
+`qwen35-9b-explicit-tracing-disabled-ablation.toml` freeze that follow-up. They
+differ only in experiment identity and the tracing-enabled bit; both retain the
+same 0.5-second resource observer so sampling disturbance is held constant.
+Alternate whole-pair condition order, vary the lane-order seed, and keep task,
+provider, resource, control-phase, and native-span measures separate. The
+model-driven result is recorded below only after clean-source execution.
