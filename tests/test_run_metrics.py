@@ -141,6 +141,10 @@ def test_model_metrics_preserve_optional_usage_and_reconcile_terminal(tmp_path: 
             "output_tokens": 3,
             "cached_input_tokens": 5,
             "reasoning_tokens": 2,
+            "provider_request_id": "chatcmpl-test",
+            "queue_seconds": 0.001,
+            "time_to_first_token_seconds": 0.02,
+            "generation_seconds": 0.03,
         },
     )
     bundle.emit(
@@ -181,6 +185,11 @@ def test_model_metrics_preserve_optional_usage_and_reconcile_terminal(tmp_path: 
         },
     }
     assert call["total_latency_seconds"] >= 0
+    assert call["provider_request_id"] == "chatcmpl-test"
+    assert call["queue_seconds"] == 0.001
+    assert call["time_to_first_token_seconds"] == 0.02
+    assert call["generation_seconds"] == 0.03
+    assert set(call["timing_availability"].values()) == {"derived", "provider_reported"}
     assert summary["task_latency_seconds"] >= call["total_latency_seconds"]
     assert summary["reconciliation_status"] == "exact"
 

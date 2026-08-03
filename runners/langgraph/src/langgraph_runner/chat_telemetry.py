@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 from pydantic import PrivateAttr
 
@@ -20,7 +21,25 @@ class ModelStats:
     output_tokens: int = 0
 
 
-class InstrumentedChatOpenAI(ChatOpenAI):
+class ProviderMetricsChatOpenAI(ChatOpenAI):
+    """Retain vLLM's content-free per-request timing extension."""
+
+    def _create_chat_result(
+        self,
+        response: dict | Any,
+        generation_info: dict | None = None,
+    ) -> Any:
+        result = super()._create_chat_result(response, generation_info)
+        payload = response if isinstance(response, dict) else response.model_dump(warnings=False)
+        provider = _provider_telemetry(payload)
+        if provider:
+            result.llm_output = {**(result.llm_output or {}), "provider_telemetry": provider}
+            for generation in result.generations:
+                generation.message.response_metadata["provider_telemetry"] = provider
+        return result
+
+
+class InstrumentedChatOpenAI(ProviderMetricsChatOpenAI):
     """ChatOpenAI adapter with normalized call/token telemetry."""
 
     _actor: str = PrivateAttr()
@@ -105,6 +124,7 @@ class InstrumentedChatOpenAI(ChatOpenAI):
             if completion_details.get("reasoning_tokens") is not None:
                 reasoning_reported = True
                 reasoning_tokens = int(completion_details["reasoning_tokens"])
+        provider = (response.llm_output or {}).get("provider_telemetry", {})
         await self._telemetry.model_finished(
             actor=self._actor,
             model=self._lab_profile.name,
@@ -113,6 +133,7 @@ class InstrumentedChatOpenAI(ChatOpenAI):
             cached_input_tokens=(cached_input_tokens if cached_input_reported else None),
             reasoning_tokens=reasoning_tokens if reasoning_reported else None,
             parser_outcome=parser_outcome,
+            **provider,
         )
         self._stats.input_tokens += input_tokens
         self._stats.output_tokens += output_tokens
@@ -123,3 +144,28 @@ class InstrumentedChatOpenAI(ChatOpenAI):
 
         raise ValueError("the protocol adapter requires non-streaming model calls")
         yield  # pragma: no cover
+
+
+def _provider_telemetry(payload: dict[str, Any]) -> dict[str, str | float | None]:
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, dict):
+        return {}
+    normalized: dict[str, str | float | None] = {
+        "provider_request_id": payload.get("id") if isinstance(payload.get("id"), str) else None
+    }
+    for source, destination in (
+        ("queue_time_ms", "queue_seconds"),
+        ("time_to_first_token_ms", "time_to_first_token_seconds"),
+        ("generation_time_ms", "generation_seconds"),
+    ):
+        observed = metrics.get(source)
+        if isinstance(observed, int | float) and not isinstance(observed, bool) and observed >= 0:
+            normalized[destination] = float(observed) / 1000
+    return normalized
+
+
+def provider_telemetry_from_message(message: Any) -> dict[str, str | float | None]:
+    if not isinstance(message, AIMessage):
+        return {}
+    value = message.response_metadata.get("provider_telemetry")
+    return value if isinstance(value, dict) else {}

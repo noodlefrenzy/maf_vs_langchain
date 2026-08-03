@@ -15,7 +15,6 @@ from typing import Annotated, Any, TypedDict
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
@@ -51,6 +50,10 @@ from agent_lab.workflow_contracts import (
 )
 from agent_lab.workflow_errors import EvidenceGateFailed
 from agent_lab.workflow_telemetry import NOOP_WORKFLOW_TELEMETRY, WorkflowTelemetry
+from langgraph_runner.chat_telemetry import (
+    ProviderMetricsChatOpenAI,
+    provider_telemetry_from_message,
+)
 from langgraph_runner.checkpoint_compat import _FileBackedSaver
 
 Investigator = Callable[["InvestigationTask"], Awaitable["SpecialistFinding"]]
@@ -274,7 +277,7 @@ class LangGraphRoleAgent:
         )
         self._tools: dict[str, BaseTool] = {}
         self._called_tools: list[str] = []
-        client = ChatOpenAI(
+        client = ProviderMetricsChatOpenAI(
             api_key="agent-lab-local",
             default_headers=model_request_headers("langgraph", role.value),
             **langchain_model_kwargs(profile),
@@ -317,7 +320,8 @@ class LangGraphRoleAgent:
         response = await self._structured_client.ainvoke(
             [("system", render_role_prompt(self.role)), ("user", prompt)]
         )
-        usage = _usage(response.get("raw") if isinstance(response, dict) else None)
+        raw_response = response.get("raw") if isinstance(response, dict) else None
+        usage = _usage(raw_response)
         await self.telemetry.model_finished(
             actor=self.role.value,
             model=self.profile.name,
@@ -332,6 +336,7 @@ class LangGraphRoleAgent:
                 and isinstance(response.get("parsed"), SpecialistFinding)
                 else "structured_parse_failed"
             ),
+            **provider_telemetry_from_message(raw_response),
         )
         if not isinstance(response, dict):
             raise TypeError(f"{self.role.value} returned an invalid structured response")
@@ -362,15 +367,6 @@ class LangGraphRoleAgent:
         self.stats = self.stats.model_completed(
             input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
-            cached_input_tokens=usage["cached_input_tokens"],
-            reasoning_tokens=usage["reasoning_tokens"],
-            parser_outcome=(
-                "structured_parse_succeeded"
-                if isinstance(response, dict)
-                and response.get("parsing_error") is None
-                and isinstance(response.get("parsed"), CommanderSynthesis)
-                else "structured_parse_failed"
-            ),
         )
         await self.telemetry.handoff(
             source_actor=self.role.value,
@@ -425,7 +421,7 @@ class LangGraphCommanderAgent:
         )
         self._tools: dict[str, BaseTool] = {}
         self._called_tools: list[str] = []
-        client = ChatOpenAI(
+        client = ProviderMetricsChatOpenAI(
             api_key="agent-lab-local",
             default_headers=model_request_headers(
                 "langgraph",
@@ -462,12 +458,23 @@ class LangGraphCommanderAgent:
         response = await self._structured_client.ainvoke(
             [("system", render_role_prompt(AgentRole.INCIDENT_COMMANDER)), ("user", prompt)]
         )
-        usage = _usage(response.get("raw") if isinstance(response, dict) else None)
+        raw_response = response.get("raw") if isinstance(response, dict) else None
+        usage = _usage(raw_response)
         await self.telemetry.model_finished(
             actor=AgentRole.INCIDENT_COMMANDER.value,
             model=self.profile.name,
             input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
+            cached_input_tokens=usage["cached_input_tokens"],
+            reasoning_tokens=usage["reasoning_tokens"],
+            parser_outcome=(
+                "structured_parse_succeeded"
+                if isinstance(response, dict)
+                and response.get("parsing_error") is None
+                and isinstance(response.get("parsed"), CommanderSynthesis)
+                else "structured_parse_failed"
+            ),
+            **provider_telemetry_from_message(raw_response),
         )
         if not isinstance(response, dict):
             raise TypeError("incident commander returned an invalid structured response")

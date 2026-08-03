@@ -115,6 +115,7 @@ implemented. Current milestone status is:
    cached/reasoning usage, and fixed-cadence host/GPU JSONL with measured
    sampling overhead. Validation fails closed on identity, schema, clock,
    sample-count, phase-shape, or usage reconciliation drift. Provider-specific
-   queue/TTFT/generation and per-request cache-hit signals remain explicitly
-   unavailable until the serving boundary exposes a correlation source; the
-   profile separately preregisters warm/cold server and prefix-cache policy.
+   The pinned vLLM response's request ID and queue/TTFT/generation extension is
+   preserved symmetrically by both adapters, while detailed usage provides
+   per-request cached tokens. The profile separately preregisters warm/cold
+   server and prefix-cache policy.

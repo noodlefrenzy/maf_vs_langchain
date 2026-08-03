@@ -779,6 +779,31 @@ def _validate_model_metrics(
                 "Model call start timestamp is invalid.",
                 "metrics/model.jsonl",
             )
+        timing_fields = (
+            "queue_seconds",
+            "time_to_first_token_seconds",
+            "generation_seconds",
+        )
+        reported_timing = False
+        for field_name in timing_fields:
+            value = call.get(field_name)
+            if value is None:
+                continue
+            reported_timing = True
+            if not isinstance(value, int | float) or isinstance(value, bool) or value < 0:
+                _error(
+                    findings,
+                    "model_metrics_provider_timing_invalid",
+                    f"Model call has invalid {field_name} {value!r}.",
+                    "metrics/model.jsonl",
+                )
+        if reported_timing and not isinstance(call.get("provider_request_id"), str):
+            _error(
+                findings,
+                "model_metrics_provider_request_id_missing",
+                "Provider timing requires its correlated provider request ID.",
+                "metrics/model.jsonl",
+            )
         if finished is not None and (
             not isinstance(finished, int)
             or finished < 0

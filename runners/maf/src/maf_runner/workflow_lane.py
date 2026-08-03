@@ -22,7 +22,6 @@ from agent_framework import (
     handler,
     response_handler,
 )
-from agent_framework.openai import OpenAIChatCompletionClient
 from httpx import AsyncClient, Timeout
 from openai import AsyncOpenAI
 
@@ -58,6 +57,10 @@ from agent_lab.workflow_contracts import (
 )
 from agent_lab.workflow_errors import EvidenceGateFailed
 from agent_lab.workflow_telemetry import NOOP_WORKFLOW_TELEMETRY, WorkflowTelemetry
+from maf_runner.chat_telemetry import (
+    ProviderMetricsOpenAIChatCompletionClient,
+    provider_telemetry,
+)
 from maf_runner.checkpoint_storage import OwnerOnlyCheckpointStorage
 
 Investigator = Callable[["InvestigationTask"], Awaitable["SpecialistFinding"]]
@@ -378,7 +381,7 @@ class MafRoleAgent:
             max_retries=0,
             default_headers=model_request_headers("maf", role.value),
         )
-        client = OpenAIChatCompletionClient(
+        client = ProviderMetricsOpenAIChatCompletionClient(
             model=profile.name,
             async_client=sdk,
             function_invocation_configuration={
@@ -455,6 +458,7 @@ class MafRoleAgent:
                 if isinstance(response.value, SpecialistFinding)
                 else "structured_parse_failed"
             ),
+            **provider_telemetry(response),
         )
         if not isinstance(response.value, SpecialistFinding):
             raise TypeError(f"{self.role.value} did not return a SpecialistFinding")
@@ -479,13 +483,6 @@ class MafRoleAgent:
         self.stats = self.stats.model_completed(
             input_tokens=int(usage.get("input_token_count", 0)),
             output_tokens=int(usage.get("output_token_count", 0)),
-            cached_input_tokens=_optional_usage(usage, "cache_read_input_token_count"),
-            reasoning_tokens=_optional_usage(usage, "reasoning_output_token_count"),
-            parser_outcome=(
-                "structured_parse_succeeded"
-                if isinstance(response.value, CommanderSynthesis)
-                else "structured_parse_failed"
-            ),
         )
         await self.telemetry.handoff(
             source_actor=self.role.value,
@@ -539,7 +536,10 @@ class MafCommanderAgent:
                 AgentRole.INCIDENT_COMMANDER.value,
             ),
         )
-        client = OpenAIChatCompletionClient(model=profile.name, async_client=sdk)
+        client = ProviderMetricsOpenAIChatCompletionClient(
+            model=profile.name,
+            async_client=sdk,
+        )
         self.agent = Agent(
             client,
             name=AgentRole.INCIDENT_COMMANDER.value,
@@ -593,6 +593,14 @@ class MafCommanderAgent:
             model=self.profile.name,
             input_tokens=int(usage.get("input_token_count", 0)),
             output_tokens=int(usage.get("output_token_count", 0)),
+            cached_input_tokens=_optional_usage(usage, "cache_read_input_token_count"),
+            reasoning_tokens=_optional_usage(usage, "reasoning_output_token_count"),
+            parser_outcome=(
+                "structured_parse_succeeded"
+                if isinstance(response.value, CommanderSynthesis)
+                else "structured_parse_failed"
+            ),
+            **provider_telemetry(response),
         )
         if not isinstance(response.value, CommanderSynthesis):
             raise TypeError("incident commander did not return a CommanderSynthesis")

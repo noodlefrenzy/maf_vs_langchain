@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from agent_framework import ChatContext, ChatMiddleware, ChatResponse
 from agent_framework.openai import OpenAIChatCompletionClient
@@ -11,6 +12,17 @@ from openai import AsyncOpenAI
 from agent_lab.contracts import ModelProfile
 from agent_lab.model_request_policy import model_request_headers
 from agent_lab.workflow_telemetry import WorkflowTelemetry
+
+
+class ProviderMetricsOpenAIChatCompletionClient(OpenAIChatCompletionClient):
+    """Retain vLLM's content-free per-request timing extension."""
+
+    def _get_metadata_from_chat_response(self, response: Any) -> dict[str, Any]:
+        metadata = super()._get_metadata_from_chat_response(response)
+        timing = _normalize_provider_timing(getattr(response, "metrics", None))
+        if timing:
+            metadata["provider_timing"] = timing
+        return metadata
 
 
 class ModelDispatchMiddleware(ChatMiddleware):
@@ -46,6 +58,7 @@ class ModelDispatchMiddleware(ChatMiddleware):
         output_tokens = int(usage.get("output_token_count", 0))
         cached_input_tokens = _optional_usage(usage, "cache_read_input_token_count")
         reasoning_tokens = _optional_usage(usage, "reasoning_output_token_count")
+        provider = provider_telemetry(context.result)
         await self.telemetry.model_finished(
             actor=self.actor,
             model=self.profile.name,
@@ -53,13 +66,14 @@ class ModelDispatchMiddleware(ChatMiddleware):
             output_tokens=output_tokens,
             cached_input_tokens=cached_input_tokens,
             reasoning_tokens=reasoning_tokens,
+            **provider,
         )
         self.model_calls += 1
         self.input_tokens += input_tokens
         self.output_tokens += output_tokens
 
 
-class InstrumentedChatClient(OpenAIChatCompletionClient):
+class InstrumentedChatClient(ProviderMetricsOpenAIChatCompletionClient):
     """MAF OpenAI client with normalized model-call telemetry and a hard loop cap."""
 
     def __init__(
@@ -118,3 +132,28 @@ class InstrumentedChatClient(OpenAIChatCompletionClient):
 def _optional_usage(usage: dict, key: str) -> int | None:
     value = usage.get(key)
     return int(value) if value is not None else None
+
+
+def _normalize_provider_timing(value: Any) -> dict[str, float]:
+    if not isinstance(value, dict):
+        return {}
+    normalized = {}
+    for source, destination in (
+        ("queue_time_ms", "queue_seconds"),
+        ("time_to_first_token_ms", "time_to_first_token_seconds"),
+        ("generation_time_ms", "generation_seconds"),
+    ):
+        observed = value.get(source)
+        if isinstance(observed, int | float) and not isinstance(observed, bool) and observed >= 0:
+            normalized[destination] = float(observed) / 1000
+    return normalized
+
+
+def provider_telemetry(response: ChatResponse) -> dict[str, str | float | None]:
+    timing = response.additional_properties.get("provider_timing") or {}
+    return {
+        "provider_request_id": response.response_id,
+        "queue_seconds": timing.get("queue_seconds"),
+        "time_to_first_token_seconds": timing.get("time_to_first_token_seconds"),
+        "generation_seconds": timing.get("generation_seconds"),
+    }

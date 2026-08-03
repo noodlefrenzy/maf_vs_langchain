@@ -151,6 +151,10 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         cached_input_tokens: int | None = None,
         reasoning_tokens: int | None = None,
         parser_outcome: str = "provider_response_accepted",
+        provider_request_id: str | None = None,
+        queue_seconds: float | None = None,
+        time_to_first_token_seconds: float | None = None,
+        generation_seconds: float | None = None,
     ) -> None:
         output_limit_exceeded = self._record_usage("output_tokens", output_tokens)
         pending_models = self._model_events.get(actor, [])
@@ -190,6 +194,16 @@ class WorkflowProtocolSession(WorkflowTelemetry):
             token_payload["cached_input_tokens"] = cached_input_tokens
         if reasoning_tokens is not None:
             token_payload["reasoning_tokens"] = reasoning_tokens
+        if provider_request_id is not None:
+            token_payload["provider_request_id"] = provider_request_id
+        provider_timings = {
+            "queue_seconds": queue_seconds,
+            "time_to_first_token_seconds": time_to_first_token_seconds,
+            "generation_seconds": generation_seconds,
+        }
+        for name, value in provider_timings.items():
+            if value is not None:
+                token_payload[name] = value
         self.emit(
             EventKind.MODEL_RESPONDED,
             actor=actor,

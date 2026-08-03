@@ -396,6 +396,9 @@ def write_model_metrics(
             output_tokens = payload.get("output_tokens")
             cached_input_tokens = payload.get("cached_input_tokens")
             reasoning_tokens = payload.get("reasoning_tokens")
+            queue_seconds = payload.get("queue_seconds")
+            ttft_seconds = payload.get("time_to_first_token_seconds")
+            generation_seconds = payload.get("generation_seconds")
             started_ns = request.get("monotonic_ns")
             finished_ns = response.get("monotonic_ns") if response is not None else None
             total_latency = (
@@ -416,19 +419,38 @@ def write_model_metrics(
                     "model": request.get("payload", {}).get("model"),
                     "request_event_id": request.get("event_id"),
                     "response_event_id": response.get("event_id") if response else None,
+                    "provider_request_id": payload.get("provider_request_id"),
                     "started_at": request.get("observed_at"),
                     "finished_at": response.get("observed_at") if response else None,
                     "started_monotonic_ns": started_ns,
                     "finished_monotonic_ns": finished_ns,
                     "total_latency_seconds": total_latency,
-                    "queue_seconds": None,
-                    "time_to_first_token_seconds": None,
-                    "generation_seconds": None,
+                    "queue_seconds": (
+                        queue_seconds if isinstance(queue_seconds, int | float) else None
+                    ),
+                    "time_to_first_token_seconds": (
+                        ttft_seconds if isinstance(ttft_seconds, int | float) else None
+                    ),
+                    "generation_seconds": (
+                        generation_seconds if isinstance(generation_seconds, int | float) else None
+                    ),
                     "timing_availability": {
                         "total": "derived" if total_latency is not None else "unavailable",
-                        "queue": "not_reported_by_nonstreaming_adapter",
-                        "time_to_first_token": "not_reported_by_nonstreaming_adapter",
-                        "generation": "not_reported_by_nonstreaming_adapter",
+                        "queue": (
+                            "provider_reported"
+                            if isinstance(queue_seconds, int | float)
+                            else "provider_not_reported"
+                        ),
+                        "time_to_first_token": (
+                            "provider_reported"
+                            if isinstance(ttft_seconds, int | float)
+                            else "provider_not_reported"
+                        ),
+                        "generation": (
+                            "provider_reported"
+                            if isinstance(generation_seconds, int | float)
+                            else "provider_not_reported"
+                        ),
                     },
                     "tokens": {
                         "input": input_tokens if isinstance(input_tokens, int) else None,

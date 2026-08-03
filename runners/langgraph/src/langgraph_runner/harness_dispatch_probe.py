@@ -48,6 +48,10 @@ class _RecordingTelemetry:
         cached_input_tokens: int | None = None,
         reasoning_tokens: int | None = None,
         parser_outcome: str = "provider_response_accepted",
+        provider_request_id: str | None = None,
+        queue_seconds: float | None = None,
+        time_to_first_token_seconds: float | None = None,
+        generation_seconds: float | None = None,
     ) -> None:
         self.model_finishes.append(
             {
@@ -55,6 +59,13 @@ class _RecordingTelemetry:
                 "model": model,
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
+                "cached_input_tokens": cached_input_tokens,
+                "reasoning_tokens": reasoning_tokens,
+                "parser_outcome": parser_outcome,
+                "provider_request_id": provider_request_id,
+                "queue_seconds": queue_seconds,
+                "time_to_first_token_seconds": time_to_first_token_seconds,
+                "generation_seconds": generation_seconds,
             }
         )
 

@@ -416,6 +416,7 @@ adapter does not fabricate deeper graph paths from span names.
 Model messages remain content-free structural request/response events. A
 completed call also records input/output and optional cached-input/reasoning
 token counts as `metric.recorded`; absence stays explicit rather than becoming
-zero. Non-streaming calls do not generate synthetic text deltas, TTFT, queue,
-or generation estimates. Raw prompts, messages, tool arguments/results, and
-reasoning content remain excluded.
+zero. Non-streaming calls do not generate synthetic text deltas or timing
+estimates; exact queue/TTFT/generation fields are retained only when the
+provider response reports them. Raw prompts, messages, tool arguments/results,
+and reasoning content remain excluded.

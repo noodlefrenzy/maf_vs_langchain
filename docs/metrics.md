@@ -32,16 +32,18 @@ reasoning tokens are included only when the native SDK reports those fields.
 The provider response being accepted by the SDK is the current parser outcome;
 it is not a claim that later application-level structured validation passed.
 
-The non-streaming task adapters cannot truthfully derive queue delay, TTFT, or
-generation duration. Those fields therefore remain `null` with
-`not_reported_by_nonstreaming_adapter`. The held-constant profile distinguishes
+The pinned vLLM response extension reports a provider request ID, queue delay,
+TTFT, and generation duration for each non-streaming completion. Both native
+clients retain and normalize those exact fields; another provider that omits
+them records `null` with `provider_not_reported`. The held-constant profile distinguishes
 cold/warm server state and disabled/reset/warm/uncontrolled prefix caching.
 Current measured profiles declare a warm loaded server and
 `enabled_uncontrolled` cache; that is not a per-request cache-hit claim.
 Whole-device thermal state is joined by overlapping monotonic time in
 `host.jsonl`.
 
-The final summary reconciles request/response and normalized metric counts with
+Provider request IDs correlate timings without serializing concurrent calls or
+subtracting aggregate Prometheus histograms. The final summary reconciles request/response and normalized metric counts with
 the terminal's model-call/output-token totals. A complete event stream requires
 exact output reconciliation; a documented partial stream may only leave the
 terminal at or above observed usage.

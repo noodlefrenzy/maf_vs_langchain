@@ -43,6 +43,18 @@ def test_deep_harness_counts_each_native_model_dispatch_and_stream_fallback() ->
     assert payload["output_tokens"] == 21
     assert len(payload["model_starts"]) == 3
     assert len(payload["model_finishes"]) == 3
+    nonstreaming = payload["model_finishes"][:2]
+    assert all(
+        finish["provider_request_id"] == "chatcmpl-multi_turn"
+        and finish["queue_seconds"] == 0.00125
+        and finish["time_to_first_token_seconds"] == 0.0125
+        and finish["generation_seconds"] == 0.025
+        and finish["cached_input_tokens"] == 3
+        and finish["reasoning_tokens"] == 2
+        for finish in nonstreaming
+    )
+    assert payload["model_finishes"][-1]["provider_request_id"] == "chatcmpl-streaming"
+    assert payload["model_finishes"][-1]["time_to_first_token_seconds"] == 0.0125
     assert len(records) == 3
     assert [record["fixture"] for record in records] == [
         "multi_turn",
