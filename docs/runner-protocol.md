@@ -112,6 +112,13 @@ A future backend may set it to `true` only when it is both resumable and
 restart-safe and has passed this same request-bound restart/replay gate in its
 intended deployment environment.
 
+Cosmos DB is now the selected production-intended backend for both explicit
+lanes, and both provider adapters have passed the gate against a pinned local
+emulator in separate processes. The flag remains `false` for the normal runner
+descriptors because those profiles still use local bundle storage and emulator
+validation does not establish the intended cloud deployment. See
+[production-checkpoints.md](production-checkpoints.md).
+
 Runner description metadata also reports the frozen contract hashes loaded in
 the isolated environment and a framework-neutral normalized topology for each
 lane. Experiment startup compares those values across the matched pair before

@@ -583,7 +583,8 @@ Choose the **orchestration mode and operating model first**, then the framework.
 - One incident seed, one model profile, no injected-fault smoke cohort
 - Early harness runs used evolving source trees
 - Existing harness smoke predates the symmetric hashed adapter contract
-- No production checkpoint-backend evaluation
+- Cosmos provider restart semantics are validated on a pinned emulator, but no
+  production Azure RBAC, availability, scale, backup, or cost evaluation
 - Startup-only tracing probe does not predict full-run overhead
 - Model sampling is not bitwise deterministic even with a requested seed
 
@@ -602,7 +603,8 @@ engineering risks—not to select a universal winner.
    profiles.
 3. Execute the frozen provenance-correction, prompt-paraphrase, no-review, and
    no-compaction profiles.
-4. Select and test intended production checkpoint/resume backends.
+4. Repeat the Cosmos restart gate against the intended Azure account and
+   managed identity before enabling a production runner profile.
 5. Publish paired raw points, operational failures, effect sizes, uncertainty,
    and metric audit samples.
 

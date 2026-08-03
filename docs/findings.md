@@ -713,8 +713,10 @@ pair ID; see
 3. After the same gate, execute the implemented symmetric
    harness-policy ablations for zero/one/two provenance-correction turns and
    the matched paraphrase-A, no-review, and no-compaction variants.
-4. Validate restart/resume using production-intended checkpoint backends; do
-   not generalize from the compatibility file savers.
+4. Repeat the validated Cosmos restart/resume gate against the intended Azure
+   account and managed identity before enabling a production runner profile;
+   the pinned emulator closes provider compatibility, not deployment
+   acceptance. See [production-checkpoints.md](production-checkpoints.md).
 5. Run the implemented offline paired report builder on the clean-source pilot
    indices. It retains raw paired points and operational failures, computes
    paired effects and deterministic bootstrap intervals, reports component

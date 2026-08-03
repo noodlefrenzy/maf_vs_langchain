@@ -81,6 +81,12 @@ Framework-native objects do not cross the process boundary. A prepared run
 returns a framework-neutral topology description, effective prompt hashes,
 tool catalog hashes, and checkpoint capability metadata.
 
+The selected production-intended persistence service is Cosmos DB for both
+explicit lanes, using separate framework-native containers. Optional provider
+validation crosses a real process boundary without changing the default local
+bundle backend or its `production_ready = false` claim. See
+[production-checkpoints.md](production-checkpoints.md).
+
 The implemented v0.1 process boundary is the typed JSON-lines protocol
 documented in [runner-protocol.md](runner-protocol.md). Requests pass
 credentials over stdin, persist only a redacted request view, and expose

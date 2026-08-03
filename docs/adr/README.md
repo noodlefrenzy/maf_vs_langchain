@@ -16,6 +16,7 @@ decision requires a superseding ADR rather than rewriting its history.
 | [0008](0008-separate-fit-and-development-models.md) | Separate the local fit-check runtime from the provisional development-smoke runtime |
 | [0009](0009-runner-process-protocol.md) | Use a versioned JSON-lines runner process protocol |
 | [0010](0010-symmetric-harness-contract.md) | Freeze a symmetric two-phase harness adapter contract |
+| [0011](0011-cosmos-checkpoint-backend.md) | Select Cosmos DB for production-intended workflow checkpoints |
 
 ADR 0008 supersedes ADR 0004's one-runtime sequencing while preserving its
 Qwen3.5-9B fit-check requirement.

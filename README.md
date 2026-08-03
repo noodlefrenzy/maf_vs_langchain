@@ -107,8 +107,10 @@ LangGraph, including only 6--7 ms of explicit trace flush. Native tracing stays
 enabled for measured pilots; the full method and limits are in the
 [tracing study](docs/research/native-tracing-overhead.md).
 The next empirical milestone is a quality-tier model that clears the one-seed
-paired gate; production checkpoint-backend selection remains a separate
-deployment decision.
+paired gate. Cosmos DB is now the selected production-intended checkpoint
+substrate for both explicit lanes; both provider adapters passed a pinned
+emulator restart gate, while real Azure deployment acceptance remains separate.
+See [production-checkpoints.md](docs/production-checkpoints.md).
 Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 

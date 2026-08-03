@@ -107,10 +107,12 @@ implemented. Current milestone status is:
    no-compaction harness ablation controls and profiles are implemented and
    protocol-probed, but unmeasured. Active roles, prompts, and native compaction
    mode are hash-frozen into pair preflight and effective topology.
-5. Production-intended checkpoint backends remain unselected and unvalidated;
-   the compatibility file savers do not close that milestone. Runner metadata
-   now makes that boundary machine-readable with `production_ready = false`
-   and rejects any production-ready claim that is not resumable and restart-safe.
+5. Cosmos DB is selected as the symmetric production-intended checkpoint
+   service. MAF's first-party provider and Microsoft's LangGraph provider each
+   passed an HTTPS, fresh-process approval resume against a pinned emulator.
+   The compatibility file savers remain the default, so runner metadata still
+   reports `production_ready = false`; actual Azure RBAC and availability are
+   deployment acceptance gates. See `production-checkpoints.md`.
 6. The fail-closed offline builder successfully revalidated the available
    clean-source smoke and Qwen-gate indices. Its v2 output now reports task,
    token, provider-timing, client-concurrency, host/GPU, control, and trace
