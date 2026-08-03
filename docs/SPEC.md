@@ -221,11 +221,14 @@ Initial fit-check profile:
 - vLLM reasoning parser `qwen3`;
 - vLLM tool parser `qwen3_coder`.
 
-The 9B model is a starting hypothesis, not a frozen choice. It must pass
-multi-step/parallel tool-call tests and fit with useful KV cache on the 24 GB
-RTX 4090. `Qwen3.5-35B-A3B-GPTQ-Int4` is a quality-tier candidate using bounded
-CPU offload into the 128 GB system RAM. Model selection is finalized from
-measurements, not parameter count.
+The 9B model was a starting hypothesis, not a frozen choice. It passed native
+compatibility but failed the paired task-quality gate.
+`Qwen3.5-35B-A3B-GPTQ-Int4` was then tested as a quality-tier candidate using
+bounded CPU offload into the 128 GB system RAM. It loaded but failed engine
+initialization because the pinned Triton kernels could not consume offloaded
+tensors, while no-offload loading cannot preserve useful KV-cache headroom on
+the 24 GB RTX 4090. Model selection remains gated on a different measured
+candidate or serving topology, not parameter count.
 
 The run manifest records the model repository revision, weight digest, server
 version and flags, CUDA/driver versions, quantization, context limit, sampling

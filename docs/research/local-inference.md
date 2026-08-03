@@ -150,7 +150,7 @@ the frozen identities, throughput matrix, restart comparison, and evidence
 hashes. This establishes fit and compatibility, not sufficient task quality
 for the final paired study.
 
-## Quality-tier candidate: Qwen3.5-35B-A3B GPTQ Int4
+## Rejected quality-tier candidate: Qwen3.5-35B-A3B GPTQ Int4
 
 The 35B-A3B model activates about 3B parameters per token and the official
 GPTQ-Int4 repository is about 24.5 GB. That repository size already approaches
@@ -161,16 +161,22 @@ card](https://huggingface.co/Qwen/Qwen3.5-35B-A3B),
 [official GPTQ-Int4
 files](https://huggingface.co/Qwen/Qwen3.5-35B-A3B-GPTQ-Int4/tree/main)
 
-The available 128 GB host RAM makes bounded offload possible, but PCIe transfer,
-kernel support, latency, and context capacity must be characterized. MoE active
-parameter count does not reduce the need to store all expert weights.
+The available 128 GB host RAM made bounded offload worth testing, but MoE active
+parameter count does not reduce the need to store all expert weights. The
+pinned official revision
+`3af5ca2972faf6de1fd6f4efc4d8d319ca751e8b` loaded all 14 shards at both the
+staged 16K/8 GiB-offload setting and a reduced 8K/2 GiB-offload diagnostic
+setting. Engine initialization then failed in each case because a Triton kernel
+received a CPU tensor: first in the Qwen GDN prefill path, then in the WNA16 MoE
+path. Eager mode did not remove the second failure.
 
-The staged gate now pins official revision
-`3af5ca2972faf6de1fd6f4efc4d8d319ca751e8b`, loopback port 8002, a 16K
-context, `moe_wna16`, 75% GPU-memory utilization, and 8 GiB of CPU offload. See the
-[executable quality-tier gate](qwen35-35b-a3b-gate.md). These are candidate
-controls until the server and both native clients pass; they are not a selected
-measured-study operating point.
+The reduced run used one sequence and 4,096 batched tokens. It still consumed
+18.02 GiB for model loading after 2.13 GiB was offloaded. Restoring those
+parameters to the GPU would consume essentially all VRAM currently available
+under WSL before useful KV cache. The 35B candidate is therefore rejected on
+the present single-4090/pinned-vLLM topology. See the
+[failed quality-tier gate record](qwen35-35b-a3b-gate.md). A different model,
+multi-GPU serving, or a server with supported layer-aware offload is required.
 
 ## Why not pick the largest model immediately
 
@@ -199,7 +205,7 @@ lonestar development tunnel on port 8000 is unaffected.
 
 | Dimension | Values |
 | --- | --- |
-| Model | Qwen3.5-9B BitsAndBytes 4-bit with BF16 compute; BF16 and CPU offload rejected; 35B-A3B GPTQ Int4 remains experimental |
+| Model | Qwen3.5-9B BitsAndBytes 4-bit with BF16 compute; BF16 and CPU offload rejected; 35B-A3B GPTQ Int4 also rejected on the single-4090 vLLM topology |
 | Context | 8K, 16K, 32K; larger only if it fits |
 | Concurrency | 1 and 2 in-flight requests |
 | Prompt type | plain reasoning, one tool, multi-step tools, parallel tools, malformed tool recovery |

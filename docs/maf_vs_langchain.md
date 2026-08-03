@@ -594,8 +594,9 @@ engineering risks—not to select a universal winner.
 
 # Recommended next phase
 
-1. Select and characterize a quality-tier model candidate; Qwen3.5-9B remains
-   the accepted fit-check model but failed the paired task-quality gate.
+1. Select and characterize a different quality-tier model or serving topology;
+   Qwen3.5-9B failed the paired task-quality gate and the 35B-A3B GPTQ-Int4
+   candidate failed the single-4090 runtime-fit gate.
 2. Rerun the one-seed paired task-quality gate at one clean source tree.
 3. Only after both gate lanes succeed, run the five-seed explicit, harness,
    compute-matched, and unrestricted single-agent profiles.

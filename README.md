@@ -196,11 +196,14 @@ prompt/correction control:
 - `configs/experiments/harness-correction-two-ablation.toml`
 - `configs/experiments/harness-paraphrase-a-ablation.toml`
 
-Qwen3.5-9B did not clear that gate. The separately pinned 35B-A3B quality-tier
-candidate therefore has its own compatibility-first gate and runbook:
-
-- `configs/experiments/qwen35-35b-a3b-task-quality-gate.toml`
-- `docs/research/qwen35-35b-a3b-gate.md`
+Qwen3.5-9B did not clear that gate. The separately pinned 35B-A3B GPTQ-Int4
+candidate was then tested at 16K/8 GiB offload and at a minimal 8K/2 GiB
+offload operating point. Both configurations loaded all weights but failed
+during vLLM engine initialization because Triton kernels received CPU-offloaded
+tensors. A no-offload configuration cannot leave useful KV-cache headroom on
+this host, so the candidate is rejected for the current single-4090 stack. The
+failed gate and immutable evidence identities remain documented in
+`docs/research/qwen35-35b-a3b-gate.md`; no larger profile was promoted.
 
 The effective prompt/policy payload is hashed into both paired manifests and
 the pair preflight. Both native adapters consume the same validated

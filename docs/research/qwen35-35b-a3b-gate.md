@@ -1,16 +1,19 @@
 # Qwen3.5-35B-A3B quality-tier gate
 
-Status: staged experimental candidate
+Status: rejected on the current single-RTX-4090/pinned-vLLM topology
 
-This gate tests the quality-tier candidate only after Qwen3.5-9B has passed
-hardware/client compatibility but failed the one-seed paired task-quality
-operating point. It does not promote the 35B model merely because it starts.
+This record preserves the quality-tier candidate tested after Qwen3.5-9B
+passed hardware/client compatibility but failed the one-seed paired
+task-quality operating point. The 35B model did not reach server health, so no
+native-client compatibility or task-quality run was started.
 
 ## Frozen candidate
 
 - model: `Qwen/Qwen3.5-35B-A3B-GPTQ-Int4`;
 - revision: `3af5ca2972faf6de1fd6f4efc4d8d319ca751e8b`;
 - repository size: 24,447,882,201 bytes at acquisition;
+- cached snapshot aggregate SHA-256:
+  `f8335ad5d64105f3d53f2952b6db133c93b6811ebccd507cf2d21dbf97ecc97c`;
 - server image: `vllm/vllm-openai@sha256:674c5aa666d38c07a0dc779f8c77a05c2b859617410d16dcdd8a8776166c92b9`;
 - text-only Chat Completions on loopback port 8002;
 - 16,384-token served context, two sequences, and 8,192 batched tokens;
@@ -40,7 +43,7 @@ docker run --rm --pull never \
   -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen3.5-35B-A3B-GPTQ-Int4', revision='3af5ca2972faf6de1fd6f4efc4d8d319ca751e8b')"
 ```
 
-## Gate sequence
+## Executed gate sequence
 
 The 35B server cannot coexist with the 9B GPU server. Stop and remove only the
 named 9B container, then run the fail-closed gate from a clean committed tree:
@@ -55,14 +58,52 @@ scripts/run-qwen35-35b-a3b-vllm-gate.sh \
   runs/qwen35-35b-a3b-gate
 ```
 
-The script refuses to overwrite evidence, starts only the pinned offline
-snapshot, waits up to 30 minutes for health, and runs the full two-client model
-compatibility suite before the paired MAF Workflow/LangGraph task-quality gate.
-It always captures the server log and removes only its named 35B container.
+The script refused to overwrite evidence, started only the pinned offline
+snapshot, and failed closed while waiting for server health. It captured the
+server log and removed only its named 35B container. The ignored local log is
+`runs/model-compatibility/qwen35-35b-a3b-gate/server.log`, with SHA-256
+`aa2a15cbbb504df8121ed925f74ee67c9cced27c4688096da6175fa31aa9f07e`.
 
-## Promotion rule
+All 14 shards loaded in about 46 seconds, and vLLM reported 12.12 GiB of GPU
+model memory after offloading 8.03 GiB. Engine initialization then failed while
+profiling the cache in the Qwen GDN prefill path:
 
-The model advances to characterization and five-seed profiles only if:
+```text
+ValueError: Pointer argument cannot be accessed from Triton (cpu tensor?)
+```
+
+This happened after weight loading and before the health endpoint became
+available; it was not a task or client failure.
+
+## Minimal-fit diagnostic
+
+A second diagnostic tested the smallest potentially useful variant without
+changing the frozen gate:
+
+- 8,192-token context;
+- one sequence and 4,096 batched tokens;
+- 75% GPU-memory target and 2 GiB CPU offload;
+- eager execution, disabling `torch.compile` and CUDA graphs;
+- every other model, image, revision, quantization, and parser identity held
+  equal.
+
+Again all 14 shards loaded. vLLM reported 18.02 GiB of GPU model memory after
+offloading 2.13 GiB. Initialization failed with the same pointer error, this
+time in the Triton WNA16 MoE kernel. The ignored diagnostic log is
+`runs/model-compatibility/qwen35-35b-a3b-fit/server.log`, with SHA-256
+`44089c51a21ed7e4021b539cc373b1171a32d7796a450febc790c82ca603d637`.
+
+The two failures show that generic CPU offload is not compatible with the
+required Qwen GDN and WNA16 Triton kernels in this pinned stack. Removing the
+last 2.13 GiB of offload would bring model allocation to roughly 20.15 GiB,
+essentially consuming the VRAM available to WSL before KV cache and runtime
+headroom. A still smaller context would not be a useful experiment operating
+point.
+
+## Gate disposition
+
+The model would have advanced to characterization and five-seed profiles only
+if:
 
 1. the server starts without exceeding the pinned offload and context controls;
 2. every native-client compatibility fixture passes;
@@ -70,4 +111,9 @@ The model advances to characterization and five-seed profiles only if:
 4. the pair remains measurement-eligible under identical source/runtime
    provenance.
 
-Startup, throughput, or success in only one framework is not sufficient.
+Startup, throughput, or success in only one framework is not sufficient. The
+first condition failed, so the candidate is rejected for this host and server
+stack. The staged script and configs remain solely as an exact, fail-closed
+reproduction of the attempted gate; they are not an approved experiment
+profile. No 35B compatibility or task result exists and no larger profile is
+promoted.

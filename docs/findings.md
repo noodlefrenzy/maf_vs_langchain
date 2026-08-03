@@ -654,10 +654,20 @@ paraphrase-A prompts and zero, one, or two provenance-correction turns into the
 pair preflight and both manifests. All three non-measurement lifecycle probes
 passed.
 
+The pinned Qwen3.5-35B-A3B GPTQ-Int4 follow-up loaded all weights at both the
+16K/8 GiB-offload gate and an 8K/2 GiB-offload diagnostic, but vLLM engine
+initialization failed when Triton kernels encountered CPU-offloaded tensors.
+The latter configuration used eager mode, one sequence, and 4,096 batched
+tokens and still required 18.02 GiB of GPU model memory after 2.13 GiB was
+offloaded. A no-offload run cannot leave useful KV-cache headroom on this host,
+so this candidate was rejected before client compatibility or task-quality
+measurement.
+
 ## Recommended next work
 
-1. Select and characterize a quality-tier candidate; Qwen3.5-9B remains useful
-   for fit and compatibility but failed the paired task-quality gate.
+1. Select and characterize a different quality-tier candidate or serving
+   topology; Qwen3.5-9B failed the paired task-quality gate and the 35B-A3B
+   GPTQ-Int4 candidate failed the single-4090 runtime-fit gate.
 2. Rerun the one-seed task-quality gate at one clean source tree, with the
    corrected adapters, contracts, server flags, and scorer frozen.
 3. Only after both gate lanes succeed, run the implemented five-seed explicit,

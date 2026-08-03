@@ -23,8 +23,11 @@ the full native-client compatibility gate.
 The corrected one-seed task-quality gate at source `bb61e34` produced a
 successful LangGraph lane and a valid MAF evidence-gate failure. Qwen3.5-9B
 therefore remains the accepted fit-check model but is not promoted as the
-quality-tier pilot model. The larger profiles remain gated pending another
-quality-tier candidate.
+quality-tier pilot model. The Qwen3.5-35B-A3B GPTQ-Int4 candidate subsequently
+loaded but failed engine initialization at both tested CPU-offload operating
+points in the pinned vLLM stack. A no-offload configuration cannot leave useful
+KV-cache headroom on the 24 GB device. The larger profiles therefore remain
+gated pending a different quality-tier candidate or serving topology.
 
 ## Decision
 
