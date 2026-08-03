@@ -127,3 +127,11 @@ implemented. Current milestone status is:
    prefix-cache policy. A clean live pair validated exact reconciliation,
    complete GPU collection, measured cadence misses, and seven-phase control
    timing; see `research/run-observability-validation.md`.
+10. The representative-workflow tracing ablation is complete at clean source
+    `1e85861`: four matched blocks per condition balance condition order and
+    lane order across 16 launches. Tracing added median paired total-control
+    overhead of 134 ms for MAF and 423 ms for LangGraph; explicit flush was
+    6--7 ms, every enabled trace met the expected 0.952381 completeness
+    contract, and no material GPU/provider shift was detected. The raw
+    aggregate dataset and interpretation limits are retained in
+    `research/native-tracing-overhead.md`.

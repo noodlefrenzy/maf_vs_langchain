@@ -101,6 +101,11 @@ Qwen3.5-9B remains a fit-check model and none of the larger profiles were
 promoted. The clean second pair also validates the versioned per-call,
 host/GPU, and control-plane ledgers documented in the
 [native run-observability validation](docs/research/run-observability-validation.md).
+A subsequent balanced 16-launch tracing ablation measured a consistent fixed
+control-path cost: median paired increases of 134 ms for MAF and 423 ms for
+LangGraph, including only 6--7 ms of explicit trace flush. Native tracing stays
+enabled for measured pilots; the full method and limits are in the
+[tracing study](docs/research/native-tracing-overhead.md).
 The next empirical milestone is a quality-tier model that clears the one-seed
 paired gate; production checkpoint-backend selection remains a separate
 deployment decision.

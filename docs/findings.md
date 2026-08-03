@@ -1,9 +1,8 @@
 # Microsoft Agent Framework vs the LangChain stack: findings
 
-Status: engineering findings from smoke, stabilization, tracing-ablation, and
-instrumentation-verification runs through 2026-08-02, plus adapter-contract
-hardening through 2026-08-03. This is not a measured benchmark or a framework
-ranking.
+Status: engineering findings from smoke, stabilization, tracing-ablation,
+instrumentation-verification, and adapter-contract hardening through
+2026-08-03. This is not a measured benchmark or a framework ranking.
 
 ## Executive summary
 
@@ -529,6 +528,20 @@ LangChain callback manager, but that explanation is an implementation-based
 inference, not a component timing result. No percentage or per-span conclusion
 is warranted.
 
+A clean-source representative-workflow follow-up then ran four matched blocks
+per condition, balanced across condition and lane order, for 16 model-driven
+launches. Tracing increased total non-task control overhead in all eight
+lane-level comparisons: the median paired delta was +134 ms for MAF (range
++94 to +225 ms) and +423 ms for LangGraph (range +395 to +545 ms). The explicit
+terminal flush accounted for only 6.1 ms and 7.3 ms of the respective medians.
+All enabled runs exported 57 MAF or 64 LangGraph spans at 0.952381 completeness;
+all disabled runs retained zero spans. Raw task latency varied by tens of
+seconds with stochastic output length and provider queue/generation time, so it
+does not isolate tracing cost. Peak GPU memory, power, token-normalized provider
+generation time, and resource-sampling cost showed no material shift in this
+small cohort. See [native-tracing-overhead.md](research/native-tracing-overhead.md)
+for matched deltas, raw aggregate data, and interpretation limits.
+
 Privacy and resilience also required explicit handling. The OpenTelemetry
 provider is effectively one-shot global process state, reinforcing runner
 isolation. OpenInference requires every content-hiding option to be configured,
@@ -608,7 +621,8 @@ They do **not** establish that:
 - multi-agent execution outperforms a single-agent baseline;
 - the harness score difference is stable across seeds, models, incident
   families, or fault profiles;
-- the startup-only tracing ablation predicts full-run tracing overhead;
+- tracing has a known per-span cost, concurrent collector capacity, or
+  quality-tier-model overhead;
 - one customer architecture should standardize on one brand for every layer.
 
 Limitations are substantial: one incident seed, one model profile, no injected
@@ -650,6 +664,11 @@ than a promoted pilot:
   execution validated exact per-request timing/usage reconciliation, complete
   host/GPU ledgers, and control-phase timing; see
   [run-observability-validation.md](research/run-observability-validation.md).
+- The clean `1e85861` tracing follow-up retained four matched blocks per
+  condition. Total control overhead increased consistently by median 134 ms for
+  MAF and 423 ms for LangGraph, while all enabled runs exported complete-enough
+  native trace contracts. The result closes the representative-workflow
+  instrumentation fit check without claiming a per-span or concurrency cost.
 
 Qwen3.5-9B therefore remains the fit-check model; it did not clear the paired
 task-quality operating point, so the five-seed pilots and their ablations were
@@ -678,14 +697,12 @@ measurement.
    implemented five-seed explicit,
    harness, compute-matched single-agent, and unrestricted single-agent
    profiles with the standard fault schedule and balanced lane order.
-3. Repeat the full-workflow tracing on/off ablation; report absolute deltas,
-   span volume, and model/tool latency separately.
-4. After the same gate, execute the implemented symmetric
+3. After the same gate, execute the implemented symmetric
    harness-policy ablations for zero/one/two provenance-correction turns and
    the matched paraphrase-A prompt variant.
-5. Validate restart/resume using production-intended checkpoint backends; do
+4. Validate restart/resume using production-intended checkpoint backends; do
    not generalize from the compatibility file savers.
-6. Run the implemented offline paired report builder on the clean-source pilot
+5. Run the implemented offline paired report builder on the clean-source pilot
    indices. It retains raw paired points and operational failures, computes
    paired effects and deterministic bootstrap intervals, reports component
    discrimination, and preserves bundle links for audit.
