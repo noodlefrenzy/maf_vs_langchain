@@ -144,7 +144,7 @@ def _vllm_35b_command_runner(command: list[str] | tuple[str, ...], _timeout: flo
             "--max-num-batched-tokens 8192 --max-num-seqs 2 "
             "--host 127.0.0.1 --port 8002 --dtype bfloat16 "
             "--load-format safetensors --quantization moe_wna16 "
-            "--tensor-parallel-size 1 --gpu-memory-utilization 0.90 "
+            "--tensor-parallel-size 1 --gpu-memory-utilization 0.75 "
             "--cpu-offload-gb 8 --seed 1729 --generation-config vllm "
             "--reasoning-parser qwen3 --tool-call-parser qwen3_coder "
             "--enable-auto-tool-choice --enable-chunked-prefill "

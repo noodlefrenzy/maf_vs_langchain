@@ -80,7 +80,7 @@ docker run --detach --pull never \
   --max-model-len "$CONTEXT_TOKENS" \
   --max-num-batched-tokens "$MAX_BATCHED_TOKENS" \
   --max-num-seqs 2 \
-  --gpu-memory-utilization 0.90 \
+  --gpu-memory-utilization 0.75 \
   --cpu-offload-gb "$CPU_OFFLOAD_GB" \
   --seed 1729 \
   --generation-config vllm \

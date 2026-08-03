@@ -758,8 +758,8 @@ def _require_vllm_serve_contract(
         raise ValueError("vLLM --gpu-memory-utilization must be in (0, 1]")
     if model.name == "Qwen/Qwen3.5-9B" and gpu_memory_utilization != 0.75:
         raise ValueError("Qwen3.5-9B vLLM --gpu-memory-utilization must be 0.75")
-    if model.name == "Qwen/Qwen3.5-35B-A3B-GPTQ-Int4" and gpu_memory_utilization != 0.9:
-        raise ValueError("Qwen3.5-35B-A3B vLLM --gpu-memory-utilization must be 0.9")
+    if model.name == "Qwen/Qwen3.5-35B-A3B-GPTQ-Int4" and gpu_memory_utilization != 0.75:
+        raise ValueError("Qwen3.5-35B-A3B vLLM --gpu-memory-utilization must be 0.75")
     for key in (
         "--enable-auto-tool-choice",
         "--enable-chunked-prefill",

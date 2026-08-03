@@ -15,7 +15,8 @@ operating point. It does not promote the 35B model merely because it starts.
 - text-only Chat Completions on loopback port 8002;
 - 16,384-token served context, two sequences, and 8,192 batched tokens;
 - BF16 compute over official GPTQ Int4 weights with `moe_wna16`;
-- 90% GPU-memory target and exactly 8 GiB of bounded CPU offload;
+- 75% GPU-memory target and exactly 8 GiB of bounded CPU offload, leaving room
+  for the host's observed WSL/display reservation;
 - Qwen3 reasoning and `qwen3_coder` tool-call parsers.
 
 The [official model card](https://huggingface.co/Qwen/Qwen3.5-35B-A3B-GPTQ-Int4)
