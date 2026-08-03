@@ -108,6 +108,12 @@ Derived measures use explicit definitions:
 - **trace completeness**: expected semantic operations with correlated native
   spans divided by expected operations.
 
+The compute-matched ceiling uses model calls, tool calls, wall time, and output
+tokens. Input, cached-input, and reasoning tokens remain reported outcomes:
+they are reconciled when present but are not silently treated as zero or used
+as v0.1 dispatch gates. Model-call totals must reconcile across normalized
+events, metric events, the metric summary, and `terminal.json`.
+
 Ambiguous derived measures must include an audit sample before being used in a
 headline claim.
 

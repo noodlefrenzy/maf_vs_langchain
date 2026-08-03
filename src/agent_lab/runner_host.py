@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import sys
+import time
 import traceback
 from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
@@ -147,6 +148,9 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_input_tokens: int | None = None,
+        reasoning_tokens: int | None = None,
+        parser_outcome: str = "provider_response_accepted",
     ) -> None:
         output_limit_exceeded = self._record_usage("output_tokens", output_tokens)
         pending_models = self._model_events.get(actor, [])
@@ -175,16 +179,22 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         else:
             context_turns.pop(actor, None)
         self._model_turn_context.set(context_turns)
+        token_payload: dict[str, object] = {
+            "model": model,
+            "namespace": self._actor_namespace(actor),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "parser_outcome": parser_outcome,
+        }
+        if cached_input_tokens is not None:
+            token_payload["cached_input_tokens"] = cached_input_tokens
+        if reasoning_tokens is not None:
+            token_payload["reasoning_tokens"] = reasoning_tokens
         self.emit(
             EventKind.MODEL_RESPONDED,
             actor=actor,
             parent_event_id=parent.event_id if parent is not None else None,
-            payload={
-                "model": model,
-                "namespace": self._actor_namespace(actor),
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-            },
+            payload=token_payload,
         )
         self.emit(
             EventKind.AGENT_FINISHED,
@@ -195,13 +205,7 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         self.emit(
             EventKind.METRIC_RECORDED,
             actor=actor,
-            payload={
-                "name": "model_token_usage",
-                "model": model,
-                "namespace": self._actor_namespace(actor),
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-            },
+            payload={"name": "model_token_usage", **token_payload},
         )
         if output_limit_exceeded:
             raise WorkflowBudgetExceeded("output_token_budget_exhausted")
@@ -414,6 +418,7 @@ class WorkflowProtocolSession(WorkflowTelemetry):
             parent_event_id=parent_event_id,
             trace_id=trace_id,
             span_id=span_id,
+            monotonic_ns=time.perf_counter_ns(),
             visibility=visibility,
             payload=payload,
         )
@@ -762,6 +767,7 @@ def _event(
         actor=actor,
         trace_id=trace_id,
         span_id=span_id,
+        monotonic_ns=time.perf_counter_ns(),
         payload=dict(payload),
     )
 

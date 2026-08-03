@@ -448,6 +448,13 @@ class MafRoleAgent:
             model=self.profile.name,
             input_tokens=int(usage.get("input_token_count", 0)),
             output_tokens=int(usage.get("output_token_count", 0)),
+            cached_input_tokens=_optional_usage(usage, "cache_read_input_token_count"),
+            reasoning_tokens=_optional_usage(usage, "reasoning_output_token_count"),
+            parser_outcome=(
+                "structured_parse_succeeded"
+                if isinstance(response.value, SpecialistFinding)
+                else "structured_parse_failed"
+            ),
         )
         if not isinstance(response.value, SpecialistFinding):
             raise TypeError(f"{self.role.value} did not return a SpecialistFinding")
@@ -472,6 +479,13 @@ class MafRoleAgent:
         self.stats = self.stats.model_completed(
             input_tokens=int(usage.get("input_token_count", 0)),
             output_tokens=int(usage.get("output_token_count", 0)),
+            cached_input_tokens=_optional_usage(usage, "cache_read_input_token_count"),
+            reasoning_tokens=_optional_usage(usage, "reasoning_output_token_count"),
+            parser_outcome=(
+                "structured_parse_succeeded"
+                if isinstance(response.value, CommanderSynthesis)
+                else "structured_parse_failed"
+            ),
         )
         await self.telemetry.handoff(
             source_actor=self.role.value,
@@ -656,6 +670,11 @@ class MafCommanderAgent:
             succeeded=True,
         )
         return result
+
+
+def _optional_usage(usage: dict[str, Any], key: str) -> int | None:
+    value = usage.get(key)
+    return int(value) if value is not None else None
 
 
 async def run_live_investigation(request: RunRequest) -> dict[str, Any]:

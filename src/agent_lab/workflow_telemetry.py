@@ -23,6 +23,9 @@ class WorkflowTelemetry(Protocol):
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_input_tokens: int | None = None,
+        reasoning_tokens: int | None = None,
+        parser_outcome: str = "provider_response_accepted",
     ) -> None: ...
 
     async def tool_started(self, *, actor: str, tool_name: str) -> None: ...
@@ -56,6 +59,9 @@ class NoOpWorkflowTelemetry:
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_input_tokens: int | None = None,
+        reasoning_tokens: int | None = None,
+        parser_outcome: str = "provider_response_accepted",
     ) -> None:
         return None
 

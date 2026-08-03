@@ -6,7 +6,13 @@ from copy import deepcopy
 from typing import Any, Protocol
 
 from agent_lab.contract_bundle import sha256_payload
-from agent_lab.contracts import Budget, FrameworkLane, HarnessAblationProfile, ModelProfile
+from agent_lab.contracts import (
+    Budget,
+    FrameworkLane,
+    HarnessAblationProfile,
+    ModelProfile,
+    ResourceMetricsProfile,
+)
 from agent_lab.harness_contracts import harness_ablation_payload
 from agent_lab.model_request_policy import matched_effective_request_policy
 
@@ -79,6 +85,7 @@ def preflight_pair_contract(
     budget: Budget,
     fault_profile: str,
     harness_ablation: HarnessAblationProfile,
+    resource_metrics: ResourceMetricsProfile,
     source_commit: str,
     source_tree_sha256: str,
     execution_provenance_by_lane: dict[FrameworkLane, dict[str, Any]],
@@ -137,6 +144,7 @@ def preflight_pair_contract(
             "budget": budget.model_dump(mode="json"),
             "fault_profile": fault_profile,
             "harness_ablation": harness_ablation.model_dump(mode="json"),
+            "resource_metrics": resource_metrics.model_dump(mode="json"),
             "source_commit": source_commit,
             "source_tree_sha256": source_tree_sha256,
             "execution_provenance": left_execution,

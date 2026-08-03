@@ -414,6 +414,8 @@ safe, stable nested namespace attribute in the observed projected spans, so the
 adapter does not fabricate deeper graph paths from span names.
 
 Model messages remain content-free structural request/response events. A
-completed call also records input/output token counts as `metric.recorded`, but
-non-streaming calls do not generate synthetic text deltas. Raw prompts,
-messages, tool arguments/results, and reasoning remain excluded.
+completed call also records input/output and optional cached-input/reasoning
+token counts as `metric.recorded`; absence stays explicit rather than becoming
+zero. Non-streaming calls do not generate synthetic text deltas, TTFT, queue,
+or generation estimates. Raw prompts, messages, tool arguments/results, and
+reasoning content remain excluded.

@@ -26,18 +26,24 @@ Each execution writes an immutable directory under `runs/<run-id>/`.
 │   └── framework-topology.json
 └── metrics/
     ├── model.jsonl
-    └── host.jsonl
+    ├── host.jsonl
+    └── control.jsonl
 ```
 
 The core writer creates this full directory shape and writes immutable
-manifests, events, JSON artifacts, scores, and terminal records. The explicit
+manifests, events, JSON artifacts, scores, terminal records, and three
+versioned metric ledgers. The explicit
 MAF and LangGraph workflow slices populate native approval checkpoints and
 finalize their terminal workflow state into the five scorer artifacts before
 the normalized `run.finished` event. Native MAF and OpenInference/LangChain
 spans are also projected into a redacted local ledger and exported to a
 loopback Phoenix collector when it is reachable. Each completed model call
-emits a content-free `metric.recorded` event with input/output token counts;
-host and GPU metric-file producers remain a future integration layer.
+emits a content-free `metric.recorded` event and `metrics/model.jsonl` preserves
+input/output plus provider-reported cached-input/reasoning token counts without
+turning absent detail into zero. `metrics/host.jsonl` samples host CPU/RAM and
+GPU utilization/memory/power/temperature on the profile's held-constant
+cadence. `metrics/control.jsonl` separates launch, preparation, task,
+finalization, tracing flush, and teardown. See [metrics.md](metrics.md).
 
 ## `manifest.json`
 
@@ -58,7 +64,9 @@ Mutable terminal status belongs in `terminal.json`, not the manifest.
 
 ## `events.jsonl`
 
-Append-only normalized events in observation order. The schema is implemented
+Append-only normalized events in observation order. Every control-plane runner
+event carries both UTC observation time and a system-monotonic timestamp. The
+schema is implemented
 by `agent_lab.contracts.NormalizedEvent`.
 
 Core event families:
@@ -167,6 +175,8 @@ event are retained as unattested partial artifacts and excluded from scoring.
 - the status-specific start/finish and bounded partial-stream contract;
 - event run/lane IDs match the manifest;
 - terminal budgets reconcile with events;
+- metric identities, schemas, monotonic clocks, sampling counts/overhead, phase
+  intervals, and token aggregates reconcile with the terminal/event stream;
 - artifact and native-evidence digests;
 
 `agent-lab report build --index <native-index> ...` is read-only over evidence.

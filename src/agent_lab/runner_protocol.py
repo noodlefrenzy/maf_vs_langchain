@@ -23,6 +23,7 @@ from agent_lab.contracts import (
     HarnessAblationProfile,
     NativeTracingProfile,
     NormalizedEvent,
+    ResourceMetricsProfile,
     RunManifest,
     TerminalStatus,
 )
@@ -89,6 +90,7 @@ class RunRequest(ProtocolModel):
     order_seed: int
     tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
     harness_ablation: HarnessAblationProfile = Field(default_factory=HarnessAblationProfile)
+    resource_metrics: ResourceMetricsProfile = Field(default_factory=ResourceMetricsProfile)
     capture_sensitive: bool = False
     capture_reasoning: Literal[False] = False
 

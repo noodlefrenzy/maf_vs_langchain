@@ -283,6 +283,7 @@ def _prepare_block(
             budget=experiment.budget,
             fault_profile=experiment.fault_profile,
             harness_ablation=experiment.harness_ablation,
+            resource_metrics=experiment.resource_metrics,
             source_commit=prepared.source_commit,
             source_tree_sha256=prepared.source_tree_sha256,
             execution_provenance_by_lane=prepared.execution_provenance_by_lane,
@@ -465,6 +466,7 @@ async def _run_experiment(
                         order_seed=block_order_seed,
                         tracing=experiment.tracing,
                         harness_ablation=experiment.harness_ablation,
+                        resource_metrics=experiment.resource_metrics,
                         capture_sensitive=experiment.capture_sensitive,
                         capture_reasoning=experiment.capture_reasoning,
                     )

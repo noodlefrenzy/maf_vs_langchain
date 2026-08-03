@@ -230,9 +230,13 @@ tensors, while no-offload loading cannot preserve useful KV-cache headroom on
 the 24 GB RTX 4090. Model selection remains gated on a different measured
 candidate or serving topology, not parameter count.
 
-The run manifest records the model repository revision, weight digest, server
-version and flags, CUDA/driver versions, quantization, context limit, sampling
-settings, and warm/cold state.
+Execution provenance records the model repository revision, weight digest,
+server version and flags, CUDA/driver versions, quantization, context limit,
+and sampling settings. The held-constant metrics profile declares whether the
+loaded server is cold or warm and whether prefix caching is disabled, reset, or
+enabled without per-run control. Current measured profiles preregister a warm
+server with `enabled_uncontrolled` prefix caching, so they may not claim
+cache-controlled latency without an additional provider-correlated signal.
 
 ## 8. Fairness controls
 
@@ -306,8 +310,8 @@ Report these separately rather than hiding them in one composite:
 
 - end-to-end latency, time to first visible event, time to diagnosis, and time
   to mitigation;
-- model calls, input/output/reasoning token counts where the server reports
-  them, and model busy time;
+- model calls, input/output/cached-input/reasoning token counts where the
+  provider reports them, and model busy time;
 - total, useful, redundant, invalid, failed, and retried tool calls;
 - recovery rate after injected transient failures;
 - number of delegations, handoffs, repeated findings, and unresolved conflicts;
@@ -328,6 +332,12 @@ Report these separately rather than hiding them in one composite:
 - framework-native tracing disabled to measure instrumentation overhead.
 
 These detect whether “multi-agent” adds value or merely adds model calls.
+
+The compute-matched budgets are model dispatches, tool dispatches, wall time,
+and generated output tokens. Input, cached-input, and reasoning tokens are
+reported outcomes rather than hard budgets in v0.1 because the frameworks do
+not control them symmetrically before dispatch. Missing provider usage remains
+`null` with an availability reason; it is never imputed as zero.
 
 ## 10. Live comparison
 

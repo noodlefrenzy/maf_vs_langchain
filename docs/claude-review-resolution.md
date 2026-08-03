@@ -110,3 +110,11 @@ implemented. Current milestone status is:
    exclusively records the resolved case/ordering/contract plan before starting
    services. The empirical pilot remains blocked on an accepted model and the
    other documented P1 readiness gates.
+9. Run evidence now carries monotonic normalized-event timestamps, separately
+   timed control-plane phases, per-call model JSONL with optional
+   cached/reasoning usage, and fixed-cadence host/GPU JSONL with measured
+   sampling overhead. Validation fails closed on identity, schema, clock,
+   sample-count, phase-shape, or usage reconciliation drift. Provider-specific
+   queue/TTFT/generation and per-request cache-hit signals remain explicitly
+   unavailable until the serving boundary exposes a correlation source; the
+   profile separately preregisters warm/cold server and prefix-cache policy.

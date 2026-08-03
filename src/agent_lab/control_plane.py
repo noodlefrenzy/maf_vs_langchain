@@ -25,6 +25,11 @@ from agent_lab.contracts import (
     TerminalStatus,
 )
 from agent_lab.run_bundle import RunBundle
+from agent_lab.run_metrics import (
+    ControlPhaseTimeline,
+    ResourceMetricsSampler,
+    write_model_metrics,
+)
 from agent_lab.runner_protocol import (
     ApprovalCommand,
     CancelCommand,
@@ -161,6 +166,14 @@ class ControlPlane:
             raise ValueError("run bundle must be allocated before execution")
 
         started = time.monotonic()
+        timeline = ControlPhaseTimeline(run_id=request.manifest.run_id)
+        timeline.mark("control_started")
+        sampler = ResourceMetricsSampler(
+            path=request.paths.bundle / "metrics" / "host.jsonl",
+            run_id=request.manifest.run_id,
+            profile=request.resource_metrics,
+        )
+        sampler.start()
         native_path = request.paths.bundle / "native"
         trace_profile = NativeTraceProfileRecord(
             run_id=request.manifest.run_id,
@@ -180,6 +193,7 @@ class ControlPlane:
             json.dumps(redacted_request_payload(request), indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        timeline.mark("launch_started")
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -199,6 +213,7 @@ class ControlPlane:
                 },
             )
         except OSError as exc:
+            timeline.mark("launch_finished")
             stderr_path = native_path / "runner.stderr.log"
             stderr_path.write_text(
                 f"runner launch failed: {type(exc).__name__}: {exc}\n",
@@ -215,6 +230,15 @@ class ControlPlane:
                 execution_started=False,
                 event_stream_complete=False,
             )
+            timeline.mark("control_finished")
+            sampler.stop()
+            write_model_metrics(
+                request.paths.bundle / "metrics" / "model.jsonl",
+                request.paths.bundle / "events.jsonl",
+                terminal,
+                request.resource_metrics,
+            )
+            timeline.write(request.paths.bundle / "metrics" / "control.jsonl")
             bundle.write_terminal(terminal)
             return RunnerProcessResult(
                 terminal=terminal,
@@ -223,6 +247,7 @@ class ControlPlane:
                 graceful_shutdown=True,
                 stderr_path=stderr_path,
             )
+        timeline.mark("launch_finished")
         if process.stdin is None or process.stdout is None or process.stderr is None:
             raise RuntimeError("runner process pipes were not created")
         stderr_task = asyncio.create_task(process.stderr.read())
@@ -322,6 +347,7 @@ class ControlPlane:
                         terminal_reason = f"start_command_failed:{type(exc).__name__}"
                         break
                     execution_started = True
+                    timeline.mark("task_started")
                 elif isinstance(message, UsageMessage):
                     if prepared is None:
                         terminal_status = TerminalStatus.RUNNER_FAILURE
@@ -353,6 +379,7 @@ class ControlPlane:
                         encoding="utf-8",
                     ) as handle:
                         handle.write(event.model_dump_json() + "\n")
+                    timeline.observe_event(event.model_dump(mode="json"))
                     expected_event_sequence += 1
                     if event.kind is EventKind.APPROVAL_REQUESTED:
                         awaiting_approval = True
@@ -430,6 +457,8 @@ class ControlPlane:
                     violation = _usage_violation(usage, message.usage, request.manifest)
                     usage = message.usage
                     runner_terminal = message
+                    timeline.mark("tracing_flush_finished")
+                    timeline.mark("teardown_started")
                     if violation:
                         terminal_status = TerminalStatus.BUDGET_EXHAUSTED
                         terminal_reason = violation
@@ -462,6 +491,7 @@ class ControlPlane:
                         expected_event_sequence=expected_event_sequence,
                         prepared=prepared,
                         runner_terminal=runner_terminal,
+                        timeline=timeline,
                     )
                 )
                 graceful = await self._stop_process(
@@ -505,6 +535,9 @@ class ControlPlane:
         stderr = await stderr_task
         stderr_path = native_path / "runner.stderr.log"
         stderr_path.write_bytes(stderr)
+        timeline.mark("teardown_started")
+        timeline.mark("teardown_finished")
+        timeline.mark("control_finished")
         elapsed = time.monotonic() - started
         terminal = RunTerminal(
             run_id=request.manifest.run_id,
@@ -517,6 +550,14 @@ class ControlPlane:
             execution_started=execution_started,
             event_stream_complete=event_stream_complete,
         )
+        sampler.stop()
+        write_model_metrics(
+            request.paths.bundle / "metrics" / "model.jsonl",
+            request.paths.bundle / "events.jsonl",
+            terminal,
+            request.resource_metrics,
+        )
+        timeline.write(request.paths.bundle / "metrics" / "control.jsonl")
         bundle.write_terminal(terminal)
         return RunnerProcessResult(
             terminal=terminal,
@@ -566,6 +607,7 @@ class ControlPlane:
         expected_event_sequence: int,
         prepared: PreparedRun | None,
         runner_terminal: TerminalMessage | None,
+        timeline: ControlPhaseTimeline,
     ) -> tuple[
         RunnerUsage,
         int,
@@ -618,6 +660,7 @@ class ControlPlane:
                     encoding="utf-8",
                 ) as handle:
                     handle.write(event.model_dump_json() + "\n")
+                timeline.observe_event(event.model_dump(mode="json"))
                 expected_event_sequence += 1
             elif isinstance(message, TerminalMessage):
                 if runner_terminal is not None:
@@ -628,6 +671,8 @@ class ControlPlane:
                     continue
                 usage = message.usage
                 runner_terminal = message
+                timeline.mark("tracing_flush_finished")
+                timeline.mark("teardown_started")
             elif isinstance(message, ErrorMessage):
                 stream_error = f"runner_protocol_error:{message.error}"
             elif isinstance(message, PreparedMessage):

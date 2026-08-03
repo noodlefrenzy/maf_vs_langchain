@@ -45,6 +45,9 @@ class _RecordingTelemetry:
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_input_tokens: int | None = None,
+        reasoning_tokens: int | None = None,
+        parser_outcome: str = "provider_response_accepted",
     ) -> None:
         self.model_finishes.append(
             {

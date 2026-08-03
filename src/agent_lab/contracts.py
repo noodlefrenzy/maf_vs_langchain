@@ -235,6 +235,23 @@ class HarnessAblationProfile(BaseModel):
     provenance_correction_turns: int = Field(default=1, ge=0, le=2)
 
 
+class ResourceMetricsProfile(BaseModel):
+    """Held-constant host/GPU sampling policy for measured runs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    interval_seconds: float = Field(default=0.5, ge=0.1, le=5.0)
+    server_state: Literal["cold", "warm", "unknown"] = "unknown"
+    prefix_cache_state: Literal[
+        "disabled",
+        "enabled_cold",
+        "enabled_warm",
+        "enabled_uncontrolled",
+        "unknown",
+    ] = "unknown"
+
+
 class ExperimentSpec(BaseModel):
     """Validated experiment configuration loaded from TOML."""
 
@@ -255,6 +272,7 @@ class ExperimentSpec(BaseModel):
     tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
     inference_runtime: InferenceRuntimeProfile = Field(default_factory=InferenceRuntimeProfile)
     harness_ablation: HarnessAblationProfile = Field(default_factory=HarnessAblationProfile)
+    resource_metrics: ResourceMetricsProfile = Field(default_factory=ResourceMetricsProfile)
     capture_sensitive: bool = False
     capture_reasoning: Literal[False] = False
 

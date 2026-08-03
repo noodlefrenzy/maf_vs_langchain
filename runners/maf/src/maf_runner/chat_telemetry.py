@@ -44,11 +44,15 @@ class ModelDispatchMiddleware(ChatMiddleware):
         usage = context.result.usage_details or {}
         input_tokens = int(usage.get("input_token_count", 0))
         output_tokens = int(usage.get("output_token_count", 0))
+        cached_input_tokens = _optional_usage(usage, "cache_read_input_token_count")
+        reasoning_tokens = _optional_usage(usage, "reasoning_output_token_count")
         await self.telemetry.model_finished(
             actor=self.actor,
             model=self.profile.name,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cached_input_tokens=cached_input_tokens,
+            reasoning_tokens=reasoning_tokens,
         )
         self.model_calls += 1
         self.input_tokens += input_tokens
@@ -109,3 +113,8 @@ class InstrumentedChatClient(OpenAIChatCompletionClient):
     @property
     def output_tokens(self) -> int:
         return self._dispatch.output_tokens
+
+
+def _optional_usage(usage: dict, key: str) -> int | None:
+    value = usage.get(key)
+    return int(value) if value is not None else None

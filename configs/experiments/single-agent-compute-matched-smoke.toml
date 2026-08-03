@@ -23,6 +23,12 @@ collector_endpoint = "http://127.0.0.1:6006/v1/traces"
 phoenix_base_url = "http://127.0.0.1:6006"
 exporter_timeout_seconds = 1.0
 
+[resource_metrics]
+enabled = true
+interval_seconds = 0.5
+server_state = "warm"
+prefix_cache_state = "enabled_uncontrolled"
+
 [budget]
 wall_clock_seconds = 900
 model_calls = 32

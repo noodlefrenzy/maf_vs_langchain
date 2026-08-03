@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import sys
+import time
 
 from agent_lab.contracts import EventKind, NormalizedEvent, TerminalStatus
 from agent_lab.runner_protocol import (
@@ -46,6 +47,7 @@ def _mock_event(
         lane=request.manifest.lane,
         kind=kind,
         actor="mock-runner",
+        monotonic_ns=time.perf_counter_ns(),
         payload=payload,
     )
 

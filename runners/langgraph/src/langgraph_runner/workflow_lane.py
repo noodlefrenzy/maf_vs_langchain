@@ -323,6 +323,15 @@ class LangGraphRoleAgent:
             model=self.profile.name,
             input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
+            cached_input_tokens=usage["cached_input_tokens"],
+            reasoning_tokens=usage["reasoning_tokens"],
+            parser_outcome=(
+                "structured_parse_succeeded"
+                if isinstance(response, dict)
+                and response.get("parsing_error") is None
+                and isinstance(response.get("parsed"), SpecialistFinding)
+                else "structured_parse_failed"
+            ),
         )
         if not isinstance(response, dict):
             raise TypeError(f"{self.role.value} returned an invalid structured response")
@@ -353,6 +362,15 @@ class LangGraphRoleAgent:
         self.stats = self.stats.model_completed(
             input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
+            cached_input_tokens=usage["cached_input_tokens"],
+            reasoning_tokens=usage["reasoning_tokens"],
+            parser_outcome=(
+                "structured_parse_succeeded"
+                if isinstance(response, dict)
+                and response.get("parsing_error") is None
+                and isinstance(response.get("parsed"), CommanderSynthesis)
+                else "structured_parse_failed"
+            ),
         )
         await self.telemetry.handoff(
             source_actor=self.role.value,
@@ -540,13 +558,37 @@ class LangGraphCommanderAgent:
         return result
 
 
-def _usage(raw: Any) -> dict[str, int]:
+class _Usage(TypedDict):
+    input_tokens: int
+    output_tokens: int
+    cached_input_tokens: int | None
+    reasoning_tokens: int | None
+
+
+def _usage(raw: Any) -> _Usage:
     if not isinstance(raw, AIMessage):
-        return {"input_tokens": 0, "output_tokens": 0}
+        return {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": None,
+            "reasoning_tokens": None,
+        }
     usage = raw.usage_metadata or {}
+    input_details = usage.get("input_token_details") or {}
+    output_details = usage.get("output_token_details") or {}
     return {
         "input_tokens": int(usage.get("input_tokens", 0)),
         "output_tokens": int(usage.get("output_tokens", 0)),
+        "cached_input_tokens": (
+            int(input_details["cache_read"])
+            if input_details.get("cache_read") is not None
+            else None
+        ),
+        "reasoning_tokens": (
+            int(output_details["reasoning"])
+            if output_details.get("reasoning") is not None
+            else None
+        ),
     }
 
 

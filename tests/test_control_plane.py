@@ -141,6 +141,57 @@ def test_mock_runner_success_and_isolated_paths(tmp_path: Path) -> None:
     assert prepared["tool_catalog_sha256"] == request.manifest.tool_catalog_sha256
     assert "test-secret-token" not in redacted_request
     assert '"token": "[REDACTED]"' in redacted_request
+    metric_paths = {
+        name: result.paths.bundle / "metrics" / name
+        for name in ("host.jsonl", "model.jsonl", "control.jsonl")
+    }
+    assert all(path.is_file() for path in metric_paths.values())
+    model_metrics = [
+        json.loads(line)
+        for line in metric_paths["model.jsonl"].read_text(encoding="utf-8").splitlines()
+    ]
+    assert model_metrics[-1]["reconciliation_status"] == "mismatch"
+    assert model_metrics[-1]["reconciliation_issues"] == [
+        "terminal_model_calls_do_not_match_requests",
+        "terminal_output_tokens_do_not_match_responses",
+    ]
+    assert model_metrics[-1]["task_latency_seconds"] >= 0
+    control_metrics = [
+        json.loads(line)
+        for line in metric_paths["control.jsonl"].read_text(encoding="utf-8").splitlines()
+    ]
+    assert {record["phase"] for record in control_metrics} == {
+        "subprocess_launch",
+        "preparation",
+        "task_execution",
+        "finalization",
+        "tracing_flush",
+        "teardown",
+        "control_plane_total",
+    }
+
+
+def test_bundle_validation_rejects_model_metric_reconciliation_tampering(
+    tmp_path: Path,
+) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+    result = asyncio.run(control_plane.execute(_command("model_timeout"), request))
+    metrics_path = result.paths.bundle / "metrics" / "model.jsonl"
+    records = [json.loads(line) for line in metrics_path.read_text().splitlines()]
+    assert records[-1]["reconciliation_status"] == "exact"
+    records[-1]["reconciliation_status"] = "mismatch"
+    metrics_path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    validation = validate_bundle(result.paths.bundle)
+
+    assert not validation.valid
+    assert any(
+        finding.code == "model_metrics_reconciliation_failed" for finding in validation.findings
+    )
 
 
 def test_mock_runner_wall_timeout_is_budget_exhaustion(tmp_path: Path) -> None:
@@ -375,6 +426,7 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
         "namespace": "maf_workflow/telemetry_investigator",
         "input_tokens": 24,
         "output_tokens": 12,
+        "parser_outcome": "provider_response_accepted",
     }
     for event in events:
         if (
