@@ -63,3 +63,32 @@ clean source before another five-seed replacement pilot.
 - A clean one-pair gate can still fail on genuine model/framework behavior. A
   failed gate blocks another full pilot rather than prompting post hoc outcome
   repair.
+
+## Validation outcome
+
+The clean gate ran at source `448b355`. Characterization was measurement-
+eligible with no skipped probes and a 22,133 MiB peak; every compatibility
+fixture and actor probe passed. Both task bundles and the matched pair were
+valid and inference-eligible, but neither lane reached synthesis:
+
+- Deep Agents delegated to all three specialists. The reliability and
+  telemetry specialists finished after four and five model responses, but the
+  change specialist ignored the prompt-only four-response tool boundary, used
+  its sixth response for more schema calls, and failed before dispatch seven.
+- MAF delegated to telemetry and change specialists, both of which obtained
+  role-specific evidence. Its background-task start/wait/retrieval loop used
+  all six commander responses and attempted dispatch seven, which the aggregate
+  phase reservation rejected.
+
+The prompt and provenance revision is therefore useful diagnostic evidence but
+not a qualified harness operating point. It demonstrates that prompt-only
+completion guidance cannot enforce the frozen boundary and that MAF's native
+background polling consumes the same reservation independently of specialist
+completion. The failed gate blocks another full pilot.
+
+| Gate artifact | SHA-256 |
+| --- | --- |
+| `characterization.json` | `40a20abb7c3606949e396cdad1369e033d1431c1206d31e67ca7ee30e810a717` |
+| `model-compatibility.json` | `5b2d0b256600fe240cc42329e8ce9e2b6941512306472f9cebf81ef50e5c6e43` |
+| resolved execution plan | `1a7a809aa3d7a07f6a64b5c5a50113c2fc30cf9644bffd47851b266436a2b2eb` |
+| cohort index | `bfe95a021b40b46e4fc5ad6d919c48aaaf0948a81ddb4fee9afc3f11d53bac5b` |

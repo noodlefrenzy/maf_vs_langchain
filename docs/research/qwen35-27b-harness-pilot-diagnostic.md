@@ -119,9 +119,29 @@ fails closed with `opinionated_harness pilot has zero paired seed variance;
 sample size is unidentified`. This is the intended statistical guard: the
 replacement closes ADR 0014's lifecycle-integrity defect, but it does not
 qualify the canonical harness operating point for a measured comparison.
-ADR 0015 revises the canonical shared interaction from this retained failure
+ADR 0015 revised the canonical shared interaction from this retained failure
 evidence without relaxing the hard ceiling or validator: bounded completion is
 explicit in the prompts and synthesis/correction receive exact role tool and
-evidence allowlists. A new clean one-pair harness gate must pass under that
-contract hash before another five-seed harness pilot (or a different accepted
-model must pass the same gate).
+evidence allowlists.
+
+Its clean one-pair gate at source `448b355` did not qualify the operating point.
+Characterization was measurement-eligible with no skips and a 22,133 MiB peak,
+and the complete compatibility matrix passed. Both task bundles and the pair
+were valid and inference-eligible. Deep Agents nevertheless failed when its
+change specialist ignored the prompt-only tool boundary, used six model
+responses, and attempted more schema calls before dispatch seven. MAF's two
+active specialists obtained role-specific evidence, but its native background
+start/wait/retrieval loop consumed all six commander responses and attempted
+dispatch seven. The aggregate reservation failed closed.
+
+| ADR 0015 gate artifact | SHA-256 |
+| --- | --- |
+| `characterization.json` | `40a20abb7c3606949e396cdad1369e033d1431c1206d31e67ca7ee30e810a717` |
+| `model-compatibility.json` | `5b2d0b256600fe240cc42329e8ce9e2b6941512306472f9cebf81ef50e5c6e43` |
+| resolved execution plan | `1a7a809aa3d7a07f6a64b5c5a50113c2fc30cf9644bffd47851b266436a2b2eb` |
+| cohort index | `bfe95a021b40b46e4fc5ad6d919c48aaaf0948a81ddb4fee9afc3f11d53bac5b` |
+
+Prompt-only bounded completion is therefore rejected for this model. Another
+five-seed harness pilot remains blocked pending a newly frozen, mechanically
+enforceable specialist completion boundary and bounded MAF result-retrieval
+phase (or a different accepted model passing the same gate).

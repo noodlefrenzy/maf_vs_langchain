@@ -188,7 +188,10 @@ implemented. Current milestone status is:
     one structured-proposal validation failure. The combined report therefore
     has zero harness paired seed variance and no harness component scores; a
     revised, newly hash-frozen harness operating point must be clean-gated and
-    piloted before measured-study sizing can proceed. ADR 0015 now exposes the
-    unchanged hard bound in both lanes' prompts and supplies the exact tool plus
-    evidence provenance enforced during synthesis/correction; its clean
-    harness-specific gate remains the next empirical milestone.
+    piloted before measured-study sizing can proceed. ADR 0015 exposed the
+    unchanged hard bound in both lanes' prompts and supplied the exact tool plus
+    evidence provenance enforced during synthesis/correction. Its clean gate
+    retained valid, inference-eligible bundles but failed both lanes at the
+    six-call ceiling, proving that prompt-only completion and MAF background
+    polling are not a qualified operating point. A mechanically enforced
+    completion/retrieval revision and another clean gate remain required.
