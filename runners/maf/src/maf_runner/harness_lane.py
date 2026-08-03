@@ -31,6 +31,7 @@ from agent_lab.harness_contracts import (
     harness_provenance_correction_prompt,
     harness_specialist_prompt,
     harness_specialist_roles,
+    harness_specialist_tool_definitions,
     harness_synthesis_prompt,
     harness_task_prompt,
     require_harness_delegation,
@@ -40,7 +41,6 @@ from agent_lab.model_request_policy import maf_request_options
 from agent_lab.prompt_bundle import get_role_definition, render_role_prompt
 from agent_lab.runner_host import ApprovalProvider
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
-from agent_lab.tool_catalog import tool_definitions_for_role
 from agent_lab.workflow_contracts import evidence_ids_from_text, render_tool_result
 from agent_lab.workflow_telemetry import WorkflowTelemetry
 from maf_runner.chat_telemetry import InstrumentedChatClient
@@ -169,7 +169,7 @@ class _HarnessRoleRuntime:
         self.mcp = _TrackedRoleMCP(
             name=f"incident-{role.value}",
             url=endpoint.url,
-            allowed_tools=[tool.name for tool in tool_definitions_for_role(role)],
+            allowed_tools=[tool.name for tool in harness_specialist_tool_definitions(role)],
             load_prompts=False,
             request_timeout=int(profile.request_timeout_seconds),
             approval_mode="never_require",

@@ -16,7 +16,12 @@ from agent_lab.contracts import (
 )
 from agent_lab.prompt_bundle import render_role_prompt
 from agent_lab.scenario import MitigationActionId
-from agent_lab.tool_catalog import MitigationResult, RecoveryCheckResult
+from agent_lab.tool_catalog import (
+    MitigationResult,
+    RecoveryCheckResult,
+    ToolDefinition,
+    tool_definitions_for_role,
+)
 
 SPECIALIST_ROLES = frozenset(
     {
@@ -33,6 +38,7 @@ HARNESS_PHASE_MODEL_CALL_LIMIT = 6
 HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT = 4
 HARNESS_DELEGATION_RECURSION_LIMIT = 64
 HARNESS_SYNTHESIS_RECURSION_LIMIT = 16
+HARNESS_SPECIALIST_EXCLUDED_PUBLIC_TOOLS = frozenset({"get_incident_brief", "get_incident_status"})
 
 
 @dataclass(frozen=True)
@@ -136,10 +142,36 @@ class HarnessExecutionResult(HarnessModel):
         return self
 
 
+def harness_specialist_tool_definitions(
+    role: AgentRole,
+) -> tuple[ToolDefinition, ...]:
+    """Return evidence-producing MCP tools exposed during a specialist phase."""
+
+    if role not in SPECIALIST_ROLES:
+        raise ValueError(f"{role.value} is not a harness specialist role")
+    definitions = tuple(
+        definition
+        for definition in tool_definitions_for_role(role)
+        if definition.name not in HARNESS_SPECIALIST_EXCLUDED_PUBLIC_TOOLS
+    )
+    if not definitions:
+        raise RuntimeError(f"{role.value} has no harness evidence tools")
+    non_evidence_tools = [
+        definition.name
+        for definition in definitions
+        if "evidence_id" not in definition.output_model.model_fields
+    ]
+    if non_evidence_tools:
+        raise RuntimeError(
+            f"{role.value} harness tools do not return evidence IDs: {non_evidence_tools}"
+        )
+    return definitions
+
+
 def active_harness_roles(
     observations: Mapping[AgentRole, HarnessRoleObservation],
 ) -> set[AgentRole]:
-    """Return specialist roles proven active by at least one native MCP call."""
+    """Return specialist roles proven active by a role-specific evidence call."""
 
     return {role for role, observation in observations.items() if observation.called_tools}
 
@@ -147,7 +179,7 @@ def active_harness_roles(
 def require_harness_delegation(
     observations: Mapping[AgentRole, HarnessRoleObservation],
 ) -> None:
-    """Fail closed unless native tool activity proves two-role delegation."""
+    """Fail closed unless role-specific evidence activity proves two-role delegation."""
 
     if len(active_harness_roles(observations)) < MIN_HARNESS_SPECIALIST_ROLES:
         raise ValueError("harness delegation did not satisfy the two-specialist MCP gate")
@@ -354,9 +386,9 @@ def harness_specialist_prompt(
     if prompt_variant == "paraphrase_a":
         return (
             f"{render_role_prompt(role)}\n\n"
-            "Gather enough evidence with only your role-scoped MCP tools. The public incident "
-            "brief and status are not sufficient: call at least one role-specific evidence "
-            f"tool. Tools are available for exactly the first "
+            "Gather enough evidence with only your role-scoped MCP tools. The coordinator "
+            "already supplied the public incident context, so only role-specific evidence "
+            f"tools are exposed. Tools are available for exactly the first "
             f"{HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT} model responses and are mechanically "
             "disabled on the next response. Finish that tool-disabled response with a bare "
             "JSON object—no "
@@ -368,8 +400,9 @@ def harness_specialist_prompt(
         )
     return (
         f"{render_role_prompt(role)}\n\n"
-        "Use your role-scoped MCP tools to gather sufficient evidence. The public incident brief "
-        "and status are not sufficient: call at least one role-specific evidence tool. Use no "
+        "Use your role-scoped MCP tools to gather sufficient evidence. The coordinator already "
+        "supplied the public incident context, so only role-specific evidence tools are exposed. "
+        "Use no "
         f"more than {HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT} tool-calling responses. Tools are "
         "then mechanically disabled; use that next response for one JSON object with exactly "
         "these "
@@ -424,7 +457,7 @@ def harness_contract_payload() -> dict[str, object]:
         "delegation": {
             "minimum_active_specialist_roles": MIN_HARNESS_SPECIALIST_ROLES,
             "repair_turns": HARNESS_DELEGATION_REPAIR_TURNS,
-            "activity_proof": "at_least_one_native_mcp_call",
+            "activity_proof": "at_least_one_role_specific_evidence_call",
             "completion_barrier": "settle_all_started_specialist_tasks_before_gate",
             "background_result_retrieval": "bounded_native_turn_after_task_settlement",
             "exceptional_exit": "cancel_and_drain_started_specialist_tasks",
@@ -436,6 +469,15 @@ def harness_contract_payload() -> dict[str, object]:
             "claimed_tools_must_be_observed": True,
             "claimed_evidence_ids_must_be_observed_for_same_role": True,
             "failure_mode": "error",
+        },
+        "specialist_tool_catalogs": {
+            "excluded_public_context_tools": sorted(HARNESS_SPECIALIST_EXCLUDED_PUBLIC_TOOLS),
+            "roles": {
+                role.value: [
+                    definition.name for definition in harness_specialist_tool_definitions(role)
+                ]
+                for role in sorted(SPECIALIST_ROLES, key=lambda item: item.value)
+            },
         },
         "phase_limits": {
             "model_calls": HARNESS_PHASE_MODEL_CALL_LIMIT,

@@ -199,5 +199,7 @@ implemented. Current milestone status is:
     lifecycle fixes: Deep completed end to end but selected an ineffective
     mitigation, while MAF failed strict provenance because its change
     specialist used only public brief/status tools and obtained no evidence ID.
-    The gate remains non-qualifying; the next shared revision must make the
-    bounded specialist catalog consistent with the role-evidence requirement.
+    The gate remains non-qualifying. ADR 0017 now makes the bounded specialist
+    catalog consistent with the role-evidence requirement by excluding the two
+    redundant public-context tools symmetrically; its clean gate remains
+    required.

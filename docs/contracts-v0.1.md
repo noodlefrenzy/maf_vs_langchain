@@ -33,9 +33,12 @@ byte-for-byte. Opinionated-harness instructions and parity-critical control
 policy are part of the shared bundle. The harness prompts disclose the hard
 six-response phase bound, and both adapters mechanically expose specialist
 tools for at most four responses before a tool-disabled fifth completion
-response. MAF drains native background tasks outside the model loop and then
-uses one separately bounded native result-retrieval turn. Synthesis and
-correction receive exact role-specific tool/evidence provenance. The
+response. Those bounded specialist phases expose only role-specific
+evidence-producing tools; the public ticket is already in the coordinator task,
+so redundant brief/status calls cannot consume the evidence budget. MAF drains
+native background tasks outside the model loop and then uses one separately
+bounded native result-retrieval turn. Synthesis and correction receive exact
+role-specific tool/evidence provenance. The
 single-agent adapters likewise
 share one frozen baseline contract: MAF `Agent` and LangChain `create_agent`
 each run one model-driven incident commander with the same discovery-tool union

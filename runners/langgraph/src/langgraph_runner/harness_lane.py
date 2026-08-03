@@ -36,6 +36,7 @@ from agent_lab.harness_contracts import (
     harness_provenance_correction_prompt,
     harness_specialist_prompt,
     harness_specialist_roles,
+    harness_specialist_tool_definitions,
     harness_synthesis_prompt,
     harness_task_prompt,
     require_harness_delegation,
@@ -187,7 +188,8 @@ async def _role_tools(
             f"{role.value} MCP catalog mismatch: "
             f"expected={sorted(expected)}, observed={sorted(observed)}"
         )
-    return [tracker.wrap(tool) for tool in tools]
+    exposed = {tool.name for tool in harness_specialist_tool_definitions(role)}
+    return [tracker.wrap(tool) for tool in tools if tool.name in exposed]
 
 
 def _role_observations(

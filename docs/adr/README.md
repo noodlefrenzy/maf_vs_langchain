@@ -22,6 +22,7 @@ decision requires a superseding ADR rather than rewriting its history.
 | [0014](0014-bound-native-harness-subagent-lifecycle.md) | Enforce native specialist phase limits and settle all subagent work before harness phase exit |
 | [0015](0015-make-harness-bounds-and-provenance-actionable.md) | Expose bounded completion and exact role provenance in the shared harness prompts |
 | [0016](0016-enforce-harness-specialist-completion.md) | Enforce the specialist completion turn and bound MAF background-result retrieval |
+| [0017](0017-limit-harness-specialists-to-evidence-tools.md) | Expose only role-specific evidence tools during bounded harness specialist phases |
 
 ADR 0012 supersedes ADR 0008 for measured-pilot runtime selection while
 preserving the earlier fit-check and development-smoke evidence as separate

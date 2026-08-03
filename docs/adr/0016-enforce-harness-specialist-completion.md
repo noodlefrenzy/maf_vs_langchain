@@ -98,6 +98,9 @@ public-context tools that can consume the entire bounded evidence phase. A
 subsequent symmetric contract revision must remove those tools from specialist
 turns and pass another clean gate before a full pilot.
 
+ADR 0017 implements that follow-up by exposing only role-specific evidence
+tools during both frameworks' bounded specialist phases.
+
 | Gate artifact | SHA-256 |
 | --- | --- |
 | `characterization.json` | `2312e08fc5044e3a6b859b6d50c7facf88ac68f5c58d3a63190ca4de2388e634` |

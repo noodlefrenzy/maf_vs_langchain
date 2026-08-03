@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from agent_lab.contracts import AgentRole, HarnessAblationProfile
 from agent_lab.harness_contracts import (
+    HARNESS_SPECIALIST_EXCLUDED_PUBLIC_TOOLS,
     HarnessCommanderSynthesis,
     HarnessProposal,
     HarnessRoleObservation,
@@ -14,6 +15,7 @@ from agent_lab.harness_contracts import (
     harness_provenance_allowlist,
     harness_specialist_prompt,
     harness_specialist_roles,
+    harness_specialist_tool_definitions,
     harness_synthesis_prompt,
     harness_task_prompt,
     require_harness_delegation,
@@ -178,7 +180,7 @@ def test_harness_contract_freezes_symmetric_repairs_and_limits() -> None:
     assert payload["delegation"] == {
         "minimum_active_specialist_roles": 2,
         "repair_turns": 2,
-        "activity_proof": "at_least_one_native_mcp_call",
+        "activity_proof": "at_least_one_role_specific_evidence_call",
         "completion_barrier": "settle_all_started_specialist_tasks_before_gate",
         "background_result_retrieval": "bounded_native_turn_after_task_settlement",
         "exceptional_exit": "cancel_and_drain_started_specialist_tasks",
@@ -191,6 +193,15 @@ def test_harness_contract_freezes_symmetric_repairs_and_limits() -> None:
         "claimed_evidence_ids_must_be_observed_for_same_role": True,
         "failure_mode": "error",
     }
+    assert payload["specialist_tool_catalogs"]["excluded_public_context_tools"] == [
+        "get_incident_brief",
+        "get_incident_status",
+    ]
+    exposed_names = {
+        tool for tools in payload["specialist_tool_catalogs"]["roles"].values() for tool in tools
+    }
+    for public_tool in HARNESS_SPECIALIST_EXCLUDED_PUBLIC_TOOLS:
+        assert public_tool not in exposed_names
     assert payload["phase_limits"]["model_calls"] == 6
     assert payload["phase_limits"]["specialist_tool_calling_responses"] == 4
     assert payload["phase_limits"]["specialist_completion_response"] == 5
@@ -198,7 +209,7 @@ def test_harness_contract_freezes_symmetric_repairs_and_limits() -> None:
     assert "hard six-response limit" in harness_task_prompt("ticket")
     assert "hard six-response limit" in harness_task_prompt("ticket", prompt_variant="paraphrase_a")
     specialist = harness_specialist_prompt(AgentRole.TELEMETRY_INVESTIGATOR)
-    assert "public incident brief and status are not sufficient" in specialist
+    assert "only role-specific evidence tools are exposed" in specialist
     assert "no more than 4 tool-calling responses" in specialist
     assert "mechanically disabled" in specialist
     retrieval = harness_background_result_retrieval_prompt()
@@ -210,6 +221,23 @@ def test_harness_contract_freezes_symmetric_repairs_and_limits() -> None:
     assert payload["ablation_space"]["prompt_variants"] == ["canonical", "paraphrase_a"]
     assert payload["ablation_space"]["reviewer_enabled"] == [True, False]
     assert payload["ablation_space"]["context_compaction"] == ["native", "disabled"]
+
+
+@pytest.mark.parametrize("role", sorted(AgentRole, key=lambda item: item.value))
+def test_harness_specialist_catalogs_exclude_public_context_tools(role: AgentRole) -> None:
+    if role is AgentRole.INCIDENT_COMMANDER:
+        with pytest.raises(ValueError, match="not a harness specialist role"):
+            harness_specialist_tool_definitions(role)
+        return
+
+    names = {definition.name for definition in harness_specialist_tool_definitions(role)}
+
+    assert names
+    assert names.isdisjoint(HARNESS_SPECIALIST_EXCLUDED_PUBLIC_TOOLS)
+    assert all(
+        "evidence_id" in definition.output_model.model_fields
+        for definition in harness_specialist_tool_definitions(role)
+    )
 
 
 def test_harness_ablation_payload_freezes_paraphrase_and_correction_policy() -> None:

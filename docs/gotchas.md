@@ -269,6 +269,10 @@ bounded evidence phase, exposing public-context tools to specialists is thus
 inconsistent with requiring a role-specific finding; the next contract revision
 must remove that dead end symmetrically rather than weaken validation.
 
+ADR 0017 makes that correction for both harness adapters: specialist phases see
+only their role-specific evidence tools, while the complete MCP role catalogs
+remain available to every other track and continue to define authorization.
+
 With those guards frozen, the order-seed-1737 paired smoke completed both
 lanes and produced inference-eligible bundles. Deep Agents scored `0.35` and
 MAF Harness scored `0.275`; both had `task_success = false` because their chosen
