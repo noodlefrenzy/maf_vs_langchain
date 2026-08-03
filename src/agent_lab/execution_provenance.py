@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import re
@@ -98,6 +100,7 @@ _SENSITIVE_SERVE_FLAGS = {
     "--api-key-file",
     "--ssl-key-file",
 }
+_QWEN35_27B_GGUF_MODEL = "bartowski/Qwen_Qwen3.5-27B-GGUF:Q4_K_M"
 
 
 def build_execution_provenance(
@@ -266,6 +269,14 @@ def _attest_llama_cpp_runtime(
 
     runner = command_runner or _run_host_command(runtime_profile.host)
     host_runtime = _attest_compute_runtime(runtime_profile, runner)
+    serve_process = host_runtime.pop("serve_process")
+    _require_llama_cpp_serve_contract(
+        serve_process["flags"],
+        model,
+        model_path=model_path,
+        n_ctx=n_ctx,
+        props=props,
+    )
     tokenizer = {
         "vocab_type": _required_int(meta, "vocab_type"),
         "vocab_size": _required_int(meta, "n_vocab"),
@@ -309,7 +320,7 @@ def _attest_llama_cpp_runtime(
             "build": _required_string(props, "build_info"),
             "parser": parser,
             "endpoint_flags": endpoint_flags,
-            "serve_process": host_runtime.pop("serve_process"),
+            "serve_process": serve_process,
         },
         "compute_runtime": host_runtime,
         "endpoint_identity_sha256": {
@@ -441,9 +452,12 @@ def _attest_compute_runtime(
                 f"expected exactly one {runtime_profile.process_name} serving process; "
                 f"found {len(process_lines)}"
             )
-        process_tokens = shlex.split(process_lines[0], posix=True)
-        if process_tokens and process_tokens[0].isdigit():
-            process_tokens.pop(0)
+        pid_text = process_lines[0].split(maxsplit=1)[0]
+        if not pid_text.isdigit():
+            raise ValueError("serving process listing did not include a numeric PID")
+        process_tokens = _read_process_tokens(runner, int(pid_text), timeout)
+        if not process_tokens or Path(process_tokens[0]).name != runtime_profile.process_name:
+            raise ValueError("serving process changed while its exact command was collected")
         redacted_process_tokens = _redact_process_tokens(process_tokens)
         serve_process = {
             "executable": process_tokens[0] if process_tokens else runtime_profile.process_name,
@@ -702,6 +716,72 @@ def _required_revision_flag(flags: dict[str, Any], key: str) -> str:
     return value
 
 
+def _require_llama_cpp_serve_contract(
+    flags: dict[str, Any],
+    model: ModelProfile,
+    *,
+    model_path: str,
+    n_ctx: int,
+    props: dict[str, Any],
+) -> None:
+    """Reject drift from the preregistered local 27B operating point."""
+
+    if model.name != _QWEN35_27B_GGUF_MODEL:
+        return
+    endpoint = urlsplit(model.base_url)
+    if endpoint.hostname != "127.0.0.1" or endpoint.port is None:
+        raise ValueError("Qwen3.5-27B llama.cpp endpoint must bind to explicit loopback")
+    required_values = {
+        "--model": model_path,
+        "--alias": model.name,
+        "--host": "127.0.0.1",
+        "--port": str(endpoint.port),
+        "--ctx-size": str(n_ctx),
+        "--parallel": "2",
+        "--n-gpu-layers": "99",
+        "--flash-attn": "on",
+        "--cache-type-k": "q8_0",
+        "--cache-type-v": "q8_0",
+        "--batch-size": "2048",
+        "--ubatch-size": "512",
+        "--threads": "16",
+        "--threads-batch": "16",
+        "--seed": str(model.seed),
+        "--reasoning": "on",
+        "--reasoning-format": "deepseek",
+    }
+    for key, expected in required_values.items():
+        if flags.get(key) != expected:
+            raise ValueError(f"Qwen3.5-27B llama.cpp serve flag {key} must be {expected!r}")
+    for key in (
+        "--jinja",
+        "--cont-batching",
+        "--metrics",
+        "--slots",
+        "--no-context-shift",
+        "--no-ui",
+    ):
+        if flags.get(key) is not True:
+            raise ValueError(f"Qwen3.5-27B llama.cpp serve contract requires {key}")
+    try:
+        template_kwargs = json.loads(flags.get("--chat-template-kwargs", ""))
+    except json.JSONDecodeError as error:
+        raise ValueError("llama.cpp chat-template kwargs must be valid JSON") from error
+    if template_kwargs != {"enable_thinking": True}:
+        raise ValueError("Qwen3.5-27B llama.cpp must enable thinking in its chat template")
+    endpoint_contract = {
+        "total_slots": 2,
+        "endpoint_metrics": True,
+        "endpoint_props": False,
+        "endpoint_slots": True,
+        "cors_proxy_enabled": False,
+        "ui": False,
+    }
+    for key, expected in endpoint_contract.items():
+        if props.get(key) != expected:
+            raise ValueError(f"Qwen3.5-27B llama.cpp endpoint field {key} must be {expected!r}")
+
+
 def _require_vllm_serve_contract(
     flags: dict[str, Any],
     model: ModelProfile,
@@ -835,6 +915,22 @@ def _process_matches(line: str, process_name: str) -> bool:
     if tokens and tokens[0].isdigit():
         tokens = tokens[1:]
     return bool(tokens) and Path(tokens[0]).name == process_name
+
+
+def _read_process_tokens(runner: CommandRunner, pid: int, timeout: float) -> list[str]:
+    """Read the NUL-delimited argv without lossy shell-style reconstruction."""
+
+    encoded = runner(["base64", "-w0", f"/proc/{pid}/cmdline"], timeout).strip()
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("serving process command was not valid base64") from error
+    if not payload or not payload.endswith(b"\0"):
+        raise ValueError("serving process command was not a complete NUL-delimited argv")
+    try:
+        return [item.decode("utf-8") for item in payload[:-1].split(b"\0")]
+    except UnicodeDecodeError as error:
+        raise ValueError("serving process argv was not UTF-8") from error
 
 
 def _selected_serve_flags(arguments: list[str]) -> dict[str, Any]:

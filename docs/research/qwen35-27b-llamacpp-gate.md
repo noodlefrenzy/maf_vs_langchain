@@ -93,8 +93,11 @@ scripts/run-qwen35-27b-llamacpp-gate.sh \
 The launcher verifies both large-file and server-binary digests before every
 launch, refuses an existing output directory or ambiguous serving process,
 starts a fresh server, captures its log, and reaps it on every exit path. The
-second launch runs the complete client compatibility suite and only then runs
-the one-seed paired explicit-workflow task gate.
+runtime attestation also rejects drift in the model path, loopback binding,
+context/slot topology, GPU layers, caches, parser, batch/thread settings, and
+telemetry/safety flags. The second launch runs the complete client
+compatibility suite and only then runs the one-seed paired explicit-workflow
+task gate.
 
 ## Acceptance rule
 
