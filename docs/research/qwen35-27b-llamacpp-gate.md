@@ -1,6 +1,6 @@
 # Qwen3.5-27B llama.cpp quality-tier gate
 
-Status: selected and artifact acquisition in progress; no acceptance result yet
+Status: artifact verified; corrected runtime gate pending
 
 Qwen3.5-9B fit the RTX 4090 but failed to produce two successful lanes in
 either clean task-quality pair. Qwen3.5-35B-A3B GPTQ Int4 then failed inside
@@ -49,9 +49,11 @@ it does not claim that every hosted scanner had completed.
 ## Frozen first operating point
 
 - one RTX 4090 under WSL, CUDA llama.cpp build b9333;
-- 16,384 tokens per request and two server slots;
+- 32,768 total server tokens split into two 16,384-token request slots;
 - all 99 available layers requested on GPU;
+- auto-fit disabled so the server cannot silently reduce the frozen point;
 - Q8 K/V caches, Flash Attention, continuous batching, and no context shift;
+- the default 8,192 MiB host prompt cache pinned explicitly;
 - Jinja tool parsing with thinking enabled and reasoning extracted into the
   OpenAI-compatible reasoning field;
 - loopback port 8002, metrics and read-only slot inspection enabled, UI off;
@@ -64,6 +66,13 @@ For llama.cpp it applies the served chat template before token counting,
 normalizes the server's Prometheus counters, verifies cancellation drain, and
 retains the same resource, malformed-tool recovery, concurrency, and output-cap
 matrix used for vLLM.
+
+The first launch used `--ctx-size 16384` with two slots. The model loaded all
+layers and reached health in about 5.8 seconds, but llama.cpp divided that
+server-wide context into two 8,192-token slots. Runtime attestation rejected
+the mismatch before any characterization request. The retained failure log is
+not acceptance evidence; the corrected preregistered launch uses 32,768 total
+tokens to preserve the intended 16,384-token per-request contract.
 
 ## Acquisition and execution
 

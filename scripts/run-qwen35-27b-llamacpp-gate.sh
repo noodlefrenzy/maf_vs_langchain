@@ -8,6 +8,7 @@ readonly MODEL_SHA256="81657841d62f1821c748d0fea6c260b7d3508844fe4e9250253ef81c4
 readonly LLAMA_SERVER_SHA256="afcd673634be6b8c46bce6b8326d65e9953cd541271649d5464ed7cea88dab25"
 readonly PORT="8002"
 readonly CONTEXT_TOKENS="16384"
+readonly SERVER_CONTEXT_TOKENS="32768"
 
 if [[ $# -ne 3 ]]; then
   echo "usage: $0 <before_restart|after_restart> <evidence-directory> <runs-directory>" >&2
@@ -57,17 +58,21 @@ fi
 
 mkdir -p "$EVIDENCE_DIR"
 
+unset LLAMA_ARG_MODEL LLAMA_ARG_CTX_SIZE LLAMA_ARG_N_GPU_LAYERS
+
 "$AGENT_LAB_LLAMA_SERVER" \
   --model "$AGENT_LAB_GGUF_MODEL" \
   --alias "$MODEL_ID" \
   --host 127.0.0.1 \
   --port "$PORT" \
-  --ctx-size "$CONTEXT_TOKENS" \
+  --ctx-size "$SERVER_CONTEXT_TOKENS" \
   --parallel 2 \
   --n-gpu-layers 99 \
+  --fit off \
   --flash-attn on \
   --cache-type-k q8_0 \
   --cache-type-v q8_0 \
+  --cache-ram 8192 \
   --batch-size 2048 \
   --ubatch-size 512 \
   --threads 16 \

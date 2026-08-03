@@ -42,6 +42,7 @@ _SERVE_FLAGS_WITH_VALUES = {
     "-ngl",
     "--alias",
     "--batch-size",
+    "--cache-ram",
     "--cache-reuse",
     "--cache-type-k",
     "--cache-type-v",
@@ -51,6 +52,7 @@ _SERVE_FLAGS_WITH_VALUES = {
     "--cpu-offload-gb",
     "--host",
     "--flash-attn",
+    "--fit",
     "--model",
     "--n-gpu-layers",
     "--parallel",
@@ -736,9 +738,10 @@ def _require_llama_cpp_serve_contract(
         "--alias": model.name,
         "--host": "127.0.0.1",
         "--port": str(endpoint.port),
-        "--ctx-size": str(n_ctx),
+        "--ctx-size": str(n_ctx * 2),
         "--parallel": "2",
         "--n-gpu-layers": "99",
+        "--fit": "off",
         "--flash-attn": "on",
         "--cache-type-k": "q8_0",
         "--cache-type-v": "q8_0",
@@ -746,6 +749,7 @@ def _require_llama_cpp_serve_contract(
         "--ubatch-size": "512",
         "--threads": "16",
         "--threads-batch": "16",
+        "--cache-ram": "8192",
         "--seed": str(model.seed),
         "--reasoning": "on",
         "--reasoning-format": "deepseek",
@@ -753,6 +757,8 @@ def _require_llama_cpp_serve_contract(
     for key, expected in required_values.items():
         if flags.get(key) != expected:
             raise ValueError(f"Qwen3.5-27B llama.cpp serve flag {key} must be {expected!r}")
+    if n_ctx != model.context_window_tokens:
+        raise ValueError("Qwen3.5-27B llama.cpp must expose exactly 16K per server slot")
     for key in (
         "--jinja",
         "--cont-batching",
