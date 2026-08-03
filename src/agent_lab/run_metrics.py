@@ -85,7 +85,6 @@ class ResourceMetricsSampler:
                 self._thread.join(timeout=10)
                 if self._thread.is_alive():
                     raise RuntimeError("resource metrics sampler did not stop")
-            self._sample()
         intervals = [
             (right - left) / 1_000_000_000
             for left, right in zip(
@@ -127,9 +126,14 @@ class ResourceMetricsSampler:
         self._handle = None
 
     def _run(self) -> None:
-        self._sample()
-        while not self._stop.wait(self.profile.interval_seconds):
+        interval_ns = round(self.profile.interval_seconds * 1_000_000_000)
+        next_sample_ns = time.perf_counter_ns()
+        while True:
             self._sample()
+            next_sample_ns += interval_ns
+            wait_seconds = max(0.0, (next_sample_ns - time.perf_counter_ns()) / 1_000_000_000)
+            if self._stop.wait(wait_seconds):
+                return
 
     def _sample(self) -> None:
         if self._handle is None:

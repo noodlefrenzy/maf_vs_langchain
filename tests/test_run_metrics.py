@@ -94,7 +94,7 @@ def test_resource_sampler_records_fixed_cadence_identity_and_overhead(tmp_path: 
     samples = [record for record in records if record["record_type"] == "resource_sample"]
     assert records[0]["schema_version"] == RESOURCE_METRICS_SCHEMA
     assert records[0]["interval_seconds"] == 0.1
-    assert len(samples) == records[-1]["sample_count"] == 2
+    assert len(samples) == records[-1]["sample_count"] == 1
     assert all(sample["sampling_overhead_ns"] >= 0 for sample in samples)
     assert samples[0]["host"]["memory_used_mib"] > 0
     assert samples[0]["gpu"]["devices"][0]["power_watts"] == 100.0
