@@ -146,3 +146,22 @@ now freezes a mechanically tool-disabled fifth specialist response and a
 bounded MAF result-retrieval phase after native task drain. Another five-seed
 harness pilot remains blocked until that contract passes a new clean one-pair
 gate (or a different accepted model passes the same gate).
+
+The ADR 0016 clean gate at source `b70d031` confirmed that mechanical fix.
+Deep Agents' three specialists returned within the bound and the lane completed
+approval, execution, and recovery checking. Its `0.5375` score and failed task
+were genuine model behavior: the applied `restore_feature_flag_snapshot`
+mitigation was ineffective in the seeded world. MAF also completed bounded
+delegation, task settlement, and native result retrieval, but its change
+specialist spent its evidence phase on the public brief/status tools. With no
+same-role evidence ID observed, strict provenance rejected the proposal after
+one correction. The gate remains non-qualifying, now because the shared
+specialist catalog permits public-context calls that cannot satisfy its own
+evidence contract.
+
+| ADR 0016 gate artifact | SHA-256 |
+| --- | --- |
+| `characterization.json` | `2312e08fc5044e3a6b859b6d50c7facf88ac68f5c58d3a63190ca4de2388e634` |
+| `model-compatibility.json` | `c92ebe438a299583c782cf5810af023da6a48312dd37c8a646cf5909ae2c8c9b` |
+| resolved execution plan | `28b587f6a856ac2f98bbea66bc0431eec2d269dc358ec3ebd3a1552085806f25` |
+| cohort index | `d886774136720a7bd84d4568b649daaa4682b90c39cfa89df929026f7a249474` |

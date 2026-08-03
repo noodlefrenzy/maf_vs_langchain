@@ -68,3 +68,39 @@ one-pair gate before another full harness pilot.
   `0c24718384899acec49e6227d70306c4638c170b6020e0481b05e0ddda6d1624`.
   Earlier gates and pilots remain retained evidence but cannot be pooled with a
   new cohort.
+
+## Validation outcome
+
+The clean gate ran at source `b70d031`. Characterization was measurement-
+eligible with no skipped probes and a 22,140 MiB peak; every compatibility
+fixture and actor probe passed. Both bundles and the pair were valid and
+inference-eligible, and the lifecycle controls behaved as intended:
+
+- Deep Agents' three specialists all returned within the enforced completion
+  boundary, and its workflow reached approval, mitigation, recovery, and a
+  completed terminal state. It scored `0.5375` with `task_success = false`:
+  the chosen `restore_feature_flag_snapshot` action was applied but was not the
+  seeded incident's effective mitigation, so containment and recovery scored
+  zero. This is a task-quality result rather than a lifecycle failure.
+- MAF's initial delegation returned after two commander responses, its native
+  tasks settled, and the separate result-retrieval turn stayed within its fresh
+  reservation. The telemetry specialist obtained role-specific evidence, but
+  the change specialist used only `get_incident_brief` and
+  `get_incident_status`. Those public-context calls return no evidence IDs, so
+  the strict same-role provenance validator rejected the proposal after its one
+  correction turn.
+
+ADR 0016 therefore closes the bounded-completion and background-settlement
+defects, but the clean pair does not qualify the harness operating point. The
+MAF failure reveals a narrower shared contract gap: specialist prompts require
+role-specific evidence while the specialist catalogs still expose redundant
+public-context tools that can consume the entire bounded evidence phase. A
+subsequent symmetric contract revision must remove those tools from specialist
+turns and pass another clean gate before a full pilot.
+
+| Gate artifact | SHA-256 |
+| --- | --- |
+| `characterization.json` | `2312e08fc5044e3a6b859b6d50c7facf88ac68f5c58d3a63190ca4de2388e634` |
+| `model-compatibility.json` | `c92ebe438a299583c782cf5810af023da6a48312dd37c8a646cf5909ae2c8c9b` |
+| resolved execution plan | `28b587f6a856ac2f98bbea66bc0431eec2d269dc358ec3ebd3a1552085806f25` |
+| cohort index | `d886774136720a7bd84d4568b649daaa4682b90c39cfa89df929026f7a249474` |

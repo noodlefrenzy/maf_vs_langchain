@@ -259,6 +259,16 @@ model calls, and then gives the commander one separately bounded native
 result-retrieval turn. This does not synthesize or inject specialist output;
 the model must still retrieve and use the framework-native results.
 
+The ADR 0016 clean gate verified both lifecycle changes. Deep's specialists
+completed and the lane reached a normal terminal state; its failed task was the
+scored consequence of applying an ineffective mitigation. MAF's background
+tasks also settled and were retrieved within the new bound, but one specialist
+used only the public brief/status calls. Those calls prove native activity but
+produce no role evidence ID, so strict provenance correctly failed. In a
+bounded evidence phase, exposing public-context tools to specialists is thus
+inconsistent with requiring a role-specific finding; the next contract revision
+must remove that dead end symmetrically rather than weaken validation.
+
 With those guards frozen, the order-seed-1737 paired smoke completed both
 lanes and produced inference-eligible bundles. Deep Agents scored `0.35` and
 MAF Harness scored `0.275`; both had `task_success = false` because their chosen

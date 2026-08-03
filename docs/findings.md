@@ -724,9 +724,12 @@ pair ID; see
 
 ## Recommended next work
 
-1. Run ADR 0016's newly hash-frozen clean harness gate. It mechanically enforces
-   the specialist tool-disabled completion turn and bounds MAF background-result
-   retrieval. Do not start a five-seed replacement pilot unless both lanes pass.
+1. Revise the shared harness specialist catalog so its bounded evidence phase
+   exposes only role-specific evidence tools, then run a newly hash-frozen clean
+   gate. ADR 0016's gate proved the completion and MAF task-settlement controls,
+   but Deep selected an ineffective mitigation and MAF's change specialist used
+   only public brief/status calls, leaving no same-role evidence ID. Do not start
+   a five-seed replacement pilot unless both lanes pass.
 2. Use the implemented matched correction-turn, paraphrase-A, no-review, and
    no-compaction profiles as diagnostic sensitivity checks; do not substitute
    them post hoc for the canonical confirmatory profile.
