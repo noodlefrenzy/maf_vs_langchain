@@ -113,6 +113,13 @@ class CheckpointCapability(ProtocolModel):
     resumable: bool
     restart_safe: bool
     format: str
+    production_ready: bool = False
+
+    @model_validator(mode="after")
+    def validate_production_readiness(self) -> CheckpointCapability:
+        if self.production_ready and not (self.resumable and self.restart_safe):
+            raise ValueError("production-ready checkpoints must be resumable and restart-safe")
+        return self
 
 
 class PreparedRun(ProtocolModel):

@@ -105,6 +105,13 @@ and Deep Agents lanes execute through the same protocol but advertise
 process-local, non-resumable state; their native harness sessions cannot be
 reconstructed after a runner restart.
 
+Checkpoint capability metadata also carries a fail-closed `production_ready`
+flag. Every current lane reports `false`: the owner-only file savers establish
+cross-process compatibility, not multi-host durability or deployment readiness.
+A future backend may set it to `true` only when it is both resumable and
+restart-safe and has passed this same request-bound restart/replay gate in its
+intended deployment environment.
+
 Runner description metadata also reports the frozen contract hashes loaded in
 the isolated environment and a framework-neutral normalized topology for each
 lane. Experiment startup compares those values across the matched pair before

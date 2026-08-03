@@ -100,6 +100,7 @@ def run(mode: str, *, budget_field: str) -> int:
                             resumable=True,
                             restart_safe=True,
                             format="mock-json",
+                            production_ready=False,
                         ),
                     )
                 )

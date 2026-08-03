@@ -120,16 +120,19 @@ def descriptor() -> NativeRunnerDescriptor:
                 resumable=True,
                 restart_safe=True,
                 format="agent-framework-file-checkpoint/v1",
+                production_ready=False,
             ),
             FrameworkLane.MAF_HARNESS: CheckpointCapability(
                 resumable=False,
                 restart_safe=False,
                 format="agent-framework-harness-process-local/v1",
+                production_ready=False,
             ),
             FrameworkLane.MAF_SINGLE_AGENT: CheckpointCapability(
                 resumable=False,
                 restart_safe=False,
                 format="agent-framework-agent-process-local/v1",
+                production_ready=False,
             ),
         },
     )

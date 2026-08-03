@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 import json
-import os
 import sys
 import tempfile
 from collections.abc import Awaitable, Callable, Sequence
@@ -13,8 +12,8 @@ from typing import Any
 
 from agent_framework import (
     Agent,
+    CheckpointStorage,
     Executor,
-    FileCheckpointStorage,
     MCPStreamableHTTPTool,
     Workflow,
     WorkflowBuilder,
@@ -59,6 +58,7 @@ from agent_lab.workflow_contracts import (
 )
 from agent_lab.workflow_errors import EvidenceGateFailed
 from agent_lab.workflow_telemetry import NOOP_WORKFLOW_TELEMETRY, WorkflowTelemetry
+from maf_runner.checkpoint_storage import OwnerOnlyCheckpointStorage
 
 Investigator = Callable[["InvestigationTask"], Awaitable["SpecialistFinding"]]
 Commander = Callable[[list["SpecialistFinding"]], Awaitable["CommanderSynthesis"]]
@@ -92,19 +92,6 @@ class _TrackingMCPStreamableHTTPTool(MCPStreamableHTTPTool):
     async def call_tool(self, tool_name: str, **kwargs: Any) -> Any:
         self.called_tools.append(tool_name)
         return await super().call_tool(tool_name, **kwargs)
-
-
-class _OwnerOnlyCheckpointStorage(FileCheckpointStorage):
-    async def save(self, checkpoint: WorkflowCheckpoint) -> str:
-        destination = self._validate_file_path(checkpoint.checkpoint_id)
-        temporary = destination.with_suffix(".json.tmp")
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        os.close(descriptor)
-        try:
-            return await super().save(checkpoint)
-        finally:
-            if temporary.exists():
-                temporary.unlink()
 
 
 class _Dispatcher(Executor):
@@ -310,7 +297,7 @@ def build_approved_workflow(
     commander: Commander,
     preparer: MitigationPreparer,
     executor: MitigationExecutor,
-    checkpoint_storage: FileCheckpointStorage,
+    checkpoint_storage: CheckpointStorage,
 ) -> Workflow:
     """Build the full native workflow through approval, mitigation, and recovery."""
 
@@ -362,7 +349,7 @@ def _select_approval_checkpoint(
 
 
 async def _approval_checkpoint(
-    storage: FileCheckpointStorage, request_id: str
+    storage: CheckpointStorage, request_id: str
 ) -> WorkflowCheckpoint:
     checkpoints = await storage.list_checkpoints(workflow_name="agent-lab-maf-explicit-approved-v1")
     return _select_approval_checkpoint(checkpoints, request_id)
@@ -728,7 +715,7 @@ async def run_live_approved(
         raise ValueError(f"run request is missing workflow endpoints: {missing}")
     request.paths.checkpoints.mkdir(parents=True, exist_ok=True, mode=0o700)
     request.paths.checkpoints.chmod(0o700)
-    storage = _OwnerOnlyCheckpointStorage(request.paths.checkpoints)
+    storage = OwnerOnlyCheckpointStorage(request.paths.checkpoints)
     approval_tokens: dict[str, str] = {}
 
     async with AsyncExitStack() as stack:
@@ -958,7 +945,7 @@ async def _deterministic_approval_probe(
         return mitigation, recovery
 
     with tempfile.TemporaryDirectory(prefix="agent-lab-maf-approved-probe-") as raw_path:
-        storage = _OwnerOnlyCheckpointStorage(Path(raw_path))
+        storage = OwnerOnlyCheckpointStorage(Path(raw_path))
         workflow = build_approved_workflow(
             investigators,
             synthesize,

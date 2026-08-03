@@ -31,6 +31,7 @@ def _descriptor() -> NativeRunnerDescriptor:
                 resumable=True,
                 restart_safe=True,
                 format="stub-json",
+                production_ready=False,
             )
         },
     )

@@ -213,6 +213,7 @@ def test_pair_contract_preflight_fails_closed_on_runner_drift(drift: str) -> Non
                     resumable=True,
                     restart_safe=True,
                     format="test",
+                    production_ready=False,
                 )
             },
         )

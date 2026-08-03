@@ -86,7 +86,9 @@ implemented. Current milestone status is:
 4. The symmetric canonical/paraphrase-A and zero/one/two-turn harness ablation
    controls and profiles are implemented and protocol-probed, but unmeasured.
 5. Production-intended checkpoint backends remain unselected and unvalidated;
-   the compatibility file savers do not close that milestone.
+   the compatibility file savers do not close that milestone. Runner metadata
+   now makes that boundary machine-readable with `production_ready = false`
+   and rejects any production-ready claim that is not resumable and restart-safe.
 6. The fail-closed offline builder successfully revalidated the available
    clean-source smoke and Qwen-gate indices. A final powered paired report and
    component-discrimination analysis still require an accepted model and pilot.

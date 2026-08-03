@@ -14,6 +14,17 @@ from agent_lab.contracts import (
     IncidentReport,
     NormalizedEvent,
 )
+from agent_lab.runner_protocol import CheckpointCapability
+
+
+def test_checkpoint_production_claim_requires_restart_capability() -> None:
+    with pytest.raises(ValidationError, match="resumable and restart-safe"):
+        CheckpointCapability(
+            resumable=False,
+            restart_safe=True,
+            format="invalid-production-backend",
+            production_ready=True,
+        )
 
 
 def test_non_default_harness_ablation_requires_harness_lanes() -> None:

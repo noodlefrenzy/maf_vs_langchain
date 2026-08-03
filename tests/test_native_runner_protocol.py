@@ -236,8 +236,12 @@ def test_native_runner_describes_supported_lanes(
     )
     assert payload["checkpoint"][restart_lane]["resumable"] is True
     assert payload["checkpoint"][restart_lane]["restart_safe"] is True
+    assert payload["checkpoint"][restart_lane]["production_ready"] is False
     unavailable = expected_lanes - {restart_lane}
     assert all(payload["checkpoint"][lane]["resumable"] is False for lane in unavailable)
+    assert all(
+        payload["checkpoint"][lane]["production_ready"] is False for lane in expected_lanes
+    )
 
 
 @pytest.mark.parametrize("capture_sensitive", [False, True])

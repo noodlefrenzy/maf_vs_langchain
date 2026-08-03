@@ -139,16 +139,19 @@ def descriptor() -> NativeRunnerDescriptor:
                 resumable=True,
                 restart_safe=True,
                 format="langgraph-checkpoint-v4+agent-lab-json-envelope/v1",
+                production_ready=False,
             ),
             FrameworkLane.DEEP_AGENTS: CheckpointCapability(
                 resumable=False,
                 restart_safe=False,
                 format="deep-agents-process-local/v1",
+                production_ready=False,
             ),
             FrameworkLane.LANGCHAIN_SINGLE_AGENT: CheckpointCapability(
                 resumable=False,
                 restart_safe=False,
                 format="langchain-create-agent-process-local/v1",
+                production_ready=False,
             ),
         },
     )

@@ -45,8 +45,9 @@ node. Use a domain-specific handler name such as `mitigate`.
 ### File checkpoint permissions need explicit hardening
 
 `FileCheckpointStorage` persists approval state, but its default file mode is
-affected by the process umask. The MAF runner wraps the storage backend and
-changes every saved checkpoint to mode `0600`; the checkpoint directory is
+affected by the process umask. The MAF runner wraps the storage backend,
+pre-creates its atomic temporary file with exclusive mode `0600`, and verifies
+the final checkpoint mode; the checkpoint directory is
 mode `0700`.
 
 ## LangGraph and LangChain
