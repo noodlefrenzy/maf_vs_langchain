@@ -199,7 +199,11 @@ implemented. Current milestone status is:
     lifecycle fixes: Deep completed end to end but selected an ineffective
     mitigation, while MAF failed strict provenance because its change
     specialist used only public brief/status tools and obtained no evidence ID.
-    The gate remains non-qualifying. ADR 0017 now makes the bounded specialist
+    The gate remains non-qualifying. ADR 0017 makes the bounded specialist
     catalog consistent with the role-evidence requirement by excluding the two
-    redundant public-context tools symmetrically; its clean gate remains
-    required.
+    redundant public-context tools symmetrically. Its clean gate confirmed the
+    correction: both lanes' specialists gathered exact role evidence and MAF
+    passed provenance. Deep then completed with an incorrect diagnosis and
+    ineffective mitigation, while MAF explicitly marked its evidence
+    insufficient. Those task-quality failures block the harness pilot without
+    motivating another post-observation contract change.

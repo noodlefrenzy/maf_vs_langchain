@@ -272,6 +272,11 @@ must remove that dead end symmetrically rather than weaken validation.
 ADR 0017 makes that correction for both harness adapters: specialist phases see
 only their role-specific evidence tools, while the complete MCP role catalogs
 remain available to every other track and continue to define authorization.
+Its clean gate confirmed exact evidence-bearing calls and same-role provenance
+in both lanes. Deep still chose an ineffective mitigation after an incorrect
+diagnosis, and MAF's commander marked its evidence insufficient. Those are
+task-quality failures, not reasons to loosen the gate or retune the prompt
+after observing the held-out seed.
 
 With those guards frozen, the order-seed-1737 paired smoke completed both
 lanes and produced inference-eligible bundles. Deep Agents scored `0.35` and

@@ -165,3 +165,25 @@ evidence contract.
 | `model-compatibility.json` | `c92ebe438a299583c782cf5810af023da6a48312dd37c8a646cf5909ae2c8c9b` |
 | resolved execution plan | `28b587f6a856ac2f98bbea66bc0431eec2d269dc358ec3ebd3a1552085806f25` |
 | cohort index | `d886774136720a7bd84d4568b649daaa4682b90c39cfa89df929026f7a249474` |
+
+ADR 0017 then removed the two redundant public-context tools from both bounded
+specialist catalogs. Its clean gate at source `20725a9` passed characterization
+with no skips and a 22,213 MiB peak, passed the complete compatibility matrix,
+and produced valid, inference-eligible bundles and pair. The catalog correction
+worked: every active specialist in both lanes used evidence-producing role
+tools, and MAF passed strict same-role provenance.
+
+The pair still did not pass task quality. Deep Agents completed normally at
+`0.35` but matched no causal marker group and applied an ineffective
+mitigation. MAF's valid synthesis explicitly marked the gathered evidence
+insufficient, which is a frozen evidence-gate failure rather than an adapter
+fault. These are model outcomes and must not trigger post-observation prompt or
+validator relaxation. The five-seed harness pilot remains blocked for this
+model operating point.
+
+| ADR 0017 gate artifact | SHA-256 |
+| --- | --- |
+| `characterization.json` | `be6958cde4dce53b5992aa3ccbfcaefffacb3f44d8b28b6d32fc5c527dbd105e` |
+| `model-compatibility.json` | `c9466b1446490fe031d158da7ae860bf853885ff50f6787e3571b956a30aabbd` |
+| resolved execution plan | `3ef31fdfa554a5f4caa0af2f5b6df7522259a2c84525aac6442369945947083b` |
+| cohort index | `3fe419efb954e8577777cb05eb0390585c1926fccfc7ff1368ae985335d91d59` |

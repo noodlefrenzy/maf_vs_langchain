@@ -53,3 +53,36 @@ pilot.
   `db8a188847436f28df1fb128c031aa5c956523e7d144bdb71c4aa5d9b15ef524`.
   Earlier gates remain retained diagnostic evidence and cannot be pooled with
   the next cohort.
+
+## Validation outcome
+
+The clean gate ran at source `20725a9`. Characterization was measurement-
+eligible with no skipped probes and a 22,213 MiB peak; every compatibility
+fixture and actor probe passed. Both bundles and the pair were valid and
+inference-eligible. The specialist-catalog correction behaved as designed:
+
+- Deep Agents' change, reliability, and telemetry specialists used only their
+  evidence-producing role tools and completed within the mechanical bound. The
+  lane finished normally but scored `0.35` with `task_success = false`; its
+  synthesis matched no causal marker group and its selected mitigation was
+  ineffective in the seeded world.
+- MAF's change specialist used `list_recent_changes` and
+  `get_change_detail`, while telemetry used `query_service_health`. Both
+  returned evidence-bearing findings with valid same-role provenance. The
+  coordinator then set `evidence_sufficient = false`, so the deterministic
+  evidence gate failed with only `incident commander marked the evidence
+  insufficient`.
+
+ADR 0017 therefore closes the public-context dead end. The remaining failures
+are task-quality outcomes under the frozen contract, not lifecycle, catalog,
+or provenance defects. The accepted Qwen3.5-27B operating point does not pass
+the harness task-quality gate on this preregistered seed, so another five-seed
+harness pilot is blocked. Do not weaken the evidence-sufficiency gate or tune
+the prompt against this observed outcome.
+
+| Gate artifact | SHA-256 |
+| --- | --- |
+| `characterization.json` | `be6958cde4dce53b5992aa3ccbfcaefffacb3f44d8b28b6d32fc5c527dbd105e` |
+| `model-compatibility.json` | `c9466b1446490fe031d158da7ae860bf853885ff50f6787e3571b956a30aabbd` |
+| resolved execution plan | `3ef31fdfa554a5f4caa0af2f5b6df7522259a2c84525aac6442369945947083b` |
+| cohort index | `3fe419efb954e8577777cb05eb0390585c1926fccfc7ff1368ae985335d91d59` |

@@ -724,10 +724,12 @@ pair ID; see
 
 ## Recommended next work
 
-1. Run ADR 0017's newly hash-frozen clean harness gate. Its shared catalog now
-   exposes only role-specific evidence tools during bounded specialist phases;
-   the general MCP role catalogs and other experiment tracks remain unchanged.
-   Do not start a five-seed replacement pilot unless both lanes pass.
+1. Keep the five-seed harness replacement pilot blocked for the accepted
+   Qwen3.5-27B operating point. ADR 0017's clean gate confirmed that bounded
+   specialists now gather exact role evidence in both lanes, but Deep produced
+   an incorrect diagnosis/ineffective mitigation and MAF marked the evidence
+   insufficient. Treat those as task-quality outcomes; do not tune the frozen
+   contract against the observed gate seed.
 2. Use the implemented matched correction-turn, paraphrase-A, no-review, and
    no-compaction profiles as diagnostic sensitivity checks; do not substitute
    them post hoc for the canonical confirmatory profile.
