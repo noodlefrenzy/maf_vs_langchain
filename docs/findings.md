@@ -747,6 +747,17 @@ cohort at the same source, this is exploratory sensitivity evidence rather
 than a causal correction-turn comparison; see
 [qwen35-27b-harness-correction-two-diagnostic.md](research/qwen35-27b-harness-correction-two-diagnostic.md).
 
+The preregistered zero-turn diagnostic at `1f9e634` likewise retained all 30
+valid bundles and 15 inference-eligible pairs. MAF Harness succeeded on 2/15
+runs and Deep Agents on 3/15; each lane had three operational failures. The
+seed-cluster Deep-minus-MAF risk difference is 0.066667 with interval [0, 0.2]
+and exact sign-flip `p = 1.0`. MAF's three failures all reported insufficient
+evidence. Deep retained two provenance/role-coverage failures and one native
+specialist six-call exhaustion. Removing correction therefore did not remove
+the underlying evidence-quality or loop-completion problems. This remains
+exploratory sensitivity evidence, not a causal correction-turn comparison;
+see [qwen35-27b-harness-correction-zero-diagnostic.md](research/qwen35-27b-harness-correction-zero-diagnostic.md).
+
 The neutral paired observer is now operational independently of that model
 gate. It discovers both preallocated lane bundles, replays or tails public
 normalized events with sequence-addressable SSE, exposes Phoenix and attested
@@ -766,10 +777,10 @@ pair ID; see
    an incorrect diagnosis/ineffective mitigation and MAF marked the evidence
    insufficient. Treat those as task-quality outcomes; do not tune the frozen
    contract against the observed gate seed.
-2. Retain the completed two-turn correction cohort as diagnostic sensitivity
-   evidence. The zero-turn, paraphrase-A, no-review, and no-compaction profiles
-   remain available for matched diagnostics; do not substitute any of them
-   post hoc for the canonical confirmatory profile.
+2. Retain the completed zero- and two-turn correction cohorts as diagnostic
+   sensitivity evidence. The paraphrase-A, no-review, and no-compaction
+   profiles remain available for matched diagnostics; do not substitute any
+   of them post hoc for the canonical confirmatory profile.
 3. Rebuild the combined report and rerun fail-closed study sizing only after a
    replacement canonical harness pilot supplies nonzero seed-level variance
    and scored component evidence.

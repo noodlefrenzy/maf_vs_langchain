@@ -193,3 +193,9 @@ as exploratory sensitivity evidence at the final contract. It produced scored
 successes in both lanes but also exercised outer and native call ceilings. It
 does not replace this failed canonical gate; see
 [qwen35-27b-harness-correction-two-diagnostic.md](qwen35-27b-harness-correction-two-diagnostic.md).
+
+The zero-turn profile was also run as exploratory sensitivity evidence. It
+produced sparse successes in both lanes while retaining evidence-quality and
+native-loop failures, so removing correction does not qualify the canonical
+gate; see
+[qwen35-27b-harness-correction-zero-diagnostic.md](qwen35-27b-harness-correction-zero-diagnostic.md).

@@ -126,9 +126,14 @@ implemented. Current milestone status is:
    `p = 0.5`. One MAF run exhausted the outer 32-call budget and one Deep
    specialist hit its native six-call limit, so the extra turn is neither free
    nor reliably corrective. This exploratory result does not replace the
-   failed canonical gate. The other sensitivity profiles remain unmeasured;
-   active roles, prompts, and native compaction mode stay hash-frozen into pair
-   preflight and effective topology.
+   failed canonical gate. The clean zero-turn diagnostic at `1f9e634` also
+   retained all 30 valid bundles and 15 inference-eligible pairs: MAF succeeded
+   on 2/15 runs and Deep on 3/15, each with three operational failures. Its
+   risk difference is 0.066667 with exact sign-flip `p = 1.0`; evidence-quality
+   and native-loop failures persisted without correction. The paraphrase-A,
+   no-review, and no-compaction profiles remain unmeasured; active roles,
+   prompts, and native compaction mode stay hash-frozen into pair preflight and
+   effective topology.
 5. Cosmos DB is selected as the symmetric production-intended checkpoint
    service. MAF's first-party provider and Microsoft's LangGraph provider each
    passed an HTTPS, fresh-process approval resume against a pinned emulator.
