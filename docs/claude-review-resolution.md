@@ -62,7 +62,10 @@ bundle replay and live paired timelines use one FastAPI/SSE surface, with
 Phoenix/artifact links and a Rich renderer over the same sanitized API.
 Optional operator approvals are loopback bearer-authenticated, owner-only,
 audited, and deadline-bound; unattended profiles continue to freeze the
-scripted policy.
+scripted policy. A clean interactive pair validated live discovery, one
+approval on each lane, successful completion, and exact-cursor replay; the
+acceptance record is retained in
+`research/neutral-observer-validation.md`.
 
 ## Documentation and methodology
 

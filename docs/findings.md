@@ -696,6 +696,10 @@ normalized events with sequence-addressable SSE, exposes Phoenix and attested
 artifact links, and drives both its browser and Rich views from the same
 content-redacted API. Optional interactive approvals use an owner-only,
 loopback-authenticated inbox and remain separate from scripted measured runs.
+A clean interactive pair exercised one approval on each lane, completed both
+bundles, and replayed each terminal tail from an exact cursor under the same
+pair ID; see
+[neutral-observer-validation.md](research/neutral-observer-validation.md).
 
 ## Recommended next work
 

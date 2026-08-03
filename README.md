@@ -122,7 +122,9 @@ uv run agent-lab observer serve --runs-dir runs
 It provides a two-column browser timeline, sequence-addressable SSE, Phoenix
 and artifact links, an equivalent Rich renderer, and optional authenticated
 local approval controls without rendering raw model reasoning. See
-[neutral-observer.md](docs/neutral-observer.md).
+[neutral-observer.md](docs/neutral-observer.md). A clean interactive pair has
+also validated discovery, approval, completion, and exact-cursor replay; see
+the [observer acceptance record](docs/research/neutral-observer-validation.md).
 
 Exercise the four multi-agent lanes' process boundary without loading a model:
 

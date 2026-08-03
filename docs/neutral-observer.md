@@ -78,6 +78,10 @@ uv run agent-lab observer render pair-0123456789abcdef0123 --watch
 Pair IDs come from `/api/pairs`; they are opaque and stable across the live
 sidecar and final experiment index.
 
+The complete live-to-replay acceptance record, including one authenticated
+approval on each lane, is retained in
+[neutral-observer-validation.md](research/neutral-observer-validation.md).
+
 ## Redaction boundary
 
 The observer drops all non-public events and projects each public event through
