@@ -23,6 +23,7 @@ from agent_lab.harness_contracts import (
     HARNESS_DELEGATION_RECURSION_LIMIT,
     HARNESS_DELEGATION_REPAIR_TURNS,
     HARNESS_PHASE_MODEL_CALL_LIMIT,
+    HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT,
     HARNESS_SYNTHESIS_RECURSION_LIMIT,
     HarnessApprovalResponse,
     HarnessExecutionResult,
@@ -124,6 +125,21 @@ class _SubagentTaskTracker(AgentMiddleware):
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+
+
+class _SpecialistCompletionMiddleware(AgentMiddleware):
+    """Mechanically remove specialist tools after the frozen evidence phase."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._dispatched_responses = 0
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        tools_enabled = self._dispatched_responses < HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT
+        self._dispatched_responses += 1
+        if not tools_enabled:
+            request = request.override(tools=[], tool_choice="none")
+        return await handler(request)
 
 
 def _chat_model(
@@ -239,7 +255,10 @@ async def run_live_approved(
                 ),
                 tools=await _role_tools(request.role_endpoints[role], role, tracker),
                 model=model,
-                middleware=[_phase_model_call_limit_middleware()],
+                middleware=[
+                    _phase_model_call_limit_middleware(),
+                    _SpecialistCompletionMiddleware(),
+                ],
             )
         )
 

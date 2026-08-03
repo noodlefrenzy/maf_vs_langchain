@@ -141,7 +141,8 @@ dispatch seven. The aggregate reservation failed closed.
 | resolved execution plan | `1a7a809aa3d7a07f6a64b5c5a50113c2fc30cf9644bffd47851b266436a2b2eb` |
 | cohort index | `bfe95a021b40b46e4fc5ad6d919c48aaaf0948a81ddb4fee9afc3f11d53bac5b` |
 
-Prompt-only bounded completion is therefore rejected for this model. Another
-five-seed harness pilot remains blocked pending a newly frozen, mechanically
-enforceable specialist completion boundary and bounded MAF result-retrieval
-phase (or a different accepted model passing the same gate).
+Prompt-only bounded completion is therefore rejected for this model. ADR 0016
+now freezes a mechanically tool-disabled fifth specialist response and a
+bounded MAF result-retrieval phase after native task drain. Another five-seed
+harness pilot remains blocked until that contract passes a new clean one-pair
+gate (or a different accepted model passes the same gate).

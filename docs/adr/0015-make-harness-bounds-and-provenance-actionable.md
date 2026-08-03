@@ -86,6 +86,11 @@ completion guidance cannot enforce the frozen boundary and that MAF's native
 background polling consumes the same reservation independently of specialist
 completion. The failed gate blocks another full pilot.
 
+ADR 0016 supersedes the prompt-only completion portion of this decision. It
+retains the prompts, hard limit, and exact provenance allowlist while
+mechanically disabling specialist tools on response five and separating MAF
+task drain from bounded native result retrieval.
+
 | Gate artifact | SHA-256 |
 | --- | --- |
 | `characterization.json` | `40a20abb7c3606949e396cdad1369e033d1431c1206d31e67ca7ee30e810a717` |

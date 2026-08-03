@@ -9,6 +9,7 @@ from agent_lab.harness_contracts import (
     HarnessSpecialistFinding,
     evaluate_harness_proposal,
     harness_ablation_payload,
+    harness_background_result_retrieval_prompt,
     harness_contract_payload,
     harness_provenance_allowlist,
     harness_specialist_prompt,
@@ -179,6 +180,7 @@ def test_harness_contract_freezes_symmetric_repairs_and_limits() -> None:
         "repair_turns": 2,
         "activity_proof": "at_least_one_native_mcp_call",
         "completion_barrier": "settle_all_started_specialist_tasks_before_gate",
+        "background_result_retrieval": "bounded_native_turn_after_task_settlement",
         "exceptional_exit": "cancel_and_drain_started_specialist_tasks",
         "failure_mode": "error",
     }
@@ -191,11 +193,17 @@ def test_harness_contract_freezes_symmetric_repairs_and_limits() -> None:
     }
     assert payload["phase_limits"]["model_calls"] == 6
     assert payload["phase_limits"]["specialist_tool_calling_responses"] == 4
+    assert payload["phase_limits"]["specialist_completion_response"] == 5
+    assert payload["phase_limits"]["specialist_completion_tool_choice"] == "none"
     assert "hard six-response limit" in harness_task_prompt("ticket")
     assert "hard six-response limit" in harness_task_prompt("ticket", prompt_variant="paraphrase_a")
     specialist = harness_specialist_prompt(AgentRole.TELEMETRY_INVESTIGATOR)
     assert "public incident brief and status are not sufficient" in specialist
     assert "no more than 4 tool-calling responses" in specialist
+    assert "mechanically disabled" in specialist
+    retrieval = harness_background_result_retrieval_prompt()
+    assert "background-agent result tools" in retrieval
+    assert "Do not start another task" in retrieval
     synthesis = harness_synthesis_prompt("role provenance")
     assert "tools_used and evidence_ids" in synthesis
     assert "background-agent" in synthesis

@@ -724,10 +724,9 @@ pair ID; see
 
 ## Recommended next work
 
-1. Replace ADR 0015's failed prompt-only completion guidance with a newly
-   hash-frozen, mechanically enforced specialist tool-disabled completion turn
-   and a bounded MAF background-result retrieval phase. Require another clean
-   harness-specific paired gate before any five-seed replacement pilot.
+1. Run ADR 0016's newly hash-frozen clean harness gate. It mechanically enforces
+   the specialist tool-disabled completion turn and bounds MAF background-result
+   retrieval. Do not start a five-seed replacement pilot unless both lanes pass.
 2. Use the implemented matched correction-turn, paraphrase-A, no-review, and
    no-compaction profiles as diagnostic sensitivity checks; do not substitute
    them post hoc for the canonical confirmatory profile.

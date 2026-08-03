@@ -250,6 +250,15 @@ soft maximum of four tool-calling responses before final JSON. This does not
 raise or silently catch the hard limit; it makes the already-frozen boundary
 possible for the model to obey.
 
+The clean ADR 0015 gate showed that making the boundary visible was still not
+enough: one Deep specialist ignored it, while MAF spent its commander
+reservation polling native background tasks. ADR 0016 therefore makes response
+five tool-disabled in both specialist implementations. MAF also returns from
+the initial native delegation turn, drains the retained task handles without
+model calls, and then gives the commander one separately bounded native
+result-retrieval turn. This does not synthesize or inject specialist output;
+the model must still retrieve and use the framework-native results.
+
 With those guards frozen, the order-seed-1737 paired smoke completed both
 lanes and produced inference-eligible bundles. Deep Agents scored `0.35` and
 MAF Harness scored `0.275`; both had `task_success = false` because their chosen

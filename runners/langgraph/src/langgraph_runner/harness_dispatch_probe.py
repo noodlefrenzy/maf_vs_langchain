@@ -14,6 +14,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
+from pydantic import Field
 
 from agent_lab.model_compat_contracts import (
     MODEL_NAME,
@@ -24,6 +25,7 @@ from agent_lab.model_compat_contracts import (
 from langgraph_runner.chat_telemetry import InstrumentedChatOpenAI
 from langgraph_runner.harness_lane import (
     _phase_model_call_limit_middleware,
+    _SpecialistCompletionMiddleware,
     _SubagentTaskTracker,
 )
 
@@ -160,6 +162,66 @@ class _LoopingFakeModel(BaseChatModel):
         return "looping-fake-model"
 
 
+class _CompletingDelegatingFakeModel(_DelegatingFakeModel):
+    """Delegate once, then finish after the specialist returns."""
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        if self.dispatches == 0:
+            return super()._generate(messages, stop, run_manager, **kwargs)
+        del messages, stop, run_manager, kwargs
+        self.dispatches += 1
+        return ChatResult(
+            generations=[ChatGeneration(message=AIMessage(content="delegation complete"))]
+        )
+
+
+class _ToolAwareLoopingFakeModel(BaseChatModel):
+    """Loop while tools are advertised, then honor the tool-disabled completion turn."""
+
+    tools_enabled: bool = False
+    dispatch_counter: list[int] = Field(default_factory=lambda: [0])
+
+    def bind_tools(self, tools: Any, *, tool_choice: Any = None, **kwargs: Any) -> BaseChatModel:
+        del tool_choice, kwargs
+        return self.model_copy(update={"tools_enabled": bool(tools)})
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del messages, stop, run_manager, kwargs
+        self.dispatch_counter[0] += 1
+        if self.tools_enabled:
+            message = AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "looping_lookup",
+                        "args": {"incident_id": "INC-42"},
+                        "id": f"call_loop_{self.dispatch_counter[0]}",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+            return ChatResult(generations=[ChatGeneration(message=message)])
+        return ChatResult(
+            generations=[ChatGeneration(message=AIMessage(content='{"status":"complete"}'))]
+        )
+
+    @property
+    def _llm_type(self) -> str:
+        return "tool-aware-looping-fake-model"
+
+
 async def _probe_subagent_phase_limit() -> dict[str, Any]:
     tool_calls = 0
 
@@ -199,6 +261,47 @@ async def _probe_subagent_phase_limit() -> dict[str, Any]:
         "parent_dispatches": parent_model.dispatches,
         "specialist_dispatches": specialist_model.dispatches,
         "tool_calls": tool_calls,
+    }
+
+
+async def _probe_subagent_completion_boundary() -> dict[str, Any]:
+    tool_calls = 0
+
+    @tool(description="Look up an incident until the completion boundary closes tools.")
+    def looping_lookup(incident_id: str) -> str:
+        nonlocal tool_calls
+        tool_calls += 1
+        return f"{incident_id} evidence captured"
+
+    parent_model = _CompletingDelegatingFakeModel()
+    specialist_model = _ToolAwareLoopingFakeModel()
+    graph = create_deep_agent(
+        model=parent_model,
+        system_prompt="Delegate the requested investigation.",
+        subagents=[
+            SubAgent(
+                name="looping_specialist",
+                description="Checks an incident until tools are disabled.",
+                system_prompt="Use tools while available, then return a final result.",
+                tools=[looping_lookup],
+                model=specialist_model,
+                middleware=[
+                    _phase_model_call_limit_middleware(),
+                    _SpecialistCompletionMiddleware(),
+                ],
+            )
+        ],
+        name="subagent_completion_probe",
+    )
+    state = await graph.ainvoke(
+        {"messages": [{"role": "user", "content": "Investigate INC-42."}]},
+        config={"recursion_limit": 50},
+    )
+    return {
+        "parent_dispatches": parent_model.dispatches,
+        "specialist_dispatches": specialist_model.dispatch_counter[0],
+        "tool_calls": tool_calls,
+        "text": state["messages"][-1].text,
     }
 
 
@@ -254,6 +357,7 @@ async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, A
     except RuntimeError as exc:
         error = str(exc)
     subagent_phase_limit = await _probe_subagent_phase_limit()
+    subagent_completion_boundary = await _probe_subagent_completion_boundary()
     subagent_task_drain = await _probe_subagent_task_drain()
     return {
         "text": text,
@@ -265,6 +369,7 @@ async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, A
         "model_starts": telemetry.model_starts,
         "model_finishes": telemetry.model_finishes,
         "subagent_phase_limit": subagent_phase_limit,
+        "subagent_completion_boundary": subagent_completion_boundary,
         "subagent_task_drain": subagent_task_drain,
     }
 

@@ -56,6 +56,7 @@ def test_maf_harness_counts_each_native_model_dispatch() -> None:
     )
     assert len(records) == 2
     assert all(record["fixture"] == "multi_turn" for record in records)
+    assert payload["specialist_max_tool_enabled_responses"] == 4
     assert payload["background_task_drain"] == {
         "drain_waited": True,
         "result": "finished",
@@ -94,3 +95,4 @@ def test_maf_harness_enforces_budget_before_next_native_dispatch() -> None:
     assert len(payload["model_starts"]) == 1
     assert len(payload["model_finishes"]) == 1
     assert len(records) == 1
+    assert payload["specialist_max_tool_enabled_responses"] == 4

@@ -135,6 +135,18 @@ async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, A
         error = str(exc)
     finally:
         await client.client.close()
+    specialist_client = InstrumentedChatClient(
+        actor="specialist_boundary_probe",
+        profile=profile,
+        telemetry=telemetry,
+        framework="maf-harness-probe",
+        model_call_limit=6,
+        tool_enabled_model_call_limit=4,
+    )
+    specialist_max_iterations = specialist_client.function_invocation_configuration[
+        "max_iterations"
+    ]
+    await specialist_client.client.close()
     background_task_drain = await _probe_background_task_drain()
     return {
         "text": response.text if response is not None else None,
@@ -144,6 +156,7 @@ async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, A
         "output_tokens": client.output_tokens,
         "model_starts": telemetry.model_starts,
         "model_finishes": telemetry.model_finishes,
+        "specialist_max_tool_enabled_responses": specialist_max_iterations,
         "background_task_drain": background_task_drain,
     }
 

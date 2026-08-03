@@ -68,6 +68,12 @@ def test_deep_harness_counts_each_native_model_dispatch_and_stream_fallback() ->
         "specialist_dispatches": 6,
         "tool_calls": 6,
     }
+    assert payload["subagent_completion_boundary"] == {
+        "parent_dispatches": 2,
+        "specialist_dispatches": 5,
+        "tool_calls": 4,
+        "text": "delegation complete",
+    }
     assert payload["subagent_task_drain"] == {
         "cancelled": True,
         "result": None,

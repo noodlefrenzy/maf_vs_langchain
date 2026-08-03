@@ -193,5 +193,6 @@ implemented. Current milestone status is:
     evidence provenance enforced during synthesis/correction. Its clean gate
     retained valid, inference-eligible bundles but failed both lanes at the
     six-call ceiling, proving that prompt-only completion and MAF background
-    polling are not a qualified operating point. A mechanically enforced
-    completion/retrieval revision and another clean gate remain required.
+    polling are not a qualified operating point. ADR 0016 now mechanically
+    disables specialist tools for response five and separates MAF task drain
+    from a bounded native retrieval turn; its clean gate remains required.

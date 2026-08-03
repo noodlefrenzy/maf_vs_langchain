@@ -204,6 +204,18 @@ def harness_delegation_repair_prompt(missing_roles: list[str]) -> str:
     )
 
 
+def harness_background_result_retrieval_prompt() -> str:
+    """Return the frozen MAF-native result-retrieval instruction after task drain."""
+
+    return (
+        "All started background specialist tasks have now settled. Use only the native "
+        "background-agent result tools to retrieve their completed results into this "
+        "conversation. Do not start another task, do specialist MCP work yourself, or invent a "
+        "result. Finish this retrieval turn as soon as the available completed results are "
+        "present."
+    )
+
+
 def harness_synthesis_prompt(provenance_allowlist: str) -> str:
     """Return the matched structured-synthesis instruction for both harness lanes."""
 
@@ -344,8 +356,10 @@ def harness_specialist_prompt(
             f"{render_role_prompt(role)}\n\n"
             "Gather enough evidence with only your role-scoped MCP tools. The public incident "
             "brief and status are not sufficient: call at least one role-specific evidence "
-            f"tool. Use no more than {HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT} tool-calling "
-            "responses, then make no more tool calls. Finish with a bare JSON object—no "
+            f"tool. Tools are available for exactly the first "
+            f"{HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT} model responses and are mechanically "
+            "disabled on the next response. Finish that tool-disabled response with a bare "
+            "JSON object—no "
             "Markdown—whose fields are exactly "
             "role, summary, claims, evidence_ids, tools_used, and uncertainties. Use your role "
             "ID for role, copy only evidence IDs observed in your own tool results, and name "
@@ -356,8 +370,9 @@ def harness_specialist_prompt(
         f"{render_role_prompt(role)}\n\n"
         "Use your role-scoped MCP tools to gather sufficient evidence. The public incident brief "
         "and status are not sufficient: call at least one role-specific evidence tool. Use no "
-        f"more than {HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT} tool-calling responses, then stop "
-        "calling tools. Your final assistant message must be one JSON object with exactly these "
+        f"more than {HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT} tool-calling responses. Tools are "
+        "then mechanically disabled; use that next response for one JSON object with exactly "
+        "these "
         "fields: role, "
         "summary, claims, evidence_ids, tools_used, and uncertainties. Set role to your role ID; "
         "cite only evidence IDs returned by your own MCP calls; list only MCP tools you actually "
@@ -390,6 +405,7 @@ def harness_ablation_payload(profile: HarnessAblationProfile) -> dict[str, objec
             "delegation_repair_template": harness_delegation_repair_prompt(
                 ["{remaining_specialist_roles}"]
             ),
+            "background_result_retrieval_template": (harness_background_result_retrieval_prompt()),
             "synthesis_template": harness_synthesis_prompt("{role_provenance_allowlist}"),
             "provenance_correction_template": harness_provenance_correction_prompt(
                 ValueError("{validator_error}"),
@@ -410,6 +426,7 @@ def harness_contract_payload() -> dict[str, object]:
             "repair_turns": HARNESS_DELEGATION_REPAIR_TURNS,
             "activity_proof": "at_least_one_native_mcp_call",
             "completion_barrier": "settle_all_started_specialist_tasks_before_gate",
+            "background_result_retrieval": "bounded_native_turn_after_task_settlement",
             "exceptional_exit": "cancel_and_drain_started_specialist_tasks",
             "failure_mode": "error",
         },
@@ -423,6 +440,8 @@ def harness_contract_payload() -> dict[str, object]:
         "phase_limits": {
             "model_calls": HARNESS_PHASE_MODEL_CALL_LIMIT,
             "specialist_tool_calling_responses": HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT,
+            "specialist_completion_response": HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT + 1,
+            "specialist_completion_tool_choice": "none",
             "delegation_recursion": HARNESS_DELEGATION_RECURSION_LIMIT,
             "synthesis_recursion": HARNESS_SYNTHESIS_RECURSION_LIMIT,
         },
@@ -435,6 +454,7 @@ def harness_contract_payload() -> dict[str, object]:
             "delegation_repair_template": harness_delegation_repair_prompt(
                 ["{remaining_specialist_roles}"]
             ),
+            "background_result_retrieval_template": (harness_background_result_retrieval_prompt()),
             "synthesis_template": harness_synthesis_prompt("{role_provenance_allowlist}"),
             "provenance_correction_template": harness_provenance_correction_prompt(
                 ValueError("{validator_error}"),

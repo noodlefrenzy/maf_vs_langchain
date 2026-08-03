@@ -10,8 +10,6 @@ from typing import Any, Literal
 from agent_framework import (
     FileSystemAgentFileStore,
     MCPStreamableHTTPTool,
-    background_tasks_running,
-    background_tasks_running_message,
     create_harness_agent,
 )
 from httpx import AsyncClient, Timeout
@@ -20,12 +18,14 @@ from agent_lab.contracts import AgentRole, ApprovalDecision, ModelProfile
 from agent_lab.harness_contracts import (
     HARNESS_DELEGATION_REPAIR_TURNS,
     HARNESS_PHASE_MODEL_CALL_LIMIT,
+    HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT,
     HarnessApprovalResponse,
     HarnessExecutionResult,
     HarnessProposal,
     HarnessRoleObservation,
     active_harness_roles,
     evaluate_harness_proposal,
+    harness_background_result_retrieval_prompt,
     harness_delegation_repair_prompt,
     harness_provenance_allowlist,
     harness_provenance_correction_prompt,
@@ -159,6 +159,7 @@ class _HarnessRoleRuntime:
             telemetry=telemetry,
             framework="maf-harness",
             model_call_limit=HARNESS_PHASE_MODEL_CALL_LIMIT,
+            tool_enabled_model_call_limit=HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT,
         )
         self._http = AsyncClient(
             headers={"Authorization": f"Bearer {endpoint.token}"},
@@ -282,9 +283,6 @@ async def run_live_approved(
             background_agents=[runtime.background_agent for runtime in roles.values()],
             disable_web_search=True,
             disable_tool_auto_approval=True,
-            loop_should_continue=background_tasks_running(),
-            loop_next_message=background_tasks_running_message,
-            loop_max_iterations=HARNESS_PHASE_MODEL_CALL_LIMIT,
             default_options=maf_request_options(request.manifest.model),
         )
         await stack.enter_async_context(commander)
@@ -300,6 +298,11 @@ async def run_live_approved(
                     session=session,
                 )
             await _drain_background_roles(roles)
+            with commander_client.bounded_phase():
+                await commander.run(
+                    harness_background_result_retrieval_prompt(),
+                    session=session,
+                )
             for _attempt in range(HARNESS_DELEGATION_REPAIR_TURNS):
                 observations = _role_observations(roles)
                 observed_roles = active_harness_roles(observations)
@@ -312,6 +315,11 @@ async def run_live_approved(
                         session=session,
                     )
                 await _drain_background_roles(roles)
+                with commander_client.bounded_phase():
+                    await commander.run(
+                        harness_background_result_retrieval_prompt(),
+                        session=session,
+                    )
         finally:
             await _cancel_background_roles(roles)
         observations = _role_observations(roles)

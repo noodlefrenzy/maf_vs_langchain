@@ -75,3 +75,7 @@ structured proposal validation. Both lanes were 0/15, leaving zero paired seed
 variance and no scored harness components. Any phase-policy revision prompted
 by that result requires a new contract hash, clean gate, and replacement pilot;
 the valid zero-success cohort remains in the evidence record.
+
+ADR 0016 preserves the task settlement and exceptional drain guarantees but
+supersedes model-driven MAF background polling: the adapter now drains retained
+native handles before one separately bounded native result-retrieval turn.

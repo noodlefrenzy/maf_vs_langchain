@@ -106,7 +106,14 @@ class InstrumentedChatClient(ProviderMetricsOpenAIChatCompletionClient):
         framework: str,
         model_call_limit: int,
         function_call_limit: int | None = None,
+        tool_enabled_model_call_limit: int | None = None,
     ) -> None:
+        if tool_enabled_model_call_limit is not None and not (
+            1 <= tool_enabled_model_call_limit < model_call_limit
+        ):
+            raise ValueError(
+                "tool-enabled model-call limit must leave at least one bounded completion call"
+            )
         dispatch = ModelDispatchMiddleware(
             actor=actor,
             profile=profile,
@@ -128,7 +135,11 @@ class InstrumentedChatClient(ProviderMetricsOpenAIChatCompletionClient):
                 # max_iterations. Reserve that dispatch inside the advertised
                 # provider-call ceiling. Production callers use limits >= 2;
                 # the one-call dispatch probe is still stopped by outer telemetry.
-                "max_iterations": max(model_call_limit - 1, 1),
+                "max_iterations": (
+                    tool_enabled_model_call_limit
+                    if tool_enabled_model_call_limit is not None
+                    else max(model_call_limit - 1, 1)
+                ),
                 "max_function_calls": (
                     function_call_limit if function_call_limit is not None else model_call_limit
                 ),
