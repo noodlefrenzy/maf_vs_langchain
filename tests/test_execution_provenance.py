@@ -346,6 +346,61 @@ def test_vllm_runtime_attestation_hashes_pinned_model_tokenizer_and_serve_contra
     assert len(result["attestation_sha256"]) == 64
 
 
+def test_vllm_runtime_attestation_excludes_response_local_model_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request_count = 0
+
+    def fetch(url: str, _timeout: float) -> dict[str, Any]:
+        nonlocal request_count
+        if url.endswith("/models"):
+            request_count += 1
+            return {
+                "data": [
+                    {
+                        "id": "Qwen/Qwen3.5-9B",
+                        "created": request_count,
+                        "permission": [
+                            {
+                                "id": f"modelperm-{request_count}",
+                                "created": request_count,
+                                "allow_sampling": True,
+                            }
+                        ],
+                    }
+                ]
+            }
+        if url.endswith("/version"):
+            return {"version": "0.24.0+test"}
+        if url.endswith("/tokenizer_info"):
+            return {"tokenizer_class": "Qwen2TokenizerFast", "chat_template": "template"}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr("agent_lab.execution_provenance._fetch_json", fetch)
+    monkeypatch.setattr(
+        "agent_lab.execution_provenance._post_json",
+        lambda _url, _payload, _timeout: {"count": 4, "max_model_len": 32768},
+    )
+    profile = _profile().model_copy(
+        update={
+            "name": "Qwen/Qwen3.5-9B",
+            "base_url": "http://127.0.0.1:8001/v1",
+            "context_window_tokens": 32768,
+        }
+    )
+    runtime = InferenceRuntimeProfile(
+        server_kind="vllm",
+        compute_backend="nvidia",
+        process_name="vllm",
+    )
+
+    first = attest_model_runtime(profile, runtime, command_runner=_vllm_command_runner)
+    second = attest_model_runtime(profile, runtime, command_runner=_vllm_command_runner)
+
+    assert first["attestation_sha256"] == second["attestation_sha256"]
+    assert first["endpoint_identity_sha256"] == second["endpoint_identity_sha256"]
+
+
 def test_vllm_runtime_attestation_rejects_missing_required_serve_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

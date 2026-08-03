@@ -781,12 +781,18 @@ def _stable_props_identity(props: dict[str, Any]) -> dict[str, Any]:
 
 
 def _stable_models_identity(models: dict[str, Any]) -> dict[str, Any]:
-    """Exclude llama.cpp response timestamps generated at request time."""
+    """Exclude response-local metadata that is not an inference input."""
 
     normalized = json.loads(json.dumps(models))
     for item in normalized.get("data", []):
         if isinstance(item, dict):
             item.pop("created", None)
+            permissions = item.get("permission", [])
+            if isinstance(permissions, list):
+                for permission in permissions:
+                    if isinstance(permission, dict):
+                        permission.pop("id", None)
+                        permission.pop("created", None)
     return normalized
 
 
