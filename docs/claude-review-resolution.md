@@ -104,3 +104,9 @@ implemented. Current milestone status is:
 7. The rolling 72-hour dependency quarantine is now enforced in every uv
    project and as a prerequisite CI job. It covers direct and transitive locked
    registry artifacts without adding package or index exclusions.
+8. The pilot case manifest now covers all five generator families exactly once;
+   seed 400 replaces the duplicate retry-storm seed 404. Every experiment
+   profile passes the no-service execution planner in CI, and actual execution
+   exclusively records the resolved case/ordering/contract plan before starting
+   services. The empirical pilot remains blocked on an accepted model and the
+   other documented P1 readiness gates.

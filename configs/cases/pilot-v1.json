@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "case_id": "inc-00000065-054a6860f3",
+      "seed": 101,
+      "variant": "cache_ttl_regression"
+    },
+    {
+      "case_id": "inc-000000ca-2af1f3a899",
+      "seed": 202,
+      "variant": "schema_drift"
+    },
+    {
+      "case_id": "inc-0000012f-0a7d2fe67b",
+      "seed": 303,
+      "variant": "retry_storm"
+    },
+    {
+      "case_id": "inc-00000190-1370e1fa02",
+      "seed": 400,
+      "variant": "feature_flag_mismatch"
+    },
+    {
+      "case_id": "inc-000001f9-d5c6ef13ca",
+      "seed": 505,
+      "variant": "connection_pool_exhaustion"
+    }
+  ],
+  "generator_version": "0.1.0",
+  "manifest_id": "pilot_incident_cases_v1",
+  "schema_version": "0.1.0",
+  "stratified_by": "incident_variant",
+  "weighting": "equal"
+}

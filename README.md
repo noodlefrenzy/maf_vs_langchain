@@ -201,6 +201,12 @@ prompt/correction control:
 - `configs/experiments/harness-correction-two-ablation.toml`
 - `configs/experiments/harness-paraphrase-a-ablation.toml`
 
+All pilot and ablation profiles share the equal-weight, five-family case
+manifest in `configs/cases/pilot-v1.json`. Resolve their runner support,
+contract preflights, cases, and balanced per-block lane order without starting
+services via `agent-lab experiment plan`; the frozen selection and command are
+documented in `docs/pilot-case-plan.md`.
+
 Qwen3.5-9B did not clear that gate. The separately pinned 35B-A3B GPTQ-Int4
 candidate was then tested at 16K/8 GiB offload and at a minimal 8K/2 GiB
 offload operating point. Both configurations loaded all weights but failed

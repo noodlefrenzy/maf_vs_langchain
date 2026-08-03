@@ -83,6 +83,7 @@ def preflight_pair_contract(
     source_tree_sha256: str,
     execution_provenance_by_lane: dict[FrameworkLane, dict[str, Any]],
     world_manifest_sha256: str,
+    case_manifest_sha256: str,
 ) -> dict[str, Any]:
     """Fail closed on matched-contract drift before either paired lane starts."""
 
@@ -140,6 +141,7 @@ def preflight_pair_contract(
             "source_tree_sha256": source_tree_sha256,
             "execution_provenance": left_execution,
             "world_manifest_sha256": world_manifest_sha256,
+            "case_manifest_sha256": case_manifest_sha256,
             "contract_hashes": expected_contract_hashes,
         },
         "role_prompts_sha256": role_prompts_sha256,

@@ -204,6 +204,73 @@ def run_experiment_probe(
     console.print_json(data=payload)
 
 
+@experiment_app.command("plan")
+def plan_experiment(
+    experiment: Annotated[
+        Path,
+        typer.Option(
+            "--experiment",
+            "-e",
+            help="Experiment profile to resolve without starting services.",
+        ),
+    ] = Path("configs/experiments/smoke.toml"),
+    order_seed: Annotated[
+        int,
+        typer.Option(help="Recorded seed for deterministic lane ordering."),
+    ] = 1729,
+    repository_root: Annotated[
+        Path,
+        typer.Option(help="Repository root containing runner/service projects."),
+    ] = _DEFAULT_REPOSITORY_ROOT,
+) -> None:
+    """Validate one profile through the execution planner without running it."""
+
+    uv = shutil.which("uv")
+    if uv is None:
+        console.print("[red]Cannot plan experiment: uv is not on PATH.[/red]")
+        raise typer.Exit(code=1)
+    root = repository_root.resolve()
+    command = [
+        uv,
+        "run",
+        "--project",
+        str(root / "services/incident_mcp"),
+        "--no-sync",
+        "python",
+        "-m",
+        "incident_lab_mcp.experiment_control",
+        "--repository-root",
+        str(root),
+        "--experiment",
+        str(experiment),
+        "--order-seed",
+        str(order_seed),
+        "--mode",
+        "plan",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        if result.stderr:
+            console.print(result.stderr.rstrip())
+        if result.stdout:
+            console.print(result.stdout.rstrip())
+        raise typer.Exit(code=result.returncode)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        console.print("[red]Experiment planner returned invalid JSON.[/red]")
+        if result.stderr:
+            console.print(result.stderr.rstrip())
+        raise typer.Exit(code=1) from exc
+    console.print_json(data=payload)
+
+
 @experiment_app.command("run")
 def run_native_workflow_experiment(
     experiment: Annotated[

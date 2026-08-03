@@ -138,6 +138,9 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
         "output_tokens": 100,
         "approval_requests": 1,
     }
+    assert (
+        preflight["held_constants"]["case_manifest_sha256"] == summary["case_selection"]["sha256"]
+    )
     assert preflight["role_prompts_sha256"] == contract_bundle_hashes()["prompt_bundle_sha256"]
     assert preflight["tool_schemas_sha256"] == contract_bundle_hashes()["tool_catalog_sha256"]
     assert (
@@ -191,6 +194,7 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
             "completed_artifacts_missing",
         }
     assert Path(summary["index"]).is_file()
+    assert Path(summary["plan"]).is_file()
 
 
 @pytest.mark.parametrize(
@@ -284,6 +288,7 @@ def test_pair_contract_preflight_fails_closed_on_runner_drift(drift: str) -> Non
             source_tree_sha256="1" * 64,
             execution_provenance_by_lane=execution_by_lane,
             world_manifest_sha256="2" * 64,
+            case_manifest_sha256="3" * 64,
         )
 
 
@@ -346,7 +351,62 @@ def test_native_workflow_mode_requires_one_matched_track(tmp_path: Path) -> None
     )
 
     assert result.returncode != 0
-    assert "requires exactly one matched track" in result.stderr
+    assert "protocol-probe profile cannot run as a native workflow" in result.stderr
+
+
+def test_pilot_plan_freezes_all_families_and_balances_lane_order() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(REPOSITORY_ROOT / "services/incident_mcp"),
+            "--no-sync",
+            "python",
+            "-m",
+            "incident_lab_mcp.experiment_control",
+            "--repository-root",
+            str(REPOSITORY_ROOT),
+            "--experiment",
+            str(REPOSITORY_ROOT / "configs/experiments/explicit-pilot.toml"),
+            "--order-seed",
+            "1729",
+            "--mode",
+            "plan",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(result.stdout)
+    assert plan["status"] == "ok"
+    assert plan["execution_mode"] == "native_workflow"
+    assert plan["case_selection"]["frozen"] is True
+    assert plan["case_selection"]["source"] == "configs/cases/pilot-v1.json"
+    assert len(plan["case_selection"]["sha256"]) == 64
+    assert {block["case"]["variant"] for block in plan["blocks"]} == {
+        "retry_storm",
+        "connection_pool_exhaustion",
+        "feature_flag_mismatch",
+        "schema_drift",
+        "cache_ttl_regression",
+    }
+    assert len(plan["blocks"]) == 15
+    first_lane_counts = {
+        lane: sum(block["lane_order"][0] == lane for block in plan["blocks"])
+        for lane in ("maf_workflow", "langgraph")
+    }
+    assert abs(first_lane_counts["maf_workflow"] - first_lane_counts["langgraph"]) == 1
+    for seed in (101, 202, 303, 400, 505):
+        orders = {
+            tuple(block["lane_order"]) for block in plan["blocks"] if block["case"]["seed"] == seed
+        }
+        assert orders == {
+            ("maf_workflow", "langgraph"),
+            ("langgraph", "maf_workflow"),
+        }
 
 
 @pytest.mark.skipif(

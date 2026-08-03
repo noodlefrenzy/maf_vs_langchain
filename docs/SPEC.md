@@ -266,7 +266,9 @@ It is not “normalized away,” because it is part of an opinionated harness.
 ### 8.3 Ordering and replication
 
 - Smoke: one seed, one repetition, no injected fault.
-- Pilot: five seeds, three repetitions, standard fault profile.
+- Pilot: five equally weighted incident-family seeds, three repetitions, and
+  the standard fault profile. The exact generator-derived selection and its
+  pre-execution planner are frozen in [pilot-case-plan.md](pilot-case-plan.md).
 - Measured study: at least 20 seeds and five repetitions after power/variance
   review.
 - Execute on one GPU sequentially.

@@ -10,6 +10,7 @@ import os
 import platform
 import socket
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -18,8 +19,15 @@ import uvicorn
 from agent_lab.async_cleanup import shutdown_server
 from agent_lab.bundle_validation import validate_bundle, validate_pair
 from agent_lab.config import load_experiment, load_model_profile
-from agent_lab.contract_bundle import contract_bundle_hashes
-from agent_lab.contracts import ApprovalDecision, FrameworkLane, RunManifest, TerminalStatus
+from agent_lab.contract_bundle import contract_bundle_hashes, sha256_payload
+from agent_lab.contracts import (
+    ApprovalDecision,
+    ExperimentSpec,
+    FrameworkLane,
+    ModelProfile,
+    RunManifest,
+    TerminalStatus,
+)
 from agent_lab.control_plane import ControlPlane, resolve_lane_order
 from agent_lab.execution_provenance import (
     build_execution_provenance,
@@ -28,6 +36,7 @@ from agent_lab.execution_provenance import (
 from agent_lab.matched_contracts import preflight_pair_contract
 from agent_lab.runner_host import NativeRunnerDescriptor
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
+from agent_lab.scenario import build_case_manifest, load_case_manifest
 from incident_lab_mcp.http_auth import RunCredentialSigner, RunWorldRegistry
 from incident_lab_mcp.http_service import build_http_app, issue_endpoint_credentials
 from incident_lab_mcp.roles import ROLE_TO_AGENT_ROLE
@@ -69,6 +78,21 @@ _RUNNER_PROJECT = {
 }
 
 
+@dataclass(frozen=True)
+class _PreparedExperiment:
+    repository_root: Path
+    experiment_path: Path
+    experiment: ExperimentSpec
+    model: ModelProfile
+    tracks: list[tuple[str, FrameworkLane, FrameworkLane]]
+    descriptors: dict[FrameworkLane, NativeRunnerDescriptor]
+    hashes: dict[str, str]
+    source_commit: str
+    source_tree_sha256: str
+    execution_provenance_by_lane: dict[FrameworkLane, dict[str, Any]]
+    case_selection: dict[str, Any]
+
+
 async def run_experiment_protocol_probe(
     *,
     repository_root: Path,
@@ -105,22 +129,39 @@ async def run_native_workflow_experiment(
     )
 
 
-async def _run_experiment(
+def build_experiment_plan(
     *,
     repository_root: Path,
     experiment_path: Path,
-    runs_dir: Path,
     order_seed: int,
-    execution_mode: Literal["protocol_probe", "native_workflow"],
 ) -> dict[str, Any]:
-    """Resolve a profile and run each selected lane through its native process."""
+    """Resolve an executable profile without starting services or invoking a model."""
 
+    prepared = _prepare_experiment(
+        repository_root=repository_root,
+        experiment_path=experiment_path,
+        execution_mode="protocol_probe",
+        planning=True,
+    )
+    return _plan_payload(prepared, order_seed=order_seed)
+
+
+def _prepare_experiment(
+    *,
+    repository_root: Path,
+    experiment_path: Path,
+    execution_mode: Literal["protocol_probe", "native_workflow"],
+    planning: bool,
+) -> _PreparedExperiment:
     repository_root = repository_root.resolve()
     experiment_path = _resolve(repository_root, experiment_path)
-    runs_dir = _resolve(repository_root, runs_dir)
     experiment = load_experiment(experiment_path)
     model = load_model_profile(_resolve(repository_root, Path(experiment.model_profile)))
     tracks = _selected_tracks(experiment.lanes)
+    if experiment.execution_mode == "native_workflow" and len(tracks) != 1:
+        raise ValueError("native workflow profile requires exactly one matched track")
+    if execution_mode == "native_workflow" and experiment.execution_mode != "native_workflow":
+        raise ValueError("protocol-probe profile cannot run as a native workflow")
     if execution_mode == "native_workflow" and len(tracks) != 1:
         raise ValueError("native workflow execution requires exactly one matched track")
     descriptors = {
@@ -131,10 +172,11 @@ async def _run_experiment(
     hashes = contract_bundle_hashes()
     source_commit = _source_commit(repository_root)
     source_tree_sha256 = _source_tree_sha256(repository_root)
+    provenance_mode = "protocol_probe" if planning else execution_mode
     execution_provenance_by_lane = {
         lane: build_execution_provenance(
             repository_root=repository_root,
-            execution_mode=execution_mode,
+            execution_mode=provenance_mode,
             source_commit=source_commit,
             source_tree_sha256=source_tree_sha256,
             model=model,
@@ -143,60 +185,202 @@ async def _run_experiment(
         for _track, left, right in tracks
         for lane in (left, right)
     }
+    case_selection = _resolve_case_selection(repository_root, experiment)
+    return _PreparedExperiment(
+        repository_root=repository_root,
+        experiment_path=experiment_path,
+        experiment=experiment,
+        model=model,
+        tracks=tracks,
+        descriptors=descriptors,
+        hashes=hashes,
+        source_commit=source_commit,
+        source_tree_sha256=source_tree_sha256,
+        execution_provenance_by_lane=execution_provenance_by_lane,
+        case_selection=case_selection,
+    )
+
+
+def _resolve_case_selection(
+    repository_root: Path,
+    experiment: ExperimentSpec,
+) -> dict[str, Any]:
+    if experiment.case_manifest is None:
+        if len(experiment.seeds) > 1 or experiment.repetitions > 1:
+            raise ValueError("multi-case or repeated profiles require a frozen case_manifest")
+        manifest = build_case_manifest(
+            experiment.seeds,
+            manifest_id=f"{experiment.experiment_id}_inline",
+            stratified=False,
+        )
+        source = None
+        frozen = False
+    else:
+        manifest_path = _resolve(repository_root, Path(experiment.case_manifest))
+        try:
+            source = str(manifest_path.relative_to(repository_root))
+        except ValueError as exc:
+            raise ValueError("case_manifest must stay inside the repository") from exc
+        manifest = load_case_manifest(manifest_path, expected_seeds=experiment.seeds)
+        frozen = True
+    payload = manifest.model_dump(mode="json")
+    return {
+        "frozen": frozen,
+        "source": source,
+        "manifest": payload,
+        "sha256": sha256_payload(payload),
+    }
+
+
+def _prepare_block(
+    prepared: _PreparedExperiment,
+    *,
+    seed: int,
+    repetition: int,
+    order_seed: int,
+) -> tuple[
+    Any,
+    RunWorldRegistry,
+    dict[FrameworkLane, tuple[str, Any]],
+    dict[str, dict[str, Any]],
+]:
+    experiment = prepared.experiment
+    block_order_seed = _block_order_seed(order_seed, seed)
+    order = resolve_lane_order(
+        experiment.lanes,
+        policy=experiment.order,
+        order_seed=block_order_seed,
+        repetition=repetition,
+    )
+    registry = RunWorldRegistry()
+    pair_by_lane: dict[FrameworkLane, tuple[str, Any]] = {}
+    contract_preflights = {}
+    for track, left_lane, right_lane in prepared.tracks:
+        receipt = registry.create_pair(
+            pair_id=(f"{experiment.experiment_id}:{track}:seed-{seed}:rep-{repetition}"),
+            seed=seed,
+            left_lane=left_lane,
+            right_lane=right_lane,
+            ttl_seconds=max(
+                300,
+                experiment.budget.wall_clock_seconds * len(experiment.lanes) + 60,
+            ),
+            fault_profile=experiment.fault_profile,
+        )
+        pair_by_lane[left_lane] = (track, receipt.left)
+        pair_by_lane[right_lane] = (track, receipt.right)
+        contract_preflights[track] = preflight_pair_contract(
+            track=track,
+            left_lane=left_lane,
+            right_lane=right_lane,
+            descriptors=prepared.descriptors,
+            expected_contract_hashes=prepared.hashes,
+            experiment_id=experiment.experiment_id,
+            scenario=experiment.scenario,
+            scenario_seed=seed,
+            repetition=repetition,
+            model=prepared.model,
+            budget=experiment.budget,
+            fault_profile=experiment.fault_profile,
+            harness_ablation=experiment.harness_ablation,
+            source_commit=prepared.source_commit,
+            source_tree_sha256=prepared.source_tree_sha256,
+            execution_provenance_by_lane=prepared.execution_provenance_by_lane,
+            world_manifest_sha256=receipt.left.world_manifest_sha256,
+            case_manifest_sha256=prepared.case_selection["sha256"],
+        )
+    return order, registry, pair_by_lane, contract_preflights
+
+
+def _plan_payload(prepared: _PreparedExperiment, *, order_seed: int) -> dict[str, Any]:
+    cases = {item["seed"]: item for item in prepared.case_selection["manifest"]["cases"]}
+    blocks = []
+    for seed in prepared.experiment.seeds:
+        for repetition in range(prepared.experiment.repetitions):
+            order, _registry, _pair_by_lane, preflights = _prepare_block(
+                prepared,
+                seed=seed,
+                repetition=repetition,
+                order_seed=order_seed,
+            )
+            blocks.append(
+                {
+                    "case": cases[seed],
+                    "repetition": repetition,
+                    "order_seed": order.order_seed,
+                    "lane_order": [lane.value for lane in order.lanes],
+                    "contract_preflight_sha256": {
+                        track: preflight["snapshot_sha256"]
+                        for track, preflight in preflights.items()
+                    },
+                }
+            )
+    return {
+        "schema_version": "0.1.0",
+        "status": "ok",
+        "experiment_id": prepared.experiment.experiment_id,
+        "execution_mode": prepared.experiment.execution_mode,
+        "experiment_profile": _display_path(
+            prepared.experiment_path, repository_root=prepared.repository_root
+        ),
+        "model_profile": prepared.experiment.model_profile,
+        "tracks": [track for track, _left, _right in prepared.tracks],
+        "order_seed": order_seed,
+        "source_commit": prepared.source_commit,
+        "source_tree_sha256": prepared.source_tree_sha256,
+        "case_selection": prepared.case_selection,
+        "blocks": blocks,
+    }
+
+
+async def _run_experiment(
+    *,
+    repository_root: Path,
+    experiment_path: Path,
+    runs_dir: Path,
+    order_seed: int,
+    execution_mode: Literal["protocol_probe", "native_workflow"],
+) -> dict[str, Any]:
+    """Resolve a profile and run each selected lane through its native process."""
+
+    prepared = _prepare_experiment(
+        repository_root=repository_root,
+        experiment_path=experiment_path,
+        execution_mode=execution_mode,
+        planning=False,
+    )
+    repository_root = prepared.repository_root
+    runs_dir = _resolve(repository_root, runs_dir)
+    experiment = prepared.experiment
+    model = prepared.model
+    tracks = prepared.tracks
+    hashes = prepared.hashes
+    source_commit = prepared.source_commit
+    source_tree_sha256 = prepared.source_tree_sha256
+    execution_provenance_by_lane = prepared.execution_provenance_by_lane
     runs_dir.mkdir(parents=True, exist_ok=True)
     index_prefix = "protocol-probe" if execution_mode == "protocol_probe" else "native-workflow"
     index_path = runs_dir / f"{index_prefix}-{experiment.experiment_id}-order-{order_seed}.json"
     if index_path.exists():
         raise FileExistsError(f"experiment index already exists at {index_path}")
+    plan_path = runs_dir / f"plan-{index_prefix}-{experiment.experiment_id}-order-{order_seed}.json"
+    if plan_path.exists():
+        raise FileExistsError(f"experiment plan already exists at {plan_path}")
+    plan = _plan_payload(prepared, order_seed=order_seed)
+    _write_json_exclusive(plan_path, plan)
     control_plane = ControlPlane(runs_dir)
     results: list[dict[str, Any]] = []
     blocks: list[dict[str, Any]] = []
 
     for seed in experiment.seeds:
         for repetition in range(experiment.repetitions):
-            block_order_seed = _block_order_seed(order_seed, seed)
-            order = resolve_lane_order(
-                experiment.lanes,
-                policy=experiment.order,
-                order_seed=block_order_seed,
+            order, registry, pair_by_lane, contract_preflights = _prepare_block(
+                prepared,
+                seed=seed,
                 repetition=repetition,
+                order_seed=order_seed,
             )
-            registry = RunWorldRegistry()
-            pair_by_lane = {}
-            contract_preflights = {}
-            for track, left_lane, right_lane in tracks:
-                receipt = registry.create_pair(
-                    pair_id=(f"{experiment.experiment_id}:{track}:seed-{seed}:rep-{repetition}"),
-                    seed=seed,
-                    left_lane=left_lane,
-                    right_lane=right_lane,
-                    ttl_seconds=max(
-                        300,
-                        experiment.budget.wall_clock_seconds * len(experiment.lanes) + 60,
-                    ),
-                    fault_profile=experiment.fault_profile,
-                )
-                pair_by_lane[left_lane] = (track, receipt.left)
-                pair_by_lane[right_lane] = (track, receipt.right)
-                contract_preflights[track] = preflight_pair_contract(
-                    track=track,
-                    left_lane=left_lane,
-                    right_lane=right_lane,
-                    descriptors=descriptors,
-                    expected_contract_hashes=hashes,
-                    experiment_id=experiment.experiment_id,
-                    scenario=experiment.scenario,
-                    scenario_seed=seed,
-                    repetition=repetition,
-                    model=model,
-                    budget=experiment.budget,
-                    fault_profile=experiment.fault_profile,
-                    harness_ablation=experiment.harness_ablation,
-                    source_commit=source_commit,
-                    source_tree_sha256=source_tree_sha256,
-                    execution_provenance_by_lane=execution_provenance_by_lane,
-                    world_manifest_sha256=receipt.left.world_manifest_sha256,
-                )
+            block_order_seed = order.order_seed
 
             listener = _listener()
             port = listener.getsockname()[1]
@@ -234,7 +418,7 @@ async def _run_experiment(
                     )
                     track, receipt = pair_by_lane[lane]
                     run = registry.get(receipt.run_id)
-                    descriptor = descriptors[lane]
+                    descriptor = prepared.descriptors[lane]
                     project, module = _RUNNER_PROJECT[lane]
                     preflight = contract_preflights[track]
                     manifest = RunManifest(
@@ -352,6 +536,11 @@ async def _run_experiment(
                     block_runs.append(run_result)
                 block = {
                     "seed": seed,
+                    "case": next(
+                        item
+                        for item in prepared.case_selection["manifest"]["cases"]
+                        if item["seed"] == seed
+                    ),
                     "repetition": repetition,
                     "order_seed": block_order_seed,
                     "lane_order": [lane.value for lane in order.lanes],
@@ -381,6 +570,8 @@ async def _run_experiment(
         "execution_mode": execution_mode,
         "experiment_id": experiment.experiment_id,
         "order_seed": order_seed,
+        "plan": str(plan_path),
+        "case_selection": prepared.case_selection,
         "status": (
             "ok"
             if all(
@@ -494,6 +685,13 @@ def _resolve(repository_root: Path, path: Path) -> Path:
     return path.resolve() if path.is_absolute() else (repository_root / path).resolve()
 
 
+def _display_path(path: Path, *, repository_root: Path) -> str:
+    try:
+        return str(path.relative_to(repository_root))
+    except ValueError:
+        return str(path)
+
+
 def _block_order_seed(order_seed: int, scenario_seed: int) -> int:
     digest = hashlib.sha256(f"{order_seed}:{scenario_seed}".encode()).digest()
     return int.from_bytes(digest[:8], "big")
@@ -560,10 +758,18 @@ def main() -> None:
     parser.add_argument("--order-seed", type=int, default=1729)
     parser.add_argument(
         "--mode",
-        choices=["protocol_probe", "native_workflow"],
+        choices=["plan", "protocol_probe", "native_workflow"],
         default="protocol_probe",
     )
     args = parser.parse_args()
+    if args.mode == "plan":
+        plan = build_experiment_plan(
+            repository_root=args.repository_root,
+            experiment_path=args.experiment,
+            order_seed=args.order_seed,
+        )
+        print(json.dumps(plan, sort_keys=True))
+        return
     entrypoint = (
         run_experiment_protocol_probe
         if args.mode == "protocol_probe"

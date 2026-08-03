@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import random
+from collections import Counter
 from enum import StrEnum
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -68,6 +71,29 @@ class IncidentCase(BaseModel):
             "severity": "SEV-1",
             "brief": self.public_brief,
         }
+
+
+class FrozenIncidentCase(BaseModel):
+    """One generator-derived case identity frozen before pilot execution."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    seed: int
+    case_id: str
+    variant: IncidentVariant
+
+
+class IncidentCaseManifest(BaseModel):
+    """Versioned, equally weighted incident selection for a measured cohort."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["0.1.0"] = GENERATOR_VERSION
+    manifest_id: str
+    generator_version: Literal["0.1.0"] = GENERATOR_VERSION
+    stratified_by: Literal["incident_variant"] | None = None
+    weighting: Literal["equal"] | None = None
+    cases: tuple[FrozenIncidentCase, ...]
 
 
 _VARIANT_DATA: dict[IncidentVariant, dict[str, object]] = {
@@ -201,3 +227,63 @@ def generate_incident(seed: int) -> IncidentCase:
         forbidden_mitigation=str(variant_data["forbidden"]),
         transient_failure_every=rng.randint(5, 9),
     )
+
+
+def build_case_manifest(
+    seeds: list[int],
+    *,
+    manifest_id: str,
+    stratified: bool,
+) -> IncidentCaseManifest:
+    """Build and validate the immutable identities selected by a seed list."""
+
+    if not seeds or len(set(seeds)) != len(seeds):
+        raise ValueError("case manifest seeds must be non-empty and unique")
+    cases = tuple(
+        FrozenIncidentCase(
+            seed=seed,
+            case_id=(incident := generate_incident(seed)).case_id,
+            variant=incident.variant,
+        )
+        for seed in seeds
+    )
+    manifest = IncidentCaseManifest(
+        manifest_id=manifest_id,
+        stratified_by="incident_variant" if stratified else None,
+        weighting="equal" if stratified else None,
+        cases=cases,
+    )
+    validate_case_manifest(manifest, expected_seeds=seeds)
+    return manifest
+
+
+def load_case_manifest(path: Path, *, expected_seeds: list[int]) -> IncidentCaseManifest:
+    """Load a frozen case selection and rederive every identity from its seed."""
+
+    manifest = IncidentCaseManifest.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    validate_case_manifest(manifest, expected_seeds=expected_seeds)
+    return manifest
+
+
+def validate_case_manifest(
+    manifest: IncidentCaseManifest,
+    *,
+    expected_seeds: list[int],
+) -> None:
+    """Fail closed on seed order, generator drift, or unequal stratification."""
+
+    selected_seeds = [case.seed for case in manifest.cases]
+    if selected_seeds != expected_seeds:
+        raise ValueError("case manifest seed order differs from the experiment profile")
+    if len(set(selected_seeds)) != len(selected_seeds):
+        raise ValueError("case manifest contains duplicate seeds")
+    for frozen in manifest.cases:
+        generated = generate_incident(frozen.seed)
+        if frozen.case_id != generated.case_id or frozen.variant is not generated.variant:
+            raise ValueError(f"case manifest identity drifted for seed {frozen.seed}")
+    if (manifest.stratified_by is None) != (manifest.weighting is None):
+        raise ValueError("case manifest stratification and weighting must be declared together")
+    if manifest.stratified_by == "incident_variant":
+        counts = Counter(case.variant for case in manifest.cases)
+        if set(counts) != set(IncidentVariant) or len(set(counts.values())) != 1:
+            raise ValueError("incident-variant manifest must cover every family with equal weight")

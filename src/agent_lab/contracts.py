@@ -247,6 +247,8 @@ class ExperimentSpec(BaseModel):
     seeds: list[int] = Field(min_length=1)
     repetitions: int = Field(gt=0)
     order: Literal["randomized", "alternating", "fixed"]
+    execution_mode: Literal["protocol_probe", "native_workflow"] = "native_workflow"
+    case_manifest: str | None = None
     model_profile: str
     fault_profile: Literal["none", "standard", "adversarial"]
     budget: Budget
@@ -258,6 +260,8 @@ class ExperimentSpec(BaseModel):
 
     @model_validator(mode="after")
     def require_harness_lane_for_ablation(self) -> ExperimentSpec:
+        if len(set(self.seeds)) != len(self.seeds):
+            raise ValueError("experiment seeds must be unique")
         harness_lanes = {FrameworkLane.MAF_HARNESS, FrameworkLane.DEEP_AGENTS}
         if self.harness_ablation != HarnessAblationProfile() and not (
             set(self.lanes) & harness_lanes
