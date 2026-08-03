@@ -56,6 +56,9 @@ jobs:
           for profile in configs/models/*.toml; do
             uv run agent-lab config validate "$profile"
           done
+          for profile in configs/studies/*.toml; do
+            uv run agent-lab study validate "$profile"
+          done
       - name: Validate isolated project locks
         run: |
           uv lock --check --project runners/maf

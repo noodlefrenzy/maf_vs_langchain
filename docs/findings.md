@@ -719,8 +719,9 @@ pair ID; see
    acceptance. See [production-checkpoints.md](production-checkpoints.md).
 5. Run the implemented offline paired report builder on the clean-source pilot
    indices. It retains raw paired points and operational failures, computes
-   paired effects and deterministic bootstrap intervals, reports component
-   discrimination, and preserves bundle links for audit.
+   seed-cluster paired effects, deterministic seed-bootstrap intervals,
+   sign-flip and Holm inference, reports component discrimination, and
+   preserves bundle links for audit.
 
 ## Reproducibility map
 

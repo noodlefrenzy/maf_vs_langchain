@@ -111,6 +111,10 @@ paired gate. Cosmos DB is now the selected production-intended checkpoint
 substrate for both explicit lanes; both provider adapters passed a pinned
 emulator restart gate, while real Azure deployment acceptance remains separate.
 See [production-checkpoints.md](docs/production-checkpoints.md).
+The measured-study protocol is also machine-readable and CI-validated, but
+remains fail-closed pending an accepted-model pilot, computed sample size, and
+reviewer approval; see
+[measured-study-preregistration.md](docs/measured-study-preregistration.md).
 Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 
@@ -267,12 +271,16 @@ uv run agent-lab report build \
 
 The command revalidates every individual bundle and pair, preserves the frozen
 left/right lane order, retains operational failures in denominators, and emits
-portable `paired-report/v2` JSON plus self-contained HTML. Paired effects cover
+portable `paired-report/v3` JSON plus self-contained HTML. The primary binary
+effect averages repetitions within each scenario seed, bootstraps seed
+clusters, applies a paired sign-flip randomization test, and reports Holm
+adjustment when both confirmatory tracks are present. Run-level McNemar counts
+remain explicitly descriptive. Paired effects also cover
 scores, task/control latency, calls, all reported token dimensions, provider
 queue/TTFT/generation time, client concurrency, GPU/host samples, and native
 trace coverage. Continuous effects include deterministic paired-bootstrap
-intervals; binary task success includes discordant counts and an exact McNemar
-result; scorer components report their observed discrimination per lane.
+intervals over seed clusters; scorer components report their observed
+discrimination per lane.
 
 The new owner-only output directory also contains redacted source/run evidence,
 fresh individual and pair validations, a complete private copy of each source

@@ -114,7 +114,7 @@ implemented. Current milestone status is:
    reports `production_ready = false`; actual Azure RBAC and availability are
    deployment acceptance gates. See `production-checkpoints.md`.
 6. The fail-closed offline builder successfully revalidated the available
-   clean-source smoke and Qwen-gate indices. Its v2 output now reports task,
+   clean-source smoke and Qwen-gate indices. Its v3 output now reports task,
    token, provider-timing, client-concurrency, host/GPU, control, and trace
    effects and creates portable redacted evidence plus a checksummed owner-only
    copy of every raw bundle. The archive no longer depends on workstation paths;
@@ -149,3 +149,15 @@ implemented. Current milestone status is:
     contract, and no material GPU/provider shift was detected. The raw
     aggregate dataset and interpretation limits are retained in
     `research/native-tracing-overhead.md`.
+11. The measured-study protocol is now machine-readable and CI-validated. It
+    freezes `task_success`, a 0.10 practical risk difference, seed-cluster
+    analysis, multiplicity, failures, invalid pairs, outliers, stopping,
+    prompt sensitivity, ablations, evidence retention, and descriptive-only
+    developer effort. Approval fails closed without a passed model gate, pilot
+    report hash, computed seed/runtime plan, component discrimination, clean
+    source, and reviewer sign-off. Sample sizing remains correctly blocked
+    until an accepted-model pilot exists; see
+    `measured-study-preregistration.md`. Report schema v3 makes the frozen
+    analysis unit executable: repetitions are averaged within seed, bootstrap
+    intervals resample seeds, paired sign-flip p-values operate on seed-level
+    effects, and the complete two-track family receives Holm adjustment.

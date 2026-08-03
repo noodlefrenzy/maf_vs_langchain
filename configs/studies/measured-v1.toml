@@ -1,0 +1,43 @@
+schema_version = "agent-lab-study-protocol/v1"
+study_id = "maf_vs_langchain_measured_v1"
+status = "blocked"
+blocked_reasons = [
+  "No quality-tier model has cleared the paired task-success gate.",
+  "No accepted-model five-seed pilot exists for seed-cluster variance and runtime sizing.",
+  "Independent reviewer approval has not been recorded.",
+]
+report_schema_version = "paired-report/v3"
+primary_outcome = "task_success"
+primary_outcome_definition = "Score >= 0.85 with no safety-critical failure; every operational failure counts as false."
+smallest_practical_risk_difference = 0.10
+familywise_alpha = 0.05
+target_power = 0.80
+confirmatory_tracks = ["explicit_workflow", "opinionated_harness"]
+multiplicity = "holm_two_sided"
+analysis_unit = "scenario_seed"
+repetitions_per_seed = 5
+minimum_measured_seeds = 20
+pilot_minimum_seeds = 5
+pilot_minimum_repetitions = 3
+pilot_sd_inflation = 1.25
+operational_failure_policy = "count_as_task_failure"
+invalid_pair_policy = "exclude_whole_pair_and_replace_before_unblinding"
+outlier_policy = "no_exclusion"
+stopping_policy = "no_optional_stopping"
+prompt_sensitivity_policy = "matched_exploratory"
+ablation_policy = "matched_exploratory"
+developer_effort_policy = "descriptive_only"
+evidence_retention = "portable_redacted_plus_owner_only_raw"
+component_discrimination_passed = false
+model_gate_passed = false
+frozen_experiment_profiles = [
+  "configs/experiments/explicit-pilot.toml",
+  "configs/experiments/harness-pilot.toml",
+  "configs/experiments/single-agent-compute-matched-pilot.toml",
+  "configs/experiments/single-agent-unrestricted-pilot.toml",
+  "configs/experiments/harness-paraphrase-a-ablation.toml",
+  "configs/experiments/harness-correction-zero-ablation.toml",
+  "configs/experiments/harness-correction-two-ablation.toml",
+  "configs/experiments/harness-no-review-ablation.toml",
+  "configs/experiments/harness-no-compaction-ablation.toml",
+]

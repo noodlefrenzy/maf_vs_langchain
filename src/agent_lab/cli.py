@@ -23,6 +23,12 @@ from agent_lab.bundle_validation import (
 from agent_lab.config import load_experiment, load_model_profile
 from agent_lab.report_builder import build_paired_report, write_paired_report
 from agent_lab.scenario import generate_incident
+from agent_lab.study_design import (
+    estimate_study_sample_size,
+    load_paired_report,
+    load_study_protocol,
+    validate_study_references,
+)
 
 _DEFAULT_REPOSITORY_ROOT = Path.cwd()
 
@@ -36,13 +42,59 @@ experiment_app = typer.Typer(
 )
 report_app = typer.Typer(no_args_is_help=True, help="Build offline paired reports.")
 observer_app = typer.Typer(no_args_is_help=True, help="Observe paired runs live or by replay.")
+study_app = typer.Typer(no_args_is_help=True, help="Validate and size measured-study protocols.")
 app.add_typer(scenario_app, name="scenario")
 app.add_typer(config_app, name="config")
 app.add_typer(bundle_app, name="bundle")
 app.add_typer(experiment_app, name="experiment")
 app.add_typer(report_app, name="report")
 app.add_typer(observer_app, name="observer")
+app.add_typer(study_app, name="study")
 console = Console()
+
+
+@study_app.command("validate")
+def validate_study_protocol(
+    protocol_path: Annotated[Path, typer.Argument(help="Study protocol TOML profile.")],
+    repository_root: Annotated[
+        Path,
+        typer.Option(help="Repository root used to resolve frozen profile references."),
+    ] = _DEFAULT_REPOSITORY_ROOT,
+) -> None:
+    """Validate the preregistration gate without approving a blocked study."""
+
+    try:
+        protocol = load_study_protocol(protocol_path)
+        validate_study_references(protocol, repository_root.resolve())
+    except (OSError, ValidationError, ValueError) as exc:
+        console.print(f"[red]Invalid study protocol:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print_json(protocol.model_dump_json(exclude_none=True))
+
+
+@study_app.command("size")
+def size_study(
+    protocol_path: Annotated[Path, typer.Argument(help="Blocked study protocol TOML profile.")],
+    pilot_report: Annotated[
+        Path,
+        typer.Option("--pilot-report", help="Accepted-model paired-report JSON."),
+    ],
+    repository_root: Annotated[
+        Path,
+        typer.Option(help="Repository root used to resolve frozen profile references."),
+    ] = _DEFAULT_REPOSITORY_ROOT,
+) -> None:
+    """Estimate seed clusters and GPU time from a complete paired pilot."""
+
+    try:
+        protocol = load_study_protocol(protocol_path)
+        validate_study_references(protocol, repository_root.resolve())
+        report = load_paired_report(pilot_report)
+        estimate = estimate_study_sample_size(protocol, report, pilot_report)
+    except (OSError, ValidationError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Could not size study:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print_json(estimate.model_dump_json())
 
 
 @observer_app.command("serve")

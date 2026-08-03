@@ -11,7 +11,15 @@ from agent_lab.bundle_validation import BundleValidationResult, PairValidationRe
 from agent_lab.contract_bundle import sha256_payload
 from agent_lab.contracts import Budget, FrameworkLane, ModelProfile, RunManifest, RunTerminal
 from agent_lab.evaluator import ComponentScore, DeterministicScore
-from agent_lab.report_builder import build_paired_report, write_paired_report
+from agent_lab.report_builder import (
+    BinaryEffect,
+    SeedClusterTaskEffect,
+    TrackReport,
+    _paired_randomization_p,
+    _task_success_familywise_inference,
+    build_paired_report,
+    write_paired_report,
+)
 
 
 def _manifest(lane: FrameworkLane, *, seed: int, repetition: int) -> RunManifest:
@@ -313,12 +321,19 @@ def test_report_revalidates_pairs_retains_failures_and_writes_outputs(
     assert all(mark is False for _left, _right, mark in validations)
     assert len(track.paired_points) == 2
     assert track.operational_failure_rate == {"maf_workflow": 0.5, "langgraph": 0.0}
-    assert track.task_success.pairs_total == 2
-    assert track.task_success.left_successes == 1
-    assert track.task_success.right_successes == 1
+    assert track.task_success.seed_clusters_total == 1
+    assert track.task_success.repetitions_minimum == 2
+    assert track.task_success.left_mean_success_proportion == 0.5
+    assert track.task_success.right_mean_success_proportion == 0.5
+    assert track.task_success.paired_risk_difference_right_minus_left == 0.0
+    assert track.task_success_run_level_descriptive.pairs_total == 2
+    assert track.task_success_run_level_descriptive.left_successes == 1
+    assert track.task_success_run_level_descriptive.right_successes == 1
     assert track.continuous_effects["total_score"].pairs_total == 2
     assert track.continuous_effects["total_score"].pairs_analyzed == 1
+    assert track.continuous_effects["total_score"].seed_clusters_analyzed == 1
     assert track.continuous_effects["elapsed_seconds"].pairs_analyzed == 2
+    assert track.continuous_effects["elapsed_seconds"].seed_clusters_analyzed == 1
     assert track.continuous_effects["provider_queue_seconds"].pairs_analyzed == 2
     assert track.continuous_effects["gpu_peak_memory_mib"].pairs_analyzed == 2
     assert track.continuous_effects["trace_completeness"].pairs_analyzed == 2
@@ -335,7 +350,8 @@ def test_report_revalidates_pairs_retains_failures_and_writes_outputs(
     json_path, html_path = write_paired_report(report, tmp_path / "report")
     assert len(validations) == 4
     report_payload = json.loads(json_path.read_text())
-    assert report_payload["schema_version"] == "paired-report/v2"
+    assert report_payload["schema_version"] == "paired-report/v3"
+    assert report_payload["task_success_familywise_inference"] is None
     assert all(
         not point[side]["bundle"].startswith(str(tmp_path))
         for point in report_payload["tracks"]["explicit_workflow"]["paired_points"]
@@ -366,6 +382,7 @@ def test_report_revalidates_pairs_retains_failures_and_writes_outputs(
     assert "operational failures remain in denominators" in html_path.read_text()
     assert "Task latency (seconds) paired plot" in html_path.read_text()
     assert "Recovery score paired plot" in html_path.read_text()
+    assert "Primary seed-cluster task-success effect" in html_path.read_text()
     with pytest.raises(FileExistsError):
         write_paired_report(report, tmp_path / "report")
 
@@ -399,3 +416,59 @@ def test_report_rejects_protocol_probe_indices(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="not a native workflow index"):
         build_paired_report([index], bootstrap_resamples=10)
+
+
+def _empty_track(track: str, p_value: float) -> TrackReport:
+    lanes = (
+        ("maf_workflow", "langgraph")
+        if track == "explicit_workflow"
+        else ("maf_harness", "deep_agents")
+    )
+    return TrackReport(
+        lanes=lanes,
+        paired_points=[],
+        operational_failure_rate={lanes[0]: 0.0, lanes[1]: 0.0},
+        task_success=SeedClusterTaskEffect(
+            seed_clusters_total=20,
+            repetitions_minimum=5,
+            repetitions_maximum=5,
+            left_mean_success_proportion=0.5,
+            right_mean_success_proportion=0.6,
+            paired_risk_difference_right_minus_left=0.1,
+            paired_risk_difference_ci95=(0.01, 0.2),
+            randomization_p_two_sided=p_value,
+            randomization_method="exact_sign_flip",
+            nonzero_seed_differences=10,
+        ),
+        task_success_run_level_descriptive=BinaryEffect(
+            pairs_total=100,
+            left_successes=50,
+            right_successes=60,
+            left_only_successes=10,
+            right_only_successes=20,
+        ),
+        continuous_effects={},
+        component_discrimination={},
+    )
+
+
+def test_seed_randomization_and_holm_use_seed_cluster_p_values() -> None:
+    p_value, method, nonzero = _paired_randomization_p(
+        [1.0] * 5,
+        seed=1,
+        resamples=100,
+    )
+    assert p_value == 0.0625
+    assert method == "exact_sign_flip"
+    assert nonzero == 5
+
+    family = _task_success_familywise_inference(
+        {
+            "explicit_workflow": _empty_track("explicit_workflow", 0.02),
+            "opinionated_harness": _empty_track("opinionated_harness", 0.04),
+        }
+    )
+
+    assert family is not None
+    assert [item.holm_adjusted_p for item in family.comparisons] == [0.04, 0.04]
+    assert [item.reject_null for item in family.comparisons] == [True, True]

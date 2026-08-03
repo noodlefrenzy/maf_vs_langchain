@@ -20,7 +20,7 @@ from agent_lab.contract_bundle import sha256_payload
 from agent_lab.contracts import RunManifest, RunTerminal, TerminalStatus
 from agent_lab.evaluator import DeterministicScore
 
-REPORT_SCHEMA_VERSION = "paired-report/v2"
+REPORT_SCHEMA_VERSION = "paired-report/v3"
 EVIDENCE_INDEX_SCHEMA_VERSION = "agent-lab.report-evidence/1.0.0"
 REDACTED_INDEX_SCHEMA_VERSION = "agent-lab.redacted-experiment-index/1.0.0"
 PLOT_METRICS = (
@@ -96,6 +96,8 @@ class PairedPoint(ReportModel):
 class ContinuousEffect(ReportModel):
     pairs_total: int = Field(ge=0)
     pairs_analyzed: int = Field(ge=0)
+    seed_clusters_analyzed: int = Field(ge=0)
+    bootstrap_unit: Literal["scenario_seed"] = "scenario_seed"
     left_median: float | None = None
     right_median: float | None = None
     median_difference_right_minus_left: float | None = None
@@ -114,6 +116,35 @@ class BinaryEffect(ReportModel):
     exact_mcnemar_p_two_sided: float | None = Field(default=None, ge=0, le=1)
 
 
+class SeedClusterTaskEffect(ReportModel):
+    seed_clusters_total: int = Field(ge=1)
+    repetitions_minimum: int = Field(ge=1)
+    repetitions_maximum: int = Field(ge=1)
+    left_mean_success_proportion: float = Field(ge=0, le=1)
+    right_mean_success_proportion: float = Field(ge=0, le=1)
+    paired_risk_difference_right_minus_left: float = Field(ge=-1, le=1)
+    paired_risk_difference_ci95: tuple[float, float]
+    randomization_p_two_sided: float = Field(ge=0, le=1)
+    randomization_method: Literal["exact_sign_flip", "monte_carlo_sign_flip"]
+    nonzero_seed_differences: int = Field(ge=0)
+
+
+class HolmComparison(ReportModel):
+    track: Literal["explicit_workflow", "opinionated_harness"]
+    rank: int = Field(ge=1)
+    raw_p_two_sided: float = Field(ge=0, le=1)
+    holm_adjusted_p: float = Field(ge=0, le=1)
+    rejection_threshold: float = Field(gt=0, lt=1)
+    reject_null: bool
+
+
+class TaskSuccessFamilywiseInference(ReportModel):
+    method: Literal["holm_two_sided"] = "holm_two_sided"
+    familywise_alpha: float = Field(gt=0, lt=1)
+    analysis_unit: Literal["scenario_seed"] = "scenario_seed"
+    comparisons: list[HolmComparison] = Field(min_length=2, max_length=2)
+
+
 class ComponentDiscrimination(ReportModel):
     observations: int = Field(ge=0)
     distinct_raw_scores: list[float]
@@ -126,18 +157,20 @@ class TrackReport(ReportModel):
     lanes: tuple[str, str]
     paired_points: list[PairedPoint]
     operational_failure_rate: dict[str, float]
-    task_success: BinaryEffect
+    task_success: SeedClusterTaskEffect
+    task_success_run_level_descriptive: BinaryEffect
     continuous_effects: dict[str, ContinuousEffect]
     component_discrimination: dict[str, dict[str, ComponentDiscrimination]]
 
 
 class PairedReport(ReportModel):
-    schema_version: Literal["paired-report/v2"] = REPORT_SCHEMA_VERSION
+    schema_version: Literal["paired-report/v3"] = REPORT_SCHEMA_VERSION
     source_indices: list[str]
     source_index_paths: list[str] = Field(exclude=True, repr=False)
     bootstrap_seed: int
     bootstrap_resamples: int = Field(gt=0)
     tracks: dict[str, TrackReport]
+    task_success_familywise_inference: TaskSuccessFamilywiseInference | None = None
 
 
 def build_paired_report(
@@ -156,6 +189,7 @@ def build_paired_report(
     sources: list[str] = []
     source_paths: list[str] = []
     seen_pairs: set[tuple[str, int, int, str]] = set()
+    seen_analysis_pairs: set[tuple[int, int, str]] = set()
     seen_runs: set[str] = set()
     for raw_path in index_paths:
         index_path = raw_path.resolve()
@@ -189,6 +223,13 @@ def build_paired_report(
                 if pair_key in seen_pairs:
                     raise ValueError(f"duplicate paired block in report inputs: {pair_key}")
                 seen_pairs.add(pair_key)
+                analysis_pair_key = (seed, repetition, track)
+                if analysis_pair_key in seen_analysis_pairs:
+                    raise ValueError(
+                        "duplicate seed/repetition analysis unit in report inputs: "
+                        f"{analysis_pair_key}"
+                    )
+                seen_analysis_pairs.add(analysis_pair_key)
                 point = _load_pair(
                     index_path,
                     experiment_id=experiment_id,
@@ -231,6 +272,7 @@ def build_paired_report(
         bootstrap_seed=bootstrap_seed,
         bootstrap_resamples=bootstrap_resamples,
         tracks=tracks,
+        task_success_familywise_inference=_task_success_familywise_inference(tracks),
     )
 
 
@@ -586,9 +628,14 @@ def _summarize_track(
         lanes[0]: sum(point.left.operational_failure for point in points) / total,
         lanes[1]: sum(point.right.operational_failure for point in points) / total,
     }
-    task_success = _binary_effect(
+    task_success_run_level = _binary_effect(
         [point.left.task_success for point in points],
         [point.right.task_success for point in points],
+    )
+    task_success = _seed_cluster_task_effect(
+        points,
+        seed=bootstrap_seed,
+        resamples=bootstrap_resamples,
     )
     metrics = {
         "total_score": "total_score",
@@ -626,7 +673,7 @@ def _summarize_track(
             left = getattr(point.left, attribute)
             right = getattr(point.right, attribute)
             if left is not None and right is not None:
-                values.append((float(left), float(right)))
+                values.append((point.scenario_seed, float(left), float(right)))
         continuous[name] = _continuous_effect(
             values,
             pairs_total=total,
@@ -653,33 +700,155 @@ def _summarize_track(
         paired_points=points,
         operational_failure_rate=failure_rate,
         task_success=task_success,
+        task_success_run_level_descriptive=task_success_run_level,
         continuous_effects=continuous,
         component_discrimination=component_discrimination,
     )
 
 
 def _continuous_effect(
-    values: list[tuple[float, float]],
+    values: list[tuple[int, float, float]],
     *,
     pairs_total: int,
     seed: int,
     resamples: int,
 ) -> ContinuousEffect:
     if not values:
-        return ContinuousEffect(pairs_total=pairs_total, pairs_analyzed=0)
-    left = [pair[0] for pair in values]
-    right = [pair[1] for pair in values]
-    differences = [right_value - left_value for left_value, right_value in values]
+        return ContinuousEffect(
+            pairs_total=pairs_total,
+            pairs_analyzed=0,
+            seed_clusters_analyzed=0,
+        )
+    by_seed: dict[int, list[tuple[float, float]]] = defaultdict(list)
+    for scenario_seed, left, right in values:
+        by_seed[scenario_seed].append((left, right))
+    left = [statistics.fmean(pair[0] for pair in pairs) for pairs in by_seed.values()]
+    right = [statistics.fmean(pair[1] for pair in pairs) for pairs in by_seed.values()]
+    differences = [
+        right_value - left_value for left_value, right_value in zip(left, right, strict=True)
+    ]
     mean_ci, median_ci = _bootstrap_intervals(differences, seed=seed, resamples=resamples)
     return ContinuousEffect(
         pairs_total=pairs_total,
         pairs_analyzed=len(values),
+        seed_clusters_analyzed=len(by_seed),
         left_median=statistics.median(left),
         right_median=statistics.median(right),
         median_difference_right_minus_left=statistics.median(differences),
         mean_difference_right_minus_left=statistics.fmean(differences),
         mean_difference_ci95=mean_ci,
         median_difference_ci95=median_ci,
+    )
+
+
+def _seed_cluster_task_effect(
+    points: list[PairedPoint],
+    *,
+    seed: int,
+    resamples: int,
+) -> SeedClusterTaskEffect:
+    by_seed: dict[int, list[PairedPoint]] = defaultdict(list)
+    for point in points:
+        by_seed[point.scenario_seed].append(point)
+    repetitions = [len(seed_points) for seed_points in by_seed.values()]
+    left = [
+        statistics.fmean(float(point.left.task_success) for point in seed_points)
+        for seed_points in by_seed.values()
+    ]
+    right = [
+        statistics.fmean(float(point.right.task_success) for point in seed_points)
+        for seed_points in by_seed.values()
+    ]
+    differences = [
+        right_value - left_value for left_value, right_value in zip(left, right, strict=True)
+    ]
+    mean_ci, _median_ci = _bootstrap_intervals(differences, seed=seed, resamples=resamples)
+    p_value, method, nonzero = _paired_randomization_p(
+        differences,
+        seed=seed + 10_000,
+        resamples=resamples,
+    )
+    return SeedClusterTaskEffect(
+        seed_clusters_total=len(by_seed),
+        repetitions_minimum=min(repetitions),
+        repetitions_maximum=max(repetitions),
+        left_mean_success_proportion=statistics.fmean(left),
+        right_mean_success_proportion=statistics.fmean(right),
+        paired_risk_difference_right_minus_left=statistics.fmean(differences),
+        paired_risk_difference_ci95=mean_ci,
+        randomization_p_two_sided=p_value,
+        randomization_method=method,
+        nonzero_seed_differences=nonzero,
+    )
+
+
+def _paired_randomization_p(
+    differences: list[float],
+    *,
+    seed: int,
+    resamples: int,
+) -> tuple[float, Literal["exact_sign_flip", "monte_carlo_sign_flip"], int]:
+    nonzero = [value for value in differences if not math.isclose(value, 0.0, abs_tol=1e-12)]
+    if not nonzero:
+        return 1.0, "exact_sign_flip", 0
+    observed = abs(statistics.fmean(nonzero))
+    tolerance = 1e-12
+    if len(nonzero) <= 20:
+        assignments = 1 << len(nonzero)
+        extreme = 0
+        for mask in range(assignments):
+            permuted = statistics.fmean(
+                value if mask & (1 << offset) else -value for offset, value in enumerate(nonzero)
+            )
+            if abs(permuted) >= observed - tolerance:
+                extreme += 1
+        return extreme / assignments, "exact_sign_flip", len(nonzero)
+    randomizer = random.Random(seed)
+    extreme = 0
+    for _ in range(resamples):
+        permuted = statistics.fmean(
+            value if randomizer.getrandbits(1) else -value for value in nonzero
+        )
+        if abs(permuted) >= observed - tolerance:
+            extreme += 1
+    return (extreme + 1) / (resamples + 1), "monte_carlo_sign_flip", len(nonzero)
+
+
+def _task_success_familywise_inference(
+    tracks: dict[str, TrackReport],
+    *,
+    alpha: float = 0.05,
+) -> TaskSuccessFamilywiseInference | None:
+    confirmatory = ("explicit_workflow", "opinionated_harness")
+    if any(track not in tracks for track in confirmatory):
+        return None
+    ranked = sorted(
+        ((track, tracks[track].task_success.randomization_p_two_sided) for track in confirmatory),
+        key=lambda item: (item[1], item[0]),
+    )
+    comparisons = []
+    running_adjusted = 0.0
+    prior_rejected = True
+    count = len(ranked)
+    for offset, (track, raw_p) in enumerate(ranked):
+        remaining = count - offset
+        threshold = alpha / remaining
+        running_adjusted = max(running_adjusted, min(1.0, remaining * raw_p))
+        rejected = prior_rejected and raw_p <= threshold
+        comparisons.append(
+            HolmComparison(
+                track=track,
+                rank=offset + 1,
+                raw_p_two_sided=raw_p,
+                holm_adjusted_p=running_adjusted,
+                rejection_threshold=threshold,
+                reject_null=rejected,
+            )
+        )
+        prior_rejected = rejected
+    return TaskSuccessFamilywiseInference(
+        familywise_alpha=alpha,
+        comparisons=comparisons,
     )
 
 
@@ -1127,7 +1296,7 @@ def _render_html(body: dict[str, Any]) -> str:
             effect_rows.append(
                 "<tr>"
                 f"<td>{html.escape(metric)}</td><td>{effect['pairs_analyzed']}/"
-                f"{effect['pairs_total']}</td>"
+                f"{effect['pairs_total']}</td><td>{effect['seed_clusters_analyzed']}</td>"
                 f"<td>{_display(effect['left_median'])}</td>"
                 f"<td>{_display(effect['right_median'])}</td>"
                 f"<td>{_display(effect['mean_difference_right_minus_left'])}</td>"
@@ -1145,7 +1314,8 @@ def _render_html(body: dict[str, Any]) -> str:
                     f"<td>{result['discriminates_observed_outcomes']}</td>"
                     "</tr>"
                 )
-        binary = report["task_success"]
+        seed_effect = report["task_success"]
+        binary = report["task_success_run_level_descriptive"]
         failures = report["operational_failure_rate"]
         plots = _render_paired_plots(report)
         sections.append(
@@ -1154,12 +1324,22 @@ def _render_html(body: dict[str, Any]) -> str:
             f"{len(report['paired_points'])} paired blocks.</p>"
             f"<p>Operational failure rates: {html.escape(lanes[0])} "
             f"{failures[lanes[0]]:.3f}; {html.escape(lanes[1])} "
-            f"{failures[lanes[1]]:.3f}. Task successes: {binary['left_successes']} vs "
+            f"{failures[lanes[1]]:.3f}.</p>"
+            "<p>Primary seed-cluster task-success effect: "
+            f"{_display(seed_effect['paired_risk_difference_right_minus_left'])}; 95% "
+            f"seed bootstrap CI={_display(seed_effect['paired_risk_difference_ci95'])}; "
+            f"two-sided {html.escape(seed_effect['randomization_method'])} p="
+            f"{_display(seed_effect['randomization_p_two_sided'])}; "
+            f"{seed_effect['seed_clusters_total']} seeds with "
+            f"{seed_effect['repetitions_minimum']}--{seed_effect['repetitions_maximum']} "
+            "repetitions.</p>"
+            f"<p>Descriptive run-level task successes: {binary['left_successes']} vs "
             f"{binary['right_successes']}; discordant left-only/right-only: "
             f"{binary['left_only_successes']}/{binary['right_only_successes']}; exact "
             f"McNemar p={_display(binary['exact_mcnemar_p_two_sided'])}.</p>"
             "<h3>Paired effects (right minus left)</h3><table><thead><tr><th>Metric</th>"
-            "<th>Analyzed/total</th><th>Left median</th><th>Right median</th>"
+            "<th>Run pairs analyzed/total</th><th>Seed clusters</th><th>Left median</th>"
+            "<th>Right median</th>"
             "<th>Mean difference</th><th>95% bootstrap CI</th></tr></thead>"
             f"<tbody>{''.join(effect_rows)}</tbody></table>"
             "<h3>Paired raw-point plots</h3>"
@@ -1173,6 +1353,30 @@ def _render_html(body: dict[str, Any]) -> str:
             f"<th>{html.escape(lanes[1])} bundle</th><th>status</th><th>score</th>"
             f"</tr></thead><tbody>{''.join(rows)}</tbody></table></section>"
         )
+    familywise = body.get("task_success_familywise_inference")
+    if familywise is None:
+        familywise_html = (
+            "<p>Holm familywise inference is unavailable until both confirmatory tracks "
+            "are present.</p>"
+        )
+    else:
+        comparison_rows = "".join(
+            "<tr>"
+            f"<td>{html.escape(item['track'])}</td><td>{item['rank']}</td>"
+            f"<td>{_display(item['raw_p_two_sided'])}</td>"
+            f"<td>{_display(item['holm_adjusted_p'])}</td>"
+            f"<td>{_display(item['rejection_threshold'])}</td>"
+            f"<td>{item['reject_null']}</td></tr>"
+            for item in familywise["comparisons"]
+        )
+        familywise_html = (
+            "<h2>Confirmatory task-success family</h2>"
+            f"<p>Holm two-sided control at familywise alpha "
+            f"{_display(familywise['familywise_alpha'])}; scenario seed is the analysis "
+            "unit.</p><table><thead><tr><th>Track</th><th>Rank</th><th>Raw p</th>"
+            "<th>Holm-adjusted p</th><th>Step threshold</th><th>Reject null</th>"
+            f"</tr></thead><tbody>{comparison_rows}</tbody></table>"
+        )
     embedded = html.escape(json.dumps(body, sort_keys=True))
     return (
         '<!doctype html><html><head><meta charset="utf-8"><title>Agent Lab paired '
@@ -1184,7 +1388,8 @@ def _render_html(body: dict[str, Any]) -> str:
         "<h1>Agent Lab paired report</h1>"
         "<p>Generated offline from revalidated immutable bundles. Right-minus-left effects "
         "preserve the frozen preflight lane order; operational failures remain in denominators."
-        f"</p>{''.join(sections)}<details><summary>Machine-readable report</summary>"
+        f"</p>{familywise_html}{''.join(sections)}"
+        "<details><summary>Machine-readable report</summary>"
         f"<code>{embedded}</code></details></body></html>\n"
     )
 

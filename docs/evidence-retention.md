@@ -28,7 +28,7 @@ report-output/
 └── private-runs/<run-id>/...
 ```
 
-`paired-report.json` uses `paired-report/v2`. Its source-index and bundle links
+`paired-report.json` uses `paired-report/v3`. Its source-index and bundle links
 are relative to the report directory, so moving the archive does not break
 them or disclose the workstation path. The redacted experiment indices retain
 case, ordering, contract, status, score, and trace-summary fields while

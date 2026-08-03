@@ -273,8 +273,9 @@ It is not “normalized away,” because it is part of an opinionated harness.
 - Pilot: five equally weighted incident-family seeds, three repetitions, and
   the standard fault profile. The exact generator-derived selection and its
   pre-execution planner are frozen in [pilot-case-plan.md](pilot-case-plan.md).
-- Measured study: at least 20 seeds and five repetitions after power/variance
-  review.
+- Measured study: at least 20 seeds and five repetitions after the fail-closed
+  accepted-model pilot sizing rule in
+  [measured-study-preregistration.md](measured-study-preregistration.md).
 - Execute on one GPU sequentially.
 - Randomize lane order within each seed/repetition block.
 - Balance A/B and B/A order to reduce warm-cache and thermal bias.
@@ -282,10 +283,12 @@ It is not “normalized away,” because it is part of an opinionated harness.
 - Never reuse a model conversation, checkpoint, MCP state, or workspace across
   lanes.
 
-Binary paired outcomes use McNemar-style analysis where appropriate.
-Continuous paired differences report medians, distributions, and paired
-bootstrap confidence intervals. A pilot is for variance and failure discovery,
-not a winner announcement.
+The primary binary outcome averages repetitions within scenario seed, uses a
+paired seed-level sign-flip randomization test, and applies Holm correction to
+the two confirmatory tracks. Run-level McNemar counts are descriptive.
+Continuous paired differences report medians, distributions, and bootstrap
+confidence intervals over seed clusters. A pilot is for variance and failure
+discovery, not a winner announcement.
 
 ## 9. Scoring
 

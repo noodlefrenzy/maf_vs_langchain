@@ -119,6 +119,16 @@ headline claim.
 
 ## Statistical plan
 
+The executable preregistration is
+[measured-study-preregistration.md](measured-study-preregistration.md), backed
+by `configs/studies/measured-v1.toml`. It freezes binary `task_success` as the
+primary outcome, a 10 percentage-point practical difference, seed-cluster
+analysis over five repetitions, two co-primary track contrasts with Holm
+familywise control, failure/outlier/stopping rules, and a fail-closed pilot
+sizing command. The protocol remains explicitly blocked until an accepted
+model pilot supplies variance/runtime evidence and a reviewer approves the
+frozen record.
+
 The pilot estimates variance and failure modes. Before the measured study:
 
 - choose the primary outcome and smallest practically meaningful difference;
@@ -137,8 +147,11 @@ For the measured study:
 
 - report paired raw points and distributions;
 - report effect sizes, not only p-values;
-- use paired bootstrap confidence intervals for continuous/ordinal differences;
-- use paired binary tests for success/safety outcomes;
+- average repeated observations within seed and bootstrap seed clusters for
+  continuous/ordinal differences;
+- use paired seed-level sign-flip tests for primary task success and label
+  run-level McNemar counts descriptive;
+- apply Holm correction across the two confirmatory track p-values;
 - correct or clearly label multiple exploratory comparisons;
 - include all operational failures in reliability reporting;
 - publish seeds, manifests, scorer version, and report code in the private repo.
