@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import tempfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
@@ -341,6 +341,31 @@ def build_approved_workflow(
         .add_edge(approval, mitigation)
         .build()
     )
+
+
+def _select_approval_checkpoint(
+    checkpoints: Sequence[WorkflowCheckpoint], request_id: str
+) -> WorkflowCheckpoint:
+    """Select the checkpoint that actually owns the pending approval request."""
+
+    matches = [
+        checkpoint
+        for checkpoint in checkpoints
+        if request_id in checkpoint.pending_request_info_events
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            "MAF workflow did not persist exactly one checkpoint for pending approval "
+            f"{request_id!r}; found {len(matches)}"
+        )
+    return matches[0]
+
+
+async def _approval_checkpoint(
+    storage: FileCheckpointStorage, request_id: str
+) -> WorkflowCheckpoint:
+    checkpoints = await storage.list_checkpoints(workflow_name="agent-lab-maf-explicit-approved-v1")
+    return _select_approval_checkpoint(checkpoints, request_id)
 
 
 class MafRoleAgent:
@@ -742,8 +767,7 @@ async def run_live_approved(
             InvestigationTask(public_ticket=request.public_ticket).model_dump(mode="json")
         )
         requests = initial.get_request_info_events()
-        latest = await storage.get_latest(workflow_name="agent-lab-maf-explicit-approved-v1")
-        if len(requests) != 1 or latest is None:
+        if len(requests) != 1:
             packets = [
                 EvidencePacket.model_validate(output)
                 for output in initial.get_outputs()
@@ -754,6 +778,7 @@ async def run_live_approved(
             raise RuntimeError("MAF workflow did not persist exactly one approval request")
         approval_event = requests[0]
         envelope = ApprovalEnvelope.model_validate(approval_event.data)
+        approval_checkpoint = await _approval_checkpoint(storage, envelope.request.request_id)
         if approval_provider is None:
             _emit_json_line(
                 {
@@ -778,7 +803,7 @@ async def run_live_approved(
                 raise ValueError("approved response requires an action ID, description, and token")
             approval_tokens[response.request_id] = response.approval_token
         resumed = await workflow.run(
-            checkpoint_id=latest.checkpoint_id,
+            checkpoint_id=approval_checkpoint.checkpoint_id,
             checkpoint_storage=storage,
             responses={response.request_id: response.model_dump(mode="json")},
         )
@@ -945,10 +970,10 @@ async def _deterministic_approval_probe(
             InvestigationTask(public_ticket="deterministic probe").model_dump(mode="json")
         )
         requests = initial.get_request_info_events()
-        latest = await storage.get_latest(workflow_name="agent-lab-maf-explicit-approved-v1")
-        if len(requests) != 1 or latest is None:
+        if len(requests) != 1:
             raise RuntimeError("deterministic MAF workflow did not pause for approval")
         request_id = requests[0].request_id
+        approval_checkpoint = await _approval_checkpoint(storage, request_id)
         response: dict[str, str] = {
             "request_id": request_id,
             "decision": decision.value,
@@ -959,7 +984,7 @@ async def _deterministic_approval_probe(
             )
             response["action_to_execute"] = "apply the reversible runbook action"
         resumed = await workflow.run(
-            checkpoint_id=latest.checkpoint_id,
+            checkpoint_id=approval_checkpoint.checkpoint_id,
             checkpoint_storage=storage,
             responses={request_id: response},
         )
@@ -973,12 +998,32 @@ async def _deterministic_approval_probe(
         return outputs[0].model_dump(mode="json")
 
 
+def _deterministic_checkpoint_selection_probe() -> dict[str, str]:
+    request_id = "mit-deterministic-01"
+    approval_checkpoint = WorkflowCheckpoint(
+        workflow_name="agent-lab-maf-explicit-approved-v1",
+        graph_signature_hash="deterministic",
+        checkpoint_id="approval-checkpoint",
+        timestamp="2026-08-03T00:00:00+00:00",
+        pending_request_info_events={request_id: object()},
+    )
+    newer_ancestor = WorkflowCheckpoint(
+        workflow_name="agent-lab-maf-explicit-approved-v1",
+        graph_signature_hash="deterministic",
+        checkpoint_id="newer-ancestor",
+        timestamp="2026-08-03T00:00:01+00:00",
+    )
+    selected = _select_approval_checkpoint([newer_ancestor, approval_checkpoint], request_id)
+    return {"selected_checkpoint_id": selected.checkpoint_id}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--deterministic-probe", action="store_true")
     mode.add_argument("--deterministic-approved-probe", action="store_true")
     mode.add_argument("--deterministic-rejected-probe", action="store_true")
+    mode.add_argument("--deterministic-checkpoint-selection-probe", action="store_true")
     mode.add_argument("--live-investigation", action="store_true")
     mode.add_argument("--live-approved-run", action="store_true")
     args = parser.parse_args()
@@ -988,6 +1033,8 @@ def main() -> None:
         payload = asyncio.run(_deterministic_approval_probe(ApprovalDecision.APPROVE))
     elif args.deterministic_rejected_probe:
         payload = asyncio.run(_deterministic_approval_probe(ApprovalDecision.REJECT))
+    elif args.deterministic_checkpoint_selection_probe:
+        payload = _deterministic_checkpoint_selection_probe()
     elif args.live_approved_run:
         request_line = sys.stdin.buffer.readline()
         if not request_line:
