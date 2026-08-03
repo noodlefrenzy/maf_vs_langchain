@@ -90,9 +90,9 @@ duplicate-free union discovery catalog, strict source-endpoint evidence
 provenance, and the same outer approval/recovery boundary. Both runner families
 now retain correlated, redacted native span ledgers, export best-effort to a
 pinned loopback Phoenix deployment, and record validated operation-level trace
-completeness without making collector availability run-critical. These smoke
-runs exercise the system but do not constitute a benchmark result. Clean-source
-harness and compute-matched baseline smoke pairs have now been retained, along
+completeness without making collector availability run-critical. The smoke
+runs exercise the system but do not constitute benchmark results. Clean-source
+harness and compute-matched baseline smoke pairs have been retained, along
 with two corrected Qwen3.5-9B task-quality gates. The first contained one
 LangGraph task success and one valid MAF evidence-gate failure; the second
 reversed the split, with MAF succeeding while LangGraph completed without
@@ -104,6 +104,11 @@ successful lanes; that exact operating point is promoted to the five-seed
 pilots. The clean second 9B pair also validates the versioned per-call,
 host/GPU, and control-plane ledgers documented in the
 [native run-observability validation](docs/research/run-observability-validation.md).
+A later five-seed, three-repetition compute-matched single-agent pilot retained
+all 30 valid bundles and 15 inference-eligible pairs: MAF succeeded on 3/15
+runs and LangChain on 11/15. The five-seed cluster result is descriptive and the
+unrestricted baseline remains pending; see the
+[single-agent pilot record](docs/research/qwen35-27b-single-agent-pilots.md).
 A subsequent balanced 16-launch tracing ablation measured a consistent fixed
 control-path cost: median paired increases of 134 ms for MAF and 423 ms for
 LangGraph, including only 6--7 ms of explicit trace flush. Native tracing stays

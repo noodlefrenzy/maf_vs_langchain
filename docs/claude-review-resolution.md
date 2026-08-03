@@ -95,7 +95,12 @@ implemented. Current milestone status is:
    the failure remains in the denominator.
 2. A compute-matched single-agent smoke pair was collected at `2b1a7e9`; MAF
    completed successfully at 0.916667 while LangChain failed its evidence gate.
-   The unrestricted and five-seed profiles remain unmeasured.
+   The clean five-seed, three-repetition Qwen3.5-27B compute-matched pilot at
+   `567f28e` then retained all 30 valid bundles and 15 inference-eligible pairs.
+   MAF succeeded on 3/15 runs with six operational failures; LangChain succeeded
+   on 11/15 with no operational failures. The seed-cluster risk difference is
+   0.533333 in LangChain's direction with exact sign-flip `p = 0.25`; this is
+   descriptive pilot evidence. The unrestricted profile remains unmeasured.
 3. The corrected Qwen3.5-9B 32K gate at `bb61e34` produced one successful
    LangGraph run (0.916667) and one valid MAF evidence-gate failure. A second
    clean gate at `6bc7815` reversed the split: MAF succeeded at 0.916667 while

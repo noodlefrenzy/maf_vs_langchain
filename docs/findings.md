@@ -636,12 +636,12 @@ They do **not** establish that:
   quality-tier-model overhead;
 - one customer architecture should standardize on one brand for every layer.
 
-Limitations are substantial: one incident seed, one model profile, no injected
-faults in the smoke cohort, repeated stochastic executions rather than a
-powered sample, evolving source during early stabilization, no measured
-single-agent baseline cohort, no paired Qwen3.5-9B pilot, no preregistered
-primary outcome, and no completed measured-study report. The model seed is
-requested but does not make GPU generation bitwise deterministic.
+Limitations are substantial: the accepted-model pilots contain only five seed
+clusters, repeated stochastic executions are not a powered sample, source
+evolved during early stabilization, the unrestricted baseline is unmeasured,
+the harness operating point failed its replacement gate, and no measured study
+is approved. The model seed is requested but does not make GPU generation
+bitwise deterministic.
 
 Additional methodology constraints are explicit before the pilot:
 
@@ -711,6 +711,15 @@ observed whole-device peak leaves only about 1.3 GiB of margin, so this is an
 accepted but deliberately exclusive GPU operating point rather than evidence
 of spare capacity.
 
+The clean compute-matched single-agent pilot at `567f28e` subsequently
+completed all 30 runs and 15 inference-eligible pairs. MAF succeeded on 3/15
+runs, completed nine normally, and retained six model/provenance failures;
+LangChain completed all 15 and succeeded on 11. At the five-seed cluster unit,
+the LangChain-minus-MAF task-success risk difference is 0.533333 with
+paired-bootstrap interval [0.133333, 0.933333] and exact sign-flip `p = 0.25`.
+This is descriptive pilot evidence, not a powered conclusion; see
+[qwen35-27b-single-agent-pilots.md](research/qwen35-27b-single-agent-pilots.md).
+
 The neutral paired observer is now operational independently of that model
 gate. It discovers both preallocated lane bundles, replays or tails public
 normalized events with sequence-addressable SSE, exposes Phoenix and attested
@@ -736,9 +745,10 @@ pair ID; see
 3. Rebuild the combined report and rerun fail-closed study sizing only after a
    replacement canonical harness pilot supplies nonzero seed-level variance
    and scored component evidence.
-4. Run the implemented compute-matched and unrestricted single-agent pilot
-   profiles on the accepted Qwen3.5-27B operating point before claiming a
-   multi-agent advantage.
+4. Run the implemented unrestricted single-agent pilot on the accepted
+   Qwen3.5-27B operating point. The compute-matched cohort is complete; do not
+   substitute the higher-ceiling result for it or claim a multi-agent advantage
+   while the harness and measured-study gates remain blocked.
 5. Repeat the validated Cosmos restart/resume gate against the intended Azure
    account and managed identity before enabling a production runner profile;
    the pinned emulator closes provider compatibility, not deployment

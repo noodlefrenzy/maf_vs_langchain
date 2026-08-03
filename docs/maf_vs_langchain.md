@@ -100,8 +100,9 @@ the limitations slides intact.
    retry behavior changed operational outcomes.
 4. **Neither stack removes the need for external controls.** Budgets,
    provenance, approvals, and evaluation must fail closed.
-5. **No winner claim yet.** One seed per retained smoke/gate, tiny cohorts, no
-   completed paired single-agent cohort, and no powered measured study.
+5. **No winner claim yet.** The pilots have only five seed clusters, the
+   unrestricted baseline is pending, the harness gate is blocked, and there is
+   no powered measured study.
 
 ---
 
@@ -578,9 +579,10 @@ Choose the **orchestration mode and operating model first**, then the framework.
 # What these runs do not prove
 
 - No overall speed, quality, cost, safety, or reliability winner
-- No evidence yet that multi-agent beats a compute-matched single agent
-- No powered sample, confidence intervals, or preregistered primary result
-- One incident seed, one model profile, no injected-fault smoke cohort
+- No defensible evidence that multi-agent beats the completed compute-matched
+  single-agent baseline
+- No powered sample or approved preregistered primary result
+- Only five pilot seed clusters on one accepted model profile
 - Early harness runs used evolving source trees
 - Existing harness smoke predates the symmetric hashed adapter contract
 - Cosmos provider restart semantics are validated on a pinned emulator, but no
@@ -595,8 +597,8 @@ engineering risks—not to select a universal winner.
 
 # Recommended next phase
 
-1. Run the five-seed explicit, harness, compute-matched, and unrestricted
-   single-agent profiles on the accepted Qwen3.5-27B Q4_K_M llama.cpp point.
+1. Keep the harness replacement pilot blocked, retain the completed explicit
+   and compute-matched single-agent pilots, and run the unrestricted baseline.
 2. Execute the frozen provenance-correction, prompt-paraphrase, no-review, and
    no-compaction profiles.
 3. Repeat the Cosmos restart gate against the intended Azure account and
