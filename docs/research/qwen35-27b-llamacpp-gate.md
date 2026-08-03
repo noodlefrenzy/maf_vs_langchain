@@ -104,7 +104,10 @@ launch, refuses an existing output directory or ambiguous serving process,
 starts a fresh server, captures its log, and reaps it on every exit path. The
 runtime attestation also rejects drift in the model path, loopback binding,
 context/slot topology, GPU layers, caches, parser, batch/thread settings, and
-telemetry/safety flags. The second launch runs the complete client
+telemetry/safety flags. This llama.cpp build does not expose a quantization
+field from `/props`, so provenance records `Q4_K_M` from the frozen served
+alias while the launcher independently enforces the complete GGUF SHA-256.
+The second launch runs the complete client
 compatibility suite and only then runs the one-seed paired explicit-workflow
 task gate.
 

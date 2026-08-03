@@ -33,7 +33,6 @@ def _endpoint_payloads() -> tuple[dict[str, Any], dict[str, Any]]:
     props = {
         "model_path": f"/models/snapshots/{revision}/model-q4.gguf",
         "model_alias": "org/model:Q4",
-        "model_ftype": "Q4_K - Medium",
         "chat_template": "{{ messages }}",
         "chat_template_caps": {"supports_tools": True},
         "build_info": "b100-test",
@@ -380,7 +379,6 @@ def test_qwen27b_runtime_attestation_enforces_preregistered_serve_contract(
     props.update(
         {
             "model_alias": model_name,
-            "model_ftype": "Q4_K - Medium",
             "total_slots": 2,
             "endpoint_metrics": True,
             "endpoint_slots": True,
@@ -429,7 +427,6 @@ def test_qwen27b_runtime_attestation_rejects_operating_point_drift(
     props.update(
         {
             "model_alias": model_name,
-            "model_ftype": "Q4_K - Medium",
             "total_slots": 2,
             "endpoint_metrics": True,
             "endpoint_slots": True,

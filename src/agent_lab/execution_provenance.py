@@ -293,7 +293,7 @@ def _attest_llama_cpp_runtime(
         "artifact_name": Path(model_path).name,
         "revision": revision_match.group(1),
         "format": (served.get("details") or {}).get("format", "gguf"),
-        "quantization": _required_string(props, "model_ftype"),
+        "quantization": _declared_quantization(model, props),
         "size_bytes": _required_int(meta, "size"),
         "parameter_count": _required_int(meta, "n_params"),
     }
@@ -974,6 +974,16 @@ def _required_string(payload: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"runtime attestation field {key} is missing")
     return value
+
+
+def _declared_quantization(model: ModelProfile, props: dict[str, Any]) -> str:
+    endpoint_value = props.get("model_ftype")
+    if isinstance(endpoint_value, str) and endpoint_value:
+        return endpoint_value
+    _, separator, alias_suffix = model.name.rpartition(":")
+    if separator and re.fullmatch(r"(?:IQ|Q)\d[A-Z0-9_]*", alias_suffix, re.IGNORECASE):
+        return alias_suffix
+    raise ValueError("runtime attestation could not determine the declared quantization")
 
 
 def _required_int(payload: dict[str, Any], key: str) -> int:
