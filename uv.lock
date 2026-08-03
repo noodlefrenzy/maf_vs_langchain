@@ -2,6 +2,10 @@ version = 1
 revision = 3
 requires-python = "==3.12.*"
 
+[options]
+exclude-newer = "2026-07-31T03:34:11Z"
+exclude-newer-span = "PT72H"
+
 [[package]]
 name = "agent-framework-field-lab"
 version = "0.1.0"

@@ -24,6 +24,9 @@ dev = [
   "ruff>=0.14,<1",
 ]
 
+[tool.uv]
+exclude-newer = "72 hours"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_lab"]
 

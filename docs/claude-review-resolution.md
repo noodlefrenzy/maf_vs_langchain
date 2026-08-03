@@ -52,6 +52,11 @@ harness result requires a new pair under the current
 | T-3 | Every identified nested `uv run` test/probe uses `--no-sync`. |
 | T-4 | CI enforces branch coverage with a 55% floor (60% at introduction); coverage artifacts and mypy cache paths are ignored; GitHub Actions are commit-SHA pinned. |
 
+The follow-up supply-chain gate is also mechanical: all four uv projects apply
+a rolling 72-hour `exclude-newer` cooldown, every locked registry artifact's
+upload time is audited fail-closed, and every dependency-installing CI job
+depends on that audit.
+
 ## Documentation and methodology
 
 | Finding | Resolution |
@@ -81,8 +86,12 @@ implemented. Current milestone status is:
    completed successfully at 0.916667 while LangChain failed its evidence gate.
    The unrestricted and five-seed profiles remain unmeasured.
 3. The corrected Qwen3.5-9B 32K gate at `bb61e34` produced one successful
-   LangGraph run (0.916667) and one valid MAF evidence-gate failure. Qwen3.5-9B
-   therefore remains a fit-check model and the larger pilot was not promoted.
+   LangGraph run (0.916667) and one valid MAF evidence-gate failure. The pinned
+   Qwen3.5-35B-A3B GPTQ-Int4 follow-up then loaded at both 16K/8 GiB offload and
+   8K/2 GiB offload, but the pinned vLLM stack failed engine initialization
+   when its Triton kernels received CPU tensors. No-offload loading cannot
+   preserve useful KV-cache headroom on this host, so Qwen3.5-9B remains the
+   fit-check model and no larger pilot profile was promoted.
 4. The symmetric canonical/paraphrase-A and zero/one/two-turn harness ablation
    controls and profiles are implemented and protocol-probed, but unmeasured.
 5. Production-intended checkpoint backends remain unselected and unvalidated;
@@ -92,3 +101,6 @@ implemented. Current milestone status is:
 6. The fail-closed offline builder successfully revalidated the available
    clean-source smoke and Qwen-gate indices. A final powered paired report and
    component-discrimination analysis still require an accepted model and pilot.
+7. The rolling 72-hour dependency quarantine is now enforced in every uv
+   project and as a prerequisite CI job. It covers direct and transitive locked
+   registry artifacts without adding package or index exclusions.

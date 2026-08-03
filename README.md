@@ -43,6 +43,11 @@ uv run agent-lab config validate configs/experiments/smoke.toml
 uv run pytest
 ```
 
+Dependency changes must use the rolling 72-hour release quarantine documented
+in [`docs/dependency-quarantine.md`](docs/dependency-quarantine.md). The
+project-owned lock command covers all four isolated uv projects and CI verifies
+the policy before installing repository dependencies.
+
 Framework runners and the MCP service intentionally use separate projects:
 
 ```text
