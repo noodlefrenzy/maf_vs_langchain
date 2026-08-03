@@ -100,9 +100,9 @@ the limitations slides intact.
    retry behavior changed operational outcomes.
 4. **Neither stack removes the need for external controls.** Budgets,
    provenance, approvals, and evaluation must fail closed.
-5. **No winner claim yet.** The pilots have only five seed clusters, the
-   unrestricted baseline is pending, the harness gate is blocked, and there is
-   no powered measured study.
+5. **No winner claim yet.** The single-agent cohorts have only five seed
+   clusters, the unrestricted ceiling was nonbinding, the harness gate is
+   blocked, and there is no powered measured study.
 
 ---
 
@@ -597,8 +597,8 @@ engineering risks—not to select a universal winner.
 
 # Recommended next phase
 
-1. Keep the harness replacement pilot blocked, retain the completed explicit
-   and compute-matched single-agent pilots, and run the unrestricted baseline.
+1. Keep the harness replacement pilot blocked and retain the completed
+   explicit, compute-matched single-agent, and unrestricted sensitivity pilots.
 2. Execute the frozen provenance-correction, prompt-paraphrase, no-review, and
    no-compaction profiles.
 3. Repeat the Cosmos restart gate against the intended Azure account and

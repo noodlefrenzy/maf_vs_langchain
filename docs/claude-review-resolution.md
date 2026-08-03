@@ -100,7 +100,13 @@ implemented. Current milestone status is:
    MAF succeeded on 3/15 runs with six operational failures; LangChain succeeded
    on 11/15 with no operational failures. The seed-cluster risk difference is
    0.533333 in LangChain's direction with exact sign-flip `p = 0.25`; this is
-   descriptive pilot evidence. The unrestricted profile remains unmeasured.
+   descriptive pilot evidence. The clean unrestricted pilot at `f600117`
+   retained the same 3/15 versus 11/15 aggregate and seed-cluster statistics,
+   with six MAF and one LangChain operational failures. Its observed maxima of
+   10 model calls, 22 tool calls, and 3,981 output tokens stayed below the lower
+   compute-matched ceilings and exactly matched that cohort's maxima, so the
+   higher ceiling did not create an effective compute contrast or rescue the
+   frozen-gate failures.
 3. The corrected Qwen3.5-9B 32K gate at `bb61e34` produced one successful
    LangGraph run (0.916667) and one valid MAF evidence-gate failure. A second
    clean gate at `6bc7815` reversed the split: MAF succeeded at 0.916667 while

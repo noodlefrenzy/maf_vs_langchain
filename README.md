@@ -104,10 +104,12 @@ successful lanes; that exact operating point is promoted to the five-seed
 pilots. The clean second 9B pair also validates the versioned per-call,
 host/GPU, and control-plane ledgers documented in the
 [native run-observability validation](docs/research/run-observability-validation.md).
-A later five-seed, three-repetition compute-matched single-agent pilot retained
-all 30 valid bundles and 15 inference-eligible pairs: MAF succeeded on 3/15
-runs and LangChain on 11/15. The five-seed cluster result is descriptive and the
-unrestricted baseline remains pending; see the
+Later five-seed, three-repetition compute-matched and unrestricted single-agent
+pilots each retained all 30 valid bundles and 15 inference-eligible pairs. Both
+produced the same aggregate task result: MAF succeeded on 3/15 runs and
+LangChain on 11/15. The unrestricted cohort's observed maxima remained below
+the lower compute-matched ceilings, so it supplies no budget-rescue evidence.
+The five-seed cluster results are descriptive; see the
 [single-agent pilot record](docs/research/qwen35-27b-single-agent-pilots.md).
 A subsequent balanced 16-launch tracing ablation measured a consistent fixed
 control-path cost: median paired increases of 134 ms for MAF and 423 ms for
