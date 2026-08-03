@@ -369,14 +369,19 @@ seed and repetition and produces:
 
 - outcome and safety tables;
 - paired-difference plots with confidence intervals;
-- latency and resource flame/timeline views;
-- tool-use Sankey/sequence summaries;
-- coordination topology and duplicate-work measures;
+- task/control, provider, token, host/GPU, and trace effect tables;
+- paired raw-point plots for latency, token/call, tool-use, recovery,
+  coordination, resource, and trace-completeness measures;
+- observed-actor and maximum client-in-flight coordination measures;
 - fault-injection/recovery analysis;
 - trace completeness matrix;
-- links back to events, artifacts, checkpoints, and native traces.
+- portable links to redacted evidence and checksummed private events,
+  artifacts, checkpoints, and native traces.
 
 Reports are generated from frozen bundles and never query live external data.
+Each new owner-only report directory retains a full private bundle snapshot and
+a redacted, portable audit projection as described in
+[evidence-retention.md](evidence-retention.md).
 
 ## 12. Safety and data handling
 

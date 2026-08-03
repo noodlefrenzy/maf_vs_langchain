@@ -17,6 +17,7 @@ build/
 
 # Runtime state and downloaded/private data.
 runs/
+reports/
 data/private/
 infra/phoenix/data/
 .cache/

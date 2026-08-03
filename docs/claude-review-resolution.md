@@ -100,8 +100,13 @@ implemented. Current milestone status is:
    now makes that boundary machine-readable with `production_ready = false`
    and rejects any production-ready claim that is not resumable and restart-safe.
 6. The fail-closed offline builder successfully revalidated the available
-   clean-source smoke and Qwen-gate indices. A final powered paired report and
-   component-discrimination analysis still require an accepted model and pilot.
+   clean-source smoke and Qwen-gate indices. Its v2 output now reports task,
+   token, provider-timing, client-concurrency, host/GPU, control, and trace
+   effects and creates portable redacted evidence plus a checksummed owner-only
+   copy of every raw bundle. The archive no longer depends on workstation paths;
+   transfer and publication rules are documented in `evidence-retention.md`.
+   A final powered paired report and component-discrimination analysis still
+   require an accepted model and pilot.
 7. The rolling 72-hour dependency quarantine is now enforced in every uv
    project and as a prerequisite CI job. It covers direct and transitive locked
    registry artifacts without adding package or index exclusions.

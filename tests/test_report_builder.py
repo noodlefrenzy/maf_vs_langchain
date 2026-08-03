@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import stat
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
+from agent_lab.bundle_validation import BundleValidationResult, PairValidationResult
 from agent_lab.contract_bundle import sha256_payload
 from agent_lab.contracts import Budget, FrameworkLane, ModelProfile, RunManifest, RunTerminal
 from agent_lab.evaluator import ComponentScore, DeterministicScore
@@ -69,6 +71,13 @@ def _score(case_id: str, total: float, containment: float) -> DeterministicScore
                 weighted_score=0.2,
                 reasons=["test"],
             ),
+            ComponentScore(
+                name="recovery_verification",
+                weight=0.1,
+                raw_score=1.0 if total >= 0.85 else 0.0,
+                weighted_score=0.1 if total >= 0.85 else 0.0,
+                reasons=["test"],
+            ),
         ],
     )
 
@@ -107,6 +116,94 @@ def _bundle(
             deterministic_score.model_dump_json(),
             encoding="utf-8",
         )
+    metrics = bundle / "metrics"
+    metrics.mkdir()
+    call_offset = 0.5 if lane is FrameworkLane.LANGGRAPH else 0.0
+    model_records = [
+        {
+            "record_type": "model_call",
+            "actor": f"actor-{index % 2}",
+            "started_monotonic_ns": start,
+            "finished_monotonic_ns": finish,
+            "total_latency_seconds": (finish - start) / 1_000_000_000,
+            "queue_seconds": 0.1 + call_offset,
+            "time_to_first_token_seconds": 0.2 + call_offset,
+            "generation_seconds": 0.3 + call_offset,
+            "tokens": {
+                "input": 100,
+                "output": 100,
+                "cached_input": 10,
+                "reasoning": None,
+            },
+        }
+        for index, (start, finish) in enumerate(
+            (
+                (1_000_000_000, 3_000_000_000),
+                (2_000_000_000, 4_000_000_000),
+                (5_000_000_000, 6_000_000_000),
+                (7_000_000_000, 8_000_000_000),
+            )
+        )
+    ]
+    model_records.append(
+        {
+            "record_type": "model_metrics_summary",
+            "task_latency_seconds": elapsed - 1,
+        }
+    )
+    (metrics / "model.jsonl").write_text(
+        "".join(json.dumps(record) + "\n" for record in model_records),
+        encoding="utf-8",
+    )
+    host_records = [
+        {
+            "record_type": "resource_sample",
+            "host": {
+                "cpu_utilization_percent": 20 + call_offset,
+                "memory_used_mib": 1_000 + call_offset,
+            },
+            "gpu": {
+                "devices": [
+                    {
+                        "utilization_percent": 80 + call_offset,
+                        "memory_used_mib": 20_000 + call_offset,
+                        "power_watts": 300 + call_offset,
+                        "temperature_celsius": 70 + call_offset,
+                    }
+                ]
+            },
+        },
+        {
+            "record_type": "sampling_summary",
+            "sample_count": 1,
+            "mean_sampling_overhead_ms": 40 + call_offset,
+            "max_cadence_error_ms": 5 + call_offset,
+        },
+    ]
+    (metrics / "host.jsonl").write_text(
+        "".join(json.dumps(record) + "\n" for record in host_records),
+        encoding="utf-8",
+    )
+    (metrics / "control.jsonl").write_text(
+        json.dumps(
+            {
+                "record_type": "control_phase",
+                "phase": "control_plane_total",
+                "duration_seconds": elapsed,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (bundle / "native" / "trace-link.json").write_text(
+        json.dumps(
+            {
+                "span_count": 20 + int(call_offset),
+                "completeness": {"ratio": 0.9 + call_offset / 10},
+            }
+        ),
+        encoding="utf-8",
+    )
     return bundle
 
 
@@ -172,7 +269,36 @@ def test_report_revalidates_pairs_retains_failures_and_writes_outputs(
 
     def valid_pair(left: Path, right: Path, *, mark: bool):
         validations.append((left, right, mark))
-        return SimpleNamespace(valid=True, track="explicit_workflow", findings=[])
+        left_manifest = RunManifest.model_validate_json(
+            (left / "manifest.json").read_text(encoding="utf-8")
+        )
+        right_manifest = RunManifest.model_validate_json(
+            (right / "manifest.json").read_text(encoding="utf-8")
+        )
+        left_result = BundleValidationResult(
+            bundle_path=str(left),
+            run_id=left_manifest.run_id,
+            valid=True,
+            inference_status="eligible",
+            findings=[],
+        )
+        right_result = BundleValidationResult(
+            bundle_path=str(right),
+            run_id=right_manifest.run_id,
+            valid=True,
+            inference_status="eligible",
+            findings=[],
+        )
+        return PairValidationResult(
+            left_bundle=str(left),
+            right_bundle=str(right),
+            valid=True,
+            inference_status="eligible",
+            track="explicit_workflow",
+            findings=[],
+            left=left_result,
+            right=right_result,
+        )
 
     monkeypatch.setattr("agent_lab.report_builder.validate_pair", valid_pair)
 
@@ -193,6 +319,12 @@ def test_report_revalidates_pairs_retains_failures_and_writes_outputs(
     assert track.continuous_effects["total_score"].pairs_total == 2
     assert track.continuous_effects["total_score"].pairs_analyzed == 1
     assert track.continuous_effects["elapsed_seconds"].pairs_analyzed == 2
+    assert track.continuous_effects["provider_queue_seconds"].pairs_analyzed == 2
+    assert track.continuous_effects["gpu_peak_memory_mib"].pairs_analyzed == 2
+    assert track.continuous_effects["trace_completeness"].pairs_analyzed == 2
+    assert track.paired_points[0].left.max_in_flight_model_calls == 2
+    assert track.paired_points[0].left.cached_input_tokens == 40
+    assert track.paired_points[0].left.reasoning_tokens is None
     assert (
         track.component_discrimination["maf_workflow"][
             "correct_and_effective_containment"
@@ -201,10 +333,55 @@ def test_report_revalidates_pairs_retains_failures_and_writes_outputs(
     )
 
     json_path, html_path = write_paired_report(report, tmp_path / "report")
-    assert json.loads(json_path.read_text())["schema_version"] == "paired-report/v1"
+    assert len(validations) == 4
+    report_payload = json.loads(json_path.read_text())
+    assert report_payload["schema_version"] == "paired-report/v2"
+    assert all(
+        not point[side]["bundle"].startswith(str(tmp_path))
+        for point in report_payload["tracks"]["explicit_workflow"]["paired_points"]
+        for side in ("left", "right")
+    )
+    evidence_index = json.loads((tmp_path / "report" / "evidence-index.json").read_text())
+    assert evidence_index["schema_version"] == "agent-lab.report-evidence/1.0.0"
+    assert len(evidence_index["runs"]) == 4
+    assert (tmp_path / "report" / "evidence-index.sha256").is_file()
+    assert stat.S_IMODE((tmp_path / "report").stat().st_mode) == 0o700
+    assert stat.S_IMODE(json_path.stat().st_mode) == 0o600
+    expected_index_digest = hashlib.sha256(
+        (tmp_path / "report" / "evidence-index.json").read_bytes()
+    ).hexdigest()
+    assert (tmp_path / "report" / "evidence-index.sha256").read_text().split()[0] == (
+        expected_index_digest
+    )
+    first_run = evidence_index["runs"][0]
+    assert (tmp_path / "report" / first_run["private_bundle_path"] / "manifest.json").is_file()
+    assert all(
+        not entry["path"].startswith("/")
+        for run in evidence_index["runs"]
+        for entry in run["source_file_inventory"]
+    )
+    for path in (tmp_path / "report" / "evidence").rglob("*"):
+        if path.is_file():
+            assert str(tmp_path) not in path.read_text(encoding="utf-8")
     assert "operational failures remain in denominators" in html_path.read_text()
+    assert "Task latency (seconds) paired plot" in html_path.read_text()
+    assert "Recovery score paired plot" in html_path.read_text()
     with pytest.raises(FileExistsError):
         write_paired_report(report, tmp_path / "report")
+
+    original_index = index_path.read_text(encoding="utf-8")
+    index_path.write_text(original_index + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="experiment index changed"):
+        write_paired_report(report, tmp_path / "index-race")
+    assert not (tmp_path / "index-race").exists()
+    index_path.write_text(original_index, encoding="utf-8")
+
+    source_bundle = Path(track.paired_points[0].left.source_bundle)
+    manifest_path = source_bundle / "manifest.json"
+    manifest_path.write_text(manifest_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="run bundle changed"):
+        write_paired_report(report, tmp_path / "bundle-race")
+    assert not (tmp_path / "bundle-race").exists()
 
 
 def test_report_rejects_protocol_probe_indices(tmp_path: Path) -> None:

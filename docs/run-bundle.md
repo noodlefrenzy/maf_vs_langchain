@@ -179,12 +179,21 @@ event are retained as unattested partial artifacts and excluded from scoring.
   intervals, and token aggregates reconcile with the terminal/event stream;
 - artifact and native-evidence digests;
 
-`agent-lab report build --index <native-index> ...` is read-only over evidence.
-It re-runs individual and pair validation, refuses protocol-probe or reused
-bundles, reconstructs left/right order from the frozen pair preflight, and
-writes new JSON/HTML outputs exclusively. Operational failures remain in task
-success and reliability denominators; score effects use only pairs with two
-valid scorer outputs and report that analyzed-pair count explicitly.
+`agent-lab report build --index <native-index> ...` is read-only over source
+evidence. It re-runs individual and pair validation, refuses protocol-probe or
+reused bundles, reconstructs left/right order from the frozen pair preflight,
+and writes a new owner-only output directory exclusively. Operational failures
+remain in task-success and reliability denominators; score effects use only
+pairs with two valid scorer outputs and report that analyzed-pair count
+explicitly. Other paired effects cover task/control latency, model/tool calls,
+reported token dimensions, provider timing, client concurrency, host/GPU
+metrics, and native trace coverage, retaining explicit missingness.
+
+The report output contains portable relative links, redacted experiment/run
+evidence, fresh validation results, and a full `private-runs/` copy. A versioned
+`evidence-index.json` records every retained and private file's SHA-256, and its
+sidecar authenticates the index. See [evidence-retention.md](evidence-retention.md)
+for the publication boundary and durable-storage procedure.
 - strict lexical artifact paths (one JSON filename directly under
   `artifacts/`, with no traversal or nested path segments);
 - trace-link identity, local span-ledger digest, event correlation, and

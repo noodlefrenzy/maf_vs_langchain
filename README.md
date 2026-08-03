@@ -242,9 +242,17 @@ uv run agent-lab report build \
 
 The command revalidates every individual bundle and pair, preserves the frozen
 left/right lane order, retains operational failures in denominators, and emits
-both `paired-report.json` and a self-contained `paired-report.html`. Continuous
-effects include deterministic paired-bootstrap intervals; binary task success
-includes discordant counts and an exact McNemar result; scorer components report
-their observed discrimination per lane.
+portable `paired-report/v2` JSON plus self-contained HTML. Paired effects cover
+scores, task/control latency, calls, all reported token dimensions, provider
+queue/TTFT/generation time, client concurrency, GPU/host samples, and native
+trace coverage. Continuous effects include deterministic paired-bootstrap
+intervals; binary task success includes discordant counts and an exact McNemar
+result; scorer components report their observed discrimination per lane.
+
+The new owner-only output directory also contains redacted source/run evidence,
+fresh individual and pair validations, a complete private copy of each source
+bundle, and a SHA-256 inventory. It is independent of the ignored `runs/` tree
+after transfer to access-controlled durable storage. Do not publish the
+`private-runs/` subtree; follow [the retention procedure](docs/evidence-retention.md).
 
 No license is granted by this private repository unless one is added later.
