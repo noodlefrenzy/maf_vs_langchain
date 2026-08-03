@@ -189,13 +189,13 @@ def test_native_runner_protocol_probe_can_disable_tracing(tmp_path: Path) -> Non
         (
             "runners/maf",
             "maf_runner.protocol_runner",
-            {"maf_workflow", "maf_harness"},
+            {"maf_workflow", "maf_harness", "maf_single_agent"},
             "maf_workflow",
         ),
         (
             "runners/langgraph",
             "langgraph_runner.protocol_runner",
-            {"langgraph", "deep_agents"},
+            {"langgraph", "deep_agents", "langchain_single_agent"},
             "langgraph",
         ),
     ],
@@ -238,3 +238,47 @@ def test_native_runner_describes_supported_lanes(
     assert payload["checkpoint"][restart_lane]["restart_safe"] is True
     unavailable = expected_lanes - {restart_lane}
     assert all(payload["checkpoint"][lane]["resumable"] is False for lane in unavailable)
+
+
+@pytest.mark.parametrize("capture_sensitive", [False, True])
+def test_langchain_trace_output_capture_honors_sensitive_flag(
+    capture_sensitive: bool,
+) -> None:
+    import subprocess
+
+    script = f"""
+import json
+from openinference.instrumentation.langchain import LangChainInstrumentor
+from langgraph_runner.protocol_runner import _instrument_langchain
+
+captured = {{}}
+LangChainInstrumentor.instrument = lambda self, **kwargs: captured.update(kwargs)
+LangChainInstrumentor.uninstrument = lambda self: None
+_instrument_langchain(None, True, {capture_sensitive!r})
+config = captured["config"]
+print(json.dumps({{
+    "hide_outputs": config.hide_outputs,
+    "hide_output_messages": config.hide_output_messages,
+    "hide_output_text": config.hide_output_text,
+    "hide_choices": config.hide_choices,
+}}))
+"""
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(REPOSITORY_ROOT / "runners/langgraph"),
+            "--no-sync",
+            "python",
+            "-c",
+            script,
+        ],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert set(json.loads(result.stdout).values()) == {not capture_sensitive}

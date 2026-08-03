@@ -110,6 +110,25 @@ credit, but no containment or recovery credit. Both bundles and the pair were
 provenance-valid. An operational summary status of `ok` must not be confused
 with `task_success`.
 
+### Single-agent structured output also needs a discovery phase
+
+Attaching the baseline proposal schema to the initial primitive-agent turn can
+produce a valid-looking answer before any MCP call occurs. Both single-agent
+adapters therefore run the same unstructured discovery phase first, require
+real calls through at least two capability-scoped endpoints, and only then run
+a tool-disabled structured synthesis turn with the exact observed evidence
+allowlist. A bounded repair prompt can request one of the still-unused sources;
+schema validity alone never satisfies the discovery or provenance gates. Each
+phase also has an eight-dispatch model-call ceiling; this keeps a tool-seeking
+primitive agent from reaching a framework-specific graph recursion failure
+before the shared outer budget can report a meaningful outcome.
+
+The `incident-lab-single-agent-compat` command exercises this path in twin
+worlds and uses the same fixture-truth approval edit as the explicit workflow
+compatibility probes. It uses greedy sampling to make the positive-path check
+repeatable, asserts per-role versus protocol usage equality, and is
+intentionally labeled non-measurement evidence.
+
 ## Approval protocol boundary
 
 The simulator, not the runner, creates approval tokens. A protocol message that
@@ -331,7 +350,7 @@ executing tools, then return one response whose usage is aggregated across the
 whole loop. Instrumenting that public method therefore counts agent invocations,
 not model dispatches. In the seed-42 stabilization smoke this produced only four
 to six normalized model calls for MAF Harness runs whose native ledgers contained
-25 to 34 LLM spans.
+22 to 34 LLM spans (34, 25, 29, and 22 at order seeds 1738–1741).
 
 The harness adapter installs a MAF `ChatMiddleware` instead. That layer executes
 below `FunctionInvocationLayer`, immediately around each provider request. It

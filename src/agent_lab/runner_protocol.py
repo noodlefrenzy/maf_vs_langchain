@@ -120,7 +120,7 @@ class PreparedRun(ProtocolModel):
 
 
 class RunnerUsage(ProtocolModel):
-    """Cumulative counters emitted before the corresponding dispatch."""
+    """Cumulative counters; calls are reserved pre-dispatch, tokens post-response."""
 
     model_calls: int = Field(default=0, ge=0)
     tool_calls: int = Field(default=0, ge=0)

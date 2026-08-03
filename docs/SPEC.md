@@ -8,13 +8,15 @@ Research cutoff: 2026-07-31
 
 ## 1. Purpose
 
-Build a reproducible field lab that answers two bounded questions:
+Build a reproducible field lab that answers three bounded questions:
 
 1. How does Microsoft Agent Framework Workflows compare with a custom
    LangGraph when both implement the same explicit multi-agent graph?
 2. How does Microsoft Agent Framework Harness compare with Deep Agents when
    both receive the same long-horizon task, specialist roles, tools, model,
    context budget, and stopping rules?
+3. How do the multi-agent tracks compare with matched one-agent baselines, and
+   do any outcome gains survive equal compute ceilings?
 
 The result is a decision record about engineering tradeoffs on this machine
 and this workload. It is not a universal framework leaderboard.
@@ -80,9 +82,12 @@ the task. Evidence exists only behind MCP tools.
 | Change investigator | Correlate deploys, config, feature flags, and schemas with symptom onset | Read-only change history and diffs |
 | Reliability reviewer | Find policy/runbook constraints, challenge causal claims, test whether mitigation is reversible | Read-only runbooks and review resources |
 
-No agent receives all evidence tools. Capability separation is enforced by MCP
-catalog/credentials, not only by prompts. The commander must obtain and combine
-findings from other roles.
+In the two multi-agent tracks, no agent receives all evidence tools. Capability
+separation is enforced by MCP catalog/credentials, not only by prompts. The
+commander must obtain and combine findings from other roles. The explicit
+single-agent baseline is the exception: one commander receives a duplicate-free
+union routed through the same capability-scoped credentials, and source roles
+label provenance rather than separate agents.
 
 ### 5.3 Explicit workflow topology
 
@@ -122,11 +127,14 @@ budget and completion schema.
 
 The initial generator supports:
 
-- retry amplification that makes a downstream service look causal;
-- client connection leakage with a healthy database;
-- regionally inconsistent feature flags;
-- producer/consumer schema drift with a healthy broker;
-- a cache TTL regression that makes the origin look under-provisioned.
+- retry amplification that makes a downstream service look causal
+  (`retry_storm`);
+- client connection leakage with a healthy database
+  (`connection_pool_exhaustion`);
+- regionally inconsistent feature flags (`feature_flag_mismatch`);
+- producer/consumer schema drift with a healthy broker (`schema_drift`);
+- a cache TTL regression that makes the origin look under-provisioned
+  (`cache_ttl_regression`).
 
 Each seed selects surface details, a decoy, evidence placement, and a
 replayable transient-failure cadence. Later generators may add delayed metrics,
@@ -390,7 +398,7 @@ Reports are generated from frozen bundles and never query live external data.
 - deterministic evaluator;
 - one seed end to end with approval and recovery.
 
-### Phase 2 — all four lanes
+### Phase 2 — all matched lanes
 
 - MAF Harness and Deep Agents;
 - single-agent and scripted baselines;
@@ -410,7 +418,8 @@ Reports are generated from frozen bundles and never query live external data.
 The reviewer should decide:
 
 1. whether incident response is the right primary task;
-2. whether the four-lane, two-track framing answers the intended question;
+2. whether the three-track framing (four multi-agent lanes plus two
+   single-agent lanes) answers the intended question;
 3. whether role-scoped MCP access is desirable or too constraining;
 4. whether Qwen3.5-9B is acceptable as the fit-check model before the quality
    tier is characterized;

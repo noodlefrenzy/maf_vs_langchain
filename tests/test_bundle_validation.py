@@ -384,6 +384,16 @@ def test_matched_pair_passes_with_lane_specific_dependency_locks(
     assert (right / "pair-validation.json").is_file()
 
 
+def test_single_agent_baseline_pair_is_a_valid_matched_track(tmp_path: Path) -> None:
+    left = _cancelled_bundle(tmp_path / "left", FrameworkLane.MAF_SINGLE_AGENT)
+    right = _cancelled_bundle(tmp_path / "right", FrameworkLane.LANGCHAIN_SINGLE_AGENT)
+
+    result = validate_pair(left, right)
+
+    assert result.valid is True
+    assert result.track == "single_agent_baseline"
+
+
 def test_pair_validation_accepts_one_or_both_incomplete_operational_runs(
     tmp_path: Path,
 ) -> None:

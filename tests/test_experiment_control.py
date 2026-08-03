@@ -147,6 +147,13 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
         preflight["workflow_contract_sha256"]
         == contract_bundle_hashes()["workflow_contract_sha256"]
     )
+    assert (
+        preflight["harness_contract_sha256"] == contract_bundle_hashes()["harness_contract_sha256"]
+    )
+    assert (
+        preflight["baseline_contract_sha256"]
+        == contract_bundle_hashes()["baseline_contract_sha256"]
+    )
     execution_provenance = preflight["held_constants"]["execution_provenance"]
     assert execution_provenance["execution_mode"] == "protocol_probe"
     assert execution_provenance["source_worktree"]["measurement_eligible"] is False
@@ -287,6 +294,28 @@ def test_protocol_probe_refuses_to_overwrite_index(tmp_path: Path) -> None:
     second = _run_probe(experiment, runs_dir, order_seed=991)
     assert second.returncode != 0
     assert "already exists" in second.stderr
+
+
+def test_single_agent_protocol_probe_uses_matched_isolated_worlds(tmp_path: Path) -> None:
+    experiment = _experiment(tmp_path / "experiment.toml")
+    body = experiment.read_text(encoding="utf-8").replace(
+        'lanes = ["maf_workflow", "langgraph"]',
+        'lanes = ["maf_single_agent", "langchain_single_agent"]',
+    )
+    experiment.write_text(body, encoding="utf-8")
+
+    result = _run_probe(experiment, tmp_path / "runs", order_seed=733)
+
+    assert result.returncode == 0, result.stderr
+    summary = json.loads(result.stdout)
+    assert {run["lane"] for run in summary["runs"]} == {
+        "maf_single_agent",
+        "langchain_single_agent",
+    }
+    preflight = summary["blocks"][0]["contract_preflights"]["single_agent_baseline"]
+    assert preflight["normalized_topology"] == normalized_topology_for_lane(
+        FrameworkLane.MAF_SINGLE_AGENT
+    )
 
 
 def test_native_workflow_mode_requires_one_matched_track(tmp_path: Path) -> None:

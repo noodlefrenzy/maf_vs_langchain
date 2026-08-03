@@ -9,6 +9,7 @@ from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from agent_lab.config import load_model_profile
@@ -29,6 +30,18 @@ _RUNNERS = {
 }
 
 ServerKind = Literal["openai_compatible", "llama_cpp", "vllm"]
+
+
+def _validate_loopback_base_url(base_url: str) -> None:
+    parsed = urlsplit(base_url)
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError("model compatibility endpoint must be an HTTP loopback URL")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError(
+            "model compatibility endpoint cannot contain credentials, query, or fragment"
+        )
+    if parsed.path.rstrip("/") != "/v1":
+        raise ValueError("model compatibility endpoint path must be /v1")
 
 
 def _advertised_model_ids(payload: object) -> list[str]:
@@ -201,6 +214,8 @@ def run_suite(
     """Run both native clients against the stub or a supplied loopback endpoint."""
 
     stub_context = CompatibilityStub() if base_url is None else nullcontext(None)
+    if base_url is not None:
+        _validate_loopback_base_url(base_url)
     with stub_context as stub:
         effective_base_url = stub.base_url if stub is not None else str(base_url)
         endpoint_inventory = (

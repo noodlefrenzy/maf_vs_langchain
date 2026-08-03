@@ -11,6 +11,8 @@ dependencies = [
   "agent-framework-core>=1.12,<2",
   "agent-framework-openai>=1.11,<2",
   "agent-framework-orchestrations>=1.0,<2",
+  # Exact beta pin: the tools package has date-coded prereleases and no stable
+  # API-compatible range for the accepted MAF runner cohort.
   "agent-framework-tools==1.0.0b260721",
   "mcp>=1.24,<2",
   "opentelemetry-exporter-otlp-proto-http>=1.39,<2",

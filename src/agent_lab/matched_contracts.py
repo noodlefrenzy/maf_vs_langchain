@@ -35,6 +35,14 @@ _OPINIONATED_HARNESS_TOPOLOGY: dict[str, Any] = {
     "outer_stages": ["evidence_gate", "approval", "mitigation", "recovery_verification"],
 }
 
+_SINGLE_AGENT_BASELINE_TOPOLOGY: dict[str, Any] = {
+    "kind": "single_agent_baseline",
+    "agent": "incident_commander",
+    "delegation": False,
+    "source_capabilities": _SPECIALIST_ROLES,
+    "outer_stages": ["evidence_gate", "approval", "mitigation", "recovery_verification"],
+}
+
 
 def normalized_topology_for_lane(lane: FrameworkLane) -> dict[str, Any]:
     """Return a fresh framework-neutral topology snapshot for one lane."""
@@ -43,6 +51,8 @@ def normalized_topology_for_lane(lane: FrameworkLane) -> dict[str, Any]:
         return deepcopy(_EXPLICIT_WORKFLOW_TOPOLOGY)
     if lane in {FrameworkLane.MAF_HARNESS, FrameworkLane.DEEP_AGENTS}:
         return deepcopy(_OPINIONATED_HARNESS_TOPOLOGY)
+    if lane in {FrameworkLane.MAF_SINGLE_AGENT, FrameworkLane.LANGCHAIN_SINGLE_AGENT}:
+        return deepcopy(_SINGLE_AGENT_BASELINE_TOPOLOGY)
     raise ValueError(f"unsupported matched lane {lane.value}")
 
 
@@ -125,6 +135,8 @@ def preflight_pair_contract(
         "tool_schemas_sha256": expected_contract_hashes["tool_catalog_sha256"],
         "completion_schema_sha256": expected_contract_hashes["artifact_schemas_sha256"],
         "workflow_contract_sha256": expected_contract_hashes["workflow_contract_sha256"],
+        "harness_contract_sha256": expected_contract_hashes["harness_contract_sha256"],
+        "baseline_contract_sha256": expected_contract_hashes["baseline_contract_sha256"],
         "effective_request_policy": request_policy,
         "effective_request_policy_sha256": request_policy["policy_sha256"],
         "execution_provenance_sha256": left_execution["provenance_sha256"],

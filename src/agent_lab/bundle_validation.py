@@ -72,7 +72,9 @@ class PairValidationResult(BaseModel):
     right_bundle: str
     valid: bool
     inference_status: Literal["eligible", "invalid_provenance"]
-    track: Literal["explicit_workflow", "opinionated_harness"] | None = None
+    track: Literal["explicit_workflow", "opinionated_harness", "single_agent_baseline"] | None = (
+        None
+    )
     findings: list[ValidationFinding]
     left: BundleValidationResult
     right: BundleValidationResult
@@ -129,7 +131,9 @@ def validate_pair(
 
     left_manifest = _parse_manifest_file(Path(left.bundle_path))
     right_manifest = _parse_manifest_file(Path(right.bundle_path))
-    track: Literal["explicit_workflow", "opinionated_harness"] | None = None
+    track: Literal["explicit_workflow", "opinionated_harness", "single_agent_baseline"] | None = (
+        None
+    )
     if left_manifest is not None and right_manifest is not None:
         track = _validate_pair_manifests(left_manifest, right_manifest, findings)
         _validate_pair_trace_profiles(
@@ -1025,7 +1029,7 @@ def _validate_pair_manifests(
     left: RunManifest,
     right: RunManifest,
     findings: list[ValidationFinding],
-) -> Literal["explicit_workflow", "opinionated_harness"] | None:
+) -> Literal["explicit_workflow", "opinionated_harness", "single_agent_baseline"] | None:
     track = _pair_track(left.lane, right.lane)
     if track is None:
         _error(
@@ -1143,6 +1147,8 @@ def _pair_track(
         return "explicit_workflow"
     if lanes == {FrameworkLane.MAF_HARNESS, FrameworkLane.DEEP_AGENTS}:
         return "opinionated_harness"
+    if lanes == {FrameworkLane.MAF_SINGLE_AGENT, FrameworkLane.LANGCHAIN_SINGLE_AGENT}:
+        return "single_agent_baseline"
     return None
 
 

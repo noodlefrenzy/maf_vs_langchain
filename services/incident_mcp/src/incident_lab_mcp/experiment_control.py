@@ -44,15 +44,25 @@ _TRACK_PAIRS = (
         FrameworkLane.MAF_HARNESS,
         FrameworkLane.DEEP_AGENTS,
     ),
+    (
+        "single_agent_baseline",
+        FrameworkLane.MAF_SINGLE_AGENT,
+        FrameworkLane.LANGCHAIN_SINGLE_AGENT,
+    ),
 )
 _RUNNER_PROJECT = {
     FrameworkLane.MAF_WORKFLOW: ("runners/maf", "maf_runner.protocol_runner"),
     FrameworkLane.MAF_HARNESS: ("runners/maf", "maf_runner.protocol_runner"),
+    FrameworkLane.MAF_SINGLE_AGENT: ("runners/maf", "maf_runner.protocol_runner"),
     FrameworkLane.LANGGRAPH: (
         "runners/langgraph",
         "langgraph_runner.protocol_runner",
     ),
     FrameworkLane.DEEP_AGENTS: (
+        "runners/langgraph",
+        "langgraph_runner.protocol_runner",
+    ),
+    FrameworkLane.LANGCHAIN_SINGLE_AGENT: (
         "runners/langgraph",
         "langgraph_runner.protocol_runner",
     ),

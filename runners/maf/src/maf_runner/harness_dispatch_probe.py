@@ -16,7 +16,7 @@ from agent_lab.model_compat_contracts import (
     fixture_prompt,
 )
 from agent_lab.model_request_policy import maf_request_options
-from maf_runner.harness_lane import _InstrumentedChatClient
+from maf_runner.chat_telemetry import InstrumentedChatClient
 
 
 @tool(description="Look up an incident by identifier.")
@@ -65,10 +65,12 @@ class _RecordingTelemetry:
 async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, Any]:
     telemetry = _RecordingTelemetry(model_call_limit)
     profile = compatibility_model_profile(base_url, MODEL_NAME)
-    client = _InstrumentedChatClient(
+    client = InstrumentedChatClient(
         actor="dispatch_probe",
         profile=profile,
         telemetry=telemetry,
+        framework="maf-harness-probe",
+        model_call_limit=model_call_limit or 6,
     )
     agent = Agent(client, name="dispatch_probe", tools=[lookup_incident])
     response = None

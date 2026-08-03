@@ -67,11 +67,11 @@ async def check(url: str, token: str) -> dict[str, object]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default=os.getenv("INCIDENT_LAB_MCP_URL"))
-    parser.add_argument("--token", default=os.getenv("INCIDENT_LAB_MCP_TOKEN"))
     args = parser.parse_args()
-    if not args.url or not args.token:
-        parser.error("URL and token are required via arguments or environment")
-    print(json.dumps(asyncio.run(check(args.url, args.token)), sort_keys=True))
+    token = os.getenv("INCIDENT_LAB_MCP_TOKEN")
+    if not args.url or not token:
+        parser.error("URL is required via argument/environment and token via environment")
+    print(json.dumps(asyncio.run(check(args.url, token)), sort_keys=True))
 
 
 if __name__ == "__main__":

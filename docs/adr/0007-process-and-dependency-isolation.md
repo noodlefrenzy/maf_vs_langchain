@@ -1,6 +1,6 @@
 # ADR 0007: Isolate runners and services
 
-Status: Proposed
+Status: Accepted
 
 Date: 2026-07-31
 

@@ -4,12 +4,13 @@ This repository is a controlled field lab for comparing Microsoft Agent
 Framework with the LangChain ecosystem while holding the model, task, tools,
 budgets, and evaluation rules constant.
 
-The comparison has two matched lanes:
+The comparison has three matched tracks:
 
 | Question | Microsoft lane | LangChain lane |
 | --- | --- | --- |
 | How do explicit workflow runtimes compare? | Agent Framework Workflows | Custom LangGraph |
 | How do opinionated long-horizon harnesses compare? | Agent Framework Harness | Deep Agents |
+| Does role separation add value over one agent? | Agent Framework `Agent` | LangChain `create_agent` |
 
 The primary scenario is a seeded incident-response simulation. Specialized
 agents receive role-scoped MCP tools, investigate hidden state, tolerate
@@ -45,8 +46,8 @@ uv run pytest
 Framework runners and the MCP service intentionally use separate projects:
 
 ```text
-runners/maf/          Microsoft Workflows and Harness adapters
-runners/langgraph/    LangGraph and Deep Agents adapters
+runners/maf/          Microsoft Workflows, Harness, and Agent adapters
+runners/langgraph/    LangGraph, Deep Agents, and create_agent adapters
 services/incident_mcp Seeded incident world exposed through MCP
 ```
 
@@ -79,15 +80,18 @@ executable: MAF Harness background agents and declarative Deep Agents subagents
 perform native role-scoped delegation, pass a shared evidence gate, and enter
 the same approval, execution, finalization, scoring, and pair-validation path.
 Harness state is currently process-local and non-resumable. Both runner families
+also expose a matched single-agent lane with one model-driven commander, a
+duplicate-free union discovery catalog, strict source-endpoint evidence
+provenance, and the same outer approval/recovery boundary. Both runner families
 now retain correlated, redacted native span ledgers, export best-effort to a
 pinned loopback Phoenix deployment, and record validated operation-level trace
 completeness without making collector availability run-critical. These smoke
 runs exercise the system but do not constitute a benchmark result. The next
-milestones are baselines and broader repeated experiment runs.
+milestones are clean-source baseline and broader repeated experiment runs.
 Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 
-Exercise the full four-lane process boundary without loading a model:
+Exercise the four multi-agent lanes' process boundary without loading a model:
 
 ```bash
 uv run agent-lab experiment probe \
@@ -133,5 +137,69 @@ subagents. The adapter verifies every accepted specialist against its actual
 role-scoped MCP calls and exact evidence IDs; see
 [`docs/gotchas.md`](docs/gotchas.md) for framework-specific stopping and
 structured-output behavior observed with the local model.
+
+Run the matched compute-budget single-agent smoke with:
+
+```bash
+uv run agent-lab experiment run \
+  --experiment configs/experiments/single-agent-compute-matched-smoke.toml \
+  --runs-dir runs \
+  --order-seed 1741
+```
+
+This compares primitive MAF `Agent` with LangChain `create_agent`. Each lane
+has exactly one model-driven incident commander and the same duplicate-free
+union of capability-scoped discovery tools. Source-role labels preserve MCP
+evidence provenance and do not represent delegated agents. Both adapters use
+the same two phases: unstructured MCP discovery must satisfy a two-source gate,
+then a tool-disabled structured turn synthesizes only from the observed
+source-specific evidence allowlist. Each phase has the same eight-dispatch
+local model-call ceiling in both adapters, beneath the shared outer run budget.
+
+To exercise both adapters against a live loopback model without creating
+benchmark evidence, run:
+
+```bash
+uv run --project services/incident_mcp --no-sync \
+  incident-lab-single-agent-compat \
+  --model '<model-id-advertised-by-the-endpoint>'
+```
+
+The probe uses twin seeded worlds, deliberately edits approval to the known
+recovery action, requires both lanes to recover, and validates both bundles and
+their pair. It uses greedy compatibility sampling, verifies that per-role and
+protocol model/tool/output accounting agree, and marks its output
+`measurement_eligible: false`.
+
+The clean-source Qwen3.5-9B sequence is preregistered as a one-seed task-quality
+gate followed by separately executable explicit, harness, compute-matched
+baseline, and unrestricted-baseline pilot profiles:
+
+- `configs/experiments/qwen35-9b-task-quality-pilot.toml`
+- `configs/experiments/explicit-pilot.toml`
+- `configs/experiments/harness-pilot.toml`
+- `configs/experiments/single-agent-compute-matched-pilot.toml`
+- `configs/experiments/single-agent-unrestricted-pilot.toml`
+
+Measured execution refuses a dirty Git worktree. Commit the reviewed source
+freeze before running those profiles; protocol probes remain explicitly
+non-measurement evidence.
+
+After one or more native profiles finish, build a fail-closed offline report
+from their immutable summary indices:
+
+```bash
+uv run agent-lab report build \
+  --index runs/native-workflow-explicit_workflow_pilot_v1-order-1729.json \
+  --index runs/native-workflow-opinionated_harness_pilot_v1-order-1729.json \
+  --output-dir reports/pilot-v1
+```
+
+The command revalidates every individual bundle and pair, preserves the frozen
+left/right lane order, retains operational failures in denominators, and emits
+both `paired-report.json` and a self-contained `paired-report.html`. Continuous
+effects include deterministic paired-bootstrap intervals; binary task success
+includes discordant counts and an exact McNemar result; scorer components report
+their observed discrimination per lane.
 
 No license is granted by this private repository unless one is added later.

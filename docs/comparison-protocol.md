@@ -35,6 +35,9 @@ topology. The control plane compares both runners with the repository contract
 lock and the canonical matched topology, then snapshots the effective model,
 budget, fault profile, source tree, world manifest, role-prompt hash, tool-schema
 hash, and completion-schema hash. Any drift aborts the pair before execution.
+For the opinionated track this snapshot also includes the shared harness
+contract hash covering delegation repair, provenance correction, and phase
+limits.
 The byte-stable snapshot and its digest are stored as
 `native/pair-contract-preflight.json` in both run bundles.
 
@@ -114,6 +117,7 @@ The pilot estimates variance and failure modes. Before the measured study:
 
 - choose the primary outcome and smallest practically meaningful difference;
 - estimate sample size from pilot paired differences;
+- preregister matched prompt-paraphrase perturbations for harness sensitivity;
 - freeze exclusions and outlier handling;
 - freeze model/server/config/tool/prompt versions;
 - preregister which comparisons are confirmatory versus exploratory.
@@ -156,6 +160,13 @@ model behavior.
 - Built-in prompt/harness behavior is part of a harness result.
 - More agents or calls are not evidence of better coordination.
 - The single-agent baseline is required before claiming multi-agent value.
+- Its compute-matched profile uses the same 900-second, 32-model-call,
+  64-tool-call, and 32,000-output-token ceilings as each primary pilot lane.
+  The unrestricted profile changes only the call/token ceilings to 64, 128,
+  and 64,000 respectively; prompts, model, tools, source provenance, fault
+  profile, approval policy, and scenario blocks remain fixed.
 - A richer native trace UI does not imply better task performance; it is an
   operability result.
 - A demo is illustrative, never inferential.
+- Retrospective developer-effort comparisons are descriptive unless
+  implementation order was balanced or randomized.

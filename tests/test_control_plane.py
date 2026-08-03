@@ -13,6 +13,7 @@ from agent_lab.contracts import (
     ApprovalDecision,
     ApprovalRecord,
     Budget,
+    EventKind,
     FrameworkLane,
     ModelProfile,
     RunManifest,
@@ -21,6 +22,7 @@ from agent_lab.contracts import (
 from agent_lab.control_plane import ControlPlane, resolve_lane_order
 from agent_lab.model_request_policy import effective_request_policy
 from agent_lab.run_bundle import RunBundle
+from agent_lab.runner_host import WorkflowProtocolSession
 from agent_lab.runner_protocol import (
     FinalizationResult,
     FinalizedArtifact,
@@ -31,6 +33,7 @@ from agent_lab.runner_protocol import (
     redacted_request_payload,
 )
 from agent_lab.scenario import MitigationActionId
+from agent_lab.workflow_protocol_stub import _descriptor
 
 
 def _manifest(*, wall_clock_seconds: int = 5) -> RunManifest:
@@ -718,10 +721,60 @@ def test_request_redaction_and_both_runner_environments(tmp_path: Path) -> None:
     assert "test-secret-token" not in json.dumps(redacted_request_payload(request))
     for project in ("runners/maf", "runners/langgraph"):
         result = subprocess.run(
-            ["uv", "run", "--project", project, "python", "-c", script],
+            ["uv", "run", "--project", project, "--no-sync", "python", "-c", script],
             input=encoded,
             capture_output=True,
             timeout=20,
         )
         assert result.returncode == 0, result.stderr.decode(errors="replace")
         assert result.stdout.decode().strip() == FrameworkLane.MAF_WORKFLOW.value
+
+
+def test_same_actor_concurrent_model_turns_keep_their_native_parents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agent_lab.runner_host._send", lambda _message: None)
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+    session = WorkflowProtocolSession(_descriptor(), request)
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+    finish_first = asyncio.Event()
+    finish_second = asyncio.Event()
+
+    async def turn(started: asyncio.Event, finish: asyncio.Event) -> None:
+        await session.model_started(actor="shared_actor", model="local-test")
+        started.set()
+        await finish.wait()
+        await session.model_finished(
+            actor="shared_actor",
+            model="local-test",
+            input_tokens=1,
+            output_tokens=1,
+        )
+
+    async def exercise() -> None:
+        first = asyncio.create_task(turn(first_started, finish_first))
+        await first_started.wait()
+        second = asyncio.create_task(turn(second_started, finish_second))
+        await second_started.wait()
+        finish_second.set()
+        await second
+        finish_first.set()
+        await first
+
+    asyncio.run(exercise())
+
+    requested = [event for event in session.events if event.kind is EventKind.MODEL_REQUESTED]
+    responded = [event for event in session.events if event.kind is EventKind.MODEL_RESPONDED]
+    agent_started = [event for event in session.events if event.kind is EventKind.AGENT_STARTED]
+    agent_finished = [event for event in session.events if event.kind is EventKind.AGENT_FINISHED]
+    assert [event.parent_event_id for event in responded] == [
+        requested[1].event_id,
+        requested[0].event_id,
+    ]
+    assert [event.parent_event_id for event in agent_finished] == [
+        agent_started[1].event_id,
+        agent_started[0].event_id,
+    ]

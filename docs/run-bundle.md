@@ -168,6 +168,13 @@ event are retained as unattested partial artifacts and excluded from scoring.
 - event run/lane IDs match the manifest;
 - terminal budgets reconcile with events;
 - artifact and native-evidence digests;
+
+`agent-lab report build --index <native-index> ...` is read-only over evidence.
+It re-runs individual and pair validation, refuses protocol-probe or reused
+bundles, reconstructs left/right order from the frozen pair preflight, and
+writes new JSON/HTML outputs exclusively. Operational failures remain in task
+success and reliability denominators; score effects use only pairs with two
+valid scorer outputs and report that analyzed-pair count explicitly.
 - strict lexical artifact paths (one JSON filename directly under
   `artifacts/`, with no traversal or nested path segments);
 - trace-link identity, local span-ledger digest, event correlation, and

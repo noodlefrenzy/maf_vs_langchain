@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import os
 import sys
 import tempfile
 from collections.abc import Awaitable, Callable
@@ -95,9 +96,15 @@ class _TrackingMCPStreamableHTTPTool(MCPStreamableHTTPTool):
 
 class _OwnerOnlyCheckpointStorage(FileCheckpointStorage):
     async def save(self, checkpoint: WorkflowCheckpoint) -> str:
-        checkpoint_id = await super().save(checkpoint)
-        (self.storage_path / f"{checkpoint_id}.json").chmod(0o600)
-        return checkpoint_id
+        destination = self._validate_file_path(checkpoint.checkpoint_id)
+        temporary = destination.with_suffix(".json.tmp")
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(descriptor)
+        try:
+            return await super().save(checkpoint)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
 
 
 class _Dispatcher(Executor):

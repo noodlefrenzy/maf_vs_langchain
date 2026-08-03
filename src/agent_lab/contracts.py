@@ -24,7 +24,8 @@ class FrameworkLane(StrEnum):
     MAF_HARNESS = "maf_harness"
     LANGGRAPH = "langgraph"
     DEEP_AGENTS = "deep_agents"
-    SINGLE_AGENT_BASELINE = "single_agent_baseline"
+    MAF_SINGLE_AGENT = "maf_single_agent"
+    LANGCHAIN_SINGLE_AGENT = "langchain_single_agent"
     SCRIPTED_ORACLE = "scripted_oracle"
 
 

@@ -107,8 +107,8 @@ uv run --no-sync python -m agent_lab.model_compat_suite \
   --output runs/model-compatibility/lonestar-aligned-qwen3-next-80b.json
 ```
 
-This is the active smoke-development profile, not a replacement for the RTX
-4090 vLLM characterization required by issue 13 or the final paired-study model
+This is the active smoke-development profile, not a replacement for the
+completed RTX 4090 vLLM characterization or the final paired-study model
 selection. Both framework lanes must still use the same profile within a pair.
 
 ## Fit-check model: Qwen3.5-9B
@@ -126,15 +126,29 @@ Qwen3.5-9B:
 [Official Qwen3.5-9B model card](https://huggingface.co/Qwen/Qwen3.5-9B)
 
 The model card's maximum context is not a promise that 262K fits on this GPU.
-The initial 32K profile is a deliberate fit-test compromise. Peak VRAM,
-effective KV-cache capacity, and agent quality after long tool histories must
-be measured.
+The 32K profile is a deliberate fit-test compromise. Peak VRAM, effective
+KV-cache capacity, and client compatibility through long tool histories are
+recorded in the completed characterization; task-pilot quality remains a
+separate model-selection gate.
 
 Qwen recommends thinking-mode sampling parameters for general tasks around
 temperature 1.0, top-p 0.95, and top-k 20. The first profile follows those
 values; framework adapters must pass any extra supported parameters explicitly
 and record the actual request. [Official Qwen3.5-9B model
 card](https://huggingface.co/Qwen/Qwen3.5-9B)
+
+The pinned official BF16 weights did not leave usable KV cache on the 24 GB
+device, and bounded CPU offload failed in the pinned Qwen GDN/Triton path. The
+accepted profile instead loads the same official safetensors with the image's
+quarantined BitsAndBytes 4-bit support and BF16 compute. It served 8K, 16K, and
+32K contexts at concurrency two with peak whole-GPU allocation between 22,504
+and 22,924 MiB across the pre/post-restart runs. Cancellation and
+malformed-history recovery passed at every context, and both native framework
+clients passed the full 32K compatibility gate before and after restart. See the
+[executable runbook and measured results](qwen35-9b-characterization.md) for
+the frozen identities, throughput matrix, restart comparison, and evidence
+hashes. This establishes fit and compatibility, not sufficient task quality
+for the final paired study.
 
 ## Quality-tier candidate: Qwen3.5-35B-A3B GPTQ Int4
 
@@ -171,14 +185,14 @@ Model selection should use a two-stage gate:
 
 ## Required characterization matrix
 
-The executable, pinned protocol for the fit-check is in
+The executed, pinned protocol for the fit-check is in
 [`qwen35-9b-characterization.md`](qwen35-9b-characterization.md). It separates
 artifact acquisition from offline measured runs and reserves port 8001 so the
 lonestar development tunnel on port 8000 is unaffected.
 
 | Dimension | Values |
 | --- | --- |
-| Model | Qwen3.5-9B BF16; 35B-A3B GPTQ Int4 if viable |
+| Model | Qwen3.5-9B BitsAndBytes 4-bit with BF16 compute; BF16 and CPU offload rejected; 35B-A3B GPTQ Int4 remains experimental |
 | Context | 8K, 16K, 32K; larger only if it fits |
 | Concurrency | 1 and 2 in-flight requests |
 | Prompt type | plain reasoning, one tool, multi-step tools, parallel tools, malformed tool recovery |

@@ -37,6 +37,7 @@ from agent_lab.run_bundle import RunBundle
 from incident_lab_mcp.world import IncidentWorld, WorldToolError
 
 _T = TypeVar("_T")
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 
 def run_oracle(
@@ -68,7 +69,7 @@ def run_oracle(
             "incident-lab-mcp": _package_version("incident-lab-mcp"),
             "scripted-oracle": "0.1.0",
         },
-        dependency_lock_sha256=_file_sha256(Path("services/incident_mcp/uv.lock")),
+        dependency_lock_sha256=_file_sha256(REPOSITORY_ROOT / "services/incident_mcp/uv.lock"),
         prompt_bundle_sha256=hashes["prompt_bundle_sha256"],
         tool_catalog_sha256=hashes["tool_catalog_sha256"],
         effective_request_policy_sha256=effective_request_policy(
@@ -385,6 +386,7 @@ def _evidence_item(
 def _source_commit() -> str:
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
+        cwd=REPOSITORY_ROOT,
         check=False,
         capture_output=True,
         text=True,
@@ -396,13 +398,14 @@ def _source_commit() -> str:
 def _source_tree_sha256() -> str:
     result = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        cwd=REPOSITORY_ROOT,
         check=True,
         capture_output=True,
         timeout=10,
     )
     digest = hashlib.sha256()
     for raw_path in sorted(filter(None, result.stdout.split(b"\0"))):
-        path = Path(raw_path.decode())
+        path = REPOSITORY_ROOT / raw_path.decode()
         digest.update(raw_path)
         digest.update(b"\0")
         digest.update(path.read_bytes() if path.is_file() else b"[MISSING]")

@@ -1,6 +1,6 @@
 # ADR 0002: Use seeded incident response as the primary task
 
-Status: Proposed
+Status: Accepted
 
 Date: 2026-07-31
 

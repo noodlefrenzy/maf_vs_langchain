@@ -2,128 +2,47 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 
 from agent_framework import (
-    ChatContext,
-    ChatMiddleware,
-    ChatResponse,
     FileSystemAgentFileStore,
     MCPStreamableHTTPTool,
     create_harness_agent,
 )
-from agent_framework.openai import OpenAIChatCompletionClient
 from httpx import AsyncClient, Timeout
-from openai import AsyncOpenAI
 
 from agent_lab.contracts import AgentRole, ApprovalDecision, ModelProfile
 from agent_lab.harness_contracts import (
+    HARNESS_DELEGATION_REPAIR_TURNS,
+    HARNESS_PHASE_MODEL_CALL_LIMIT,
+    HARNESS_PROVENANCE_CORRECTION_TURNS,
     SPECIALIST_ROLES,
     HarnessApprovalResponse,
     HarnessExecutionResult,
     HarnessProposal,
+    HarnessRoleObservation,
+    active_harness_roles,
     evaluate_harness_proposal,
+    harness_delegation_repair_prompt,
+    harness_evidence_allowlist,
+    harness_provenance_correction_prompt,
     harness_specialist_prompt,
+    harness_synthesis_prompt,
     harness_task_prompt,
+    require_harness_delegation,
+    validate_harness_role_provenance,
 )
-from agent_lab.model_request_policy import maf_request_options, model_request_headers
+from agent_lab.model_request_policy import maf_request_options
 from agent_lab.prompt_bundle import get_role_definition, render_role_prompt
 from agent_lab.runner_host import ApprovalProvider
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 from agent_lab.tool_catalog import tool_definitions_for_role
 from agent_lab.workflow_contracts import evidence_ids_from_text, render_tool_result
 from agent_lab.workflow_telemetry import WorkflowTelemetry
+from maf_runner.chat_telemetry import InstrumentedChatClient
 from maf_runner.workflow_lane import MafCommanderAgent
-
-
-class _ModelDispatchMiddleware(ChatMiddleware):
-    """Count each provider dispatch below MAF's function-invocation loop."""
-
-    def __init__(
-        self,
-        *,
-        actor: str,
-        profile: ModelProfile,
-        telemetry: WorkflowTelemetry,
-    ) -> None:
-        self.actor = actor
-        self.profile = profile
-        self.telemetry = telemetry
-        self.model_calls = 0
-        self.input_tokens = 0
-        self.output_tokens = 0
-
-    async def process(
-        self,
-        context: ChatContext,
-        call_next: Callable[[], Awaitable[None]],
-    ) -> None:
-        if context.stream:
-            raise ValueError("the harness protocol adapter requires non-streaming model calls")
-        await self.telemetry.model_started(actor=self.actor, model=self.profile.name)
-        await call_next()
-        if not isinstance(context.result, ChatResponse):
-            raise TypeError("MAF chat middleware returned no non-streaming response")
-        usage = context.result.usage_details or {}
-        input_tokens = int(usage.get("input_token_count", 0))
-        output_tokens = int(usage.get("output_token_count", 0))
-        await self.telemetry.model_finished(
-            actor=self.actor,
-            model=self.profile.name,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
-        self.model_calls += 1
-        self.input_tokens += input_tokens
-        self.output_tokens += output_tokens
-
-
-class _InstrumentedChatClient(OpenAIChatCompletionClient):
-    def __init__(
-        self,
-        *,
-        actor: str,
-        profile: ModelProfile,
-        telemetry: WorkflowTelemetry,
-    ) -> None:
-        dispatch = _ModelDispatchMiddleware(
-            actor=actor,
-            profile=profile,
-            telemetry=telemetry,
-        )
-        sdk = AsyncOpenAI(
-            api_key="agent-lab-local",
-            base_url=profile.base_url,
-            timeout=profile.request_timeout_seconds,
-            max_retries=0,
-            default_headers=model_request_headers("maf-harness", actor),
-        )
-        super().__init__(
-            model=profile.name,
-            async_client=sdk,
-            function_invocation_configuration={
-                "enabled": True,
-                "max_iterations": 12,
-                "max_function_calls": 6,
-            },
-            middleware=[dispatch],
-        )
-        self._dispatch = dispatch
-
-    @property
-    def model_calls(self) -> int:
-        return self._dispatch.model_calls
-
-    @property
-    def input_tokens(self) -> int:
-        return self._dispatch.input_tokens
-
-    @property
-    def output_tokens(self) -> int:
-        return self._dispatch.output_tokens
 
 
 class _TrackedRoleMCP(MCPStreamableHTTPTool):
@@ -137,11 +56,13 @@ class _TrackedRoleMCP(MCPStreamableHTTPTool):
         super().__init__(*args, **kwargs)
         self.actor = actor
         self.telemetry = telemetry
+        self.tool_calls = 0
         self.called_tools: list[str] = []
         self.observed_evidence_ids: set[str] = set()
         self.delegation_observed = False
 
     async def call_tool(self, tool_name: str, **kwargs: Any) -> Any:
+        self.tool_calls += 1
         if not self.delegation_observed:
             await self.telemetry.handoff(
                 source_actor=AgentRole.INCIDENT_COMMANDER.value,
@@ -182,10 +103,12 @@ class _HarnessRoleRuntime:
             raise ValueError("role endpoint does not match the harness specialist")
         self.role = role
         self._stack = AsyncExitStack()
-        self.client = _InstrumentedChatClient(
+        self.client = InstrumentedChatClient(
             actor=role.value,
             profile=profile,
             telemetry=telemetry,
+            framework="maf-harness",
+            model_call_limit=HARNESS_PHASE_MODEL_CALL_LIMIT,
         )
         self._http = AsyncClient(
             headers={"Authorization": f"Bearer {endpoint.token}"},
@@ -230,21 +153,16 @@ class _HarnessRoleRuntime:
         await self._stack.__aexit__(*exc_info)
 
 
-def _validate_role_provenance(
-    proposal: HarnessProposal,
+def _role_observations(
     roles: dict[AgentRole, _HarnessRoleRuntime],
-) -> None:
-    for finding in proposal.findings:
-        runtime = roles[finding.role]
-        observed_tools = set(runtime.mcp.called_tools)
-        if not observed_tools:
-            raise ValueError(f"{finding.role.value} made no native MCP calls")
-        if not set(finding.evidence_ids).issubset(runtime.mcp.observed_evidence_ids):
-            raise ValueError(
-                f"{finding.role.value} cited evidence outside its native MCP results: "
-                f"cited={finding.evidence_ids}, "
-                f"observed={sorted(runtime.mcp.observed_evidence_ids)}"
-            )
+) -> dict[AgentRole, HarnessRoleObservation]:
+    return {
+        role: HarnessRoleObservation(
+            called_tools=frozenset(runtime.mcp.called_tools),
+            evidence_ids=frozenset(runtime.mcp.observed_evidence_ids),
+        )
+        for role, runtime in roles.items()
+    }
 
 
 async def run_live_approved(
@@ -274,10 +192,12 @@ async def run_live_approved(
                     workspace,
                 )
             )
-        commander_client = _InstrumentedChatClient(
+        commander_client = InstrumentedChatClient(
             actor=AgentRole.INCIDENT_COMMANDER.value,
             profile=request.manifest.model,
             telemetry=telemetry,
+            framework="maf-harness",
+            model_call_limit=HARNESS_PHASE_MODEL_CALL_LIMIT,
         )
         commander = create_harness_agent(
             commander_client,
@@ -301,33 +221,23 @@ async def run_live_approved(
             harness_task_prompt(request.public_ticket),
             session=session,
         )
-        for _attempt in range(2):
-            active_roles = {role for role, runtime in roles.items() if runtime.mcp.called_tools}
+        for _attempt in range(HARNESS_DELEGATION_REPAIR_TURNS):
+            observations = _role_observations(roles)
+            active_roles = active_harness_roles(observations)
             if len(active_roles) >= 2:
                 break
             missing_roles = sorted(
                 (role.value for role in SPECIALIST_ROLES - active_roles),
             )
             await commander.run(
-                "The deterministic evidence gate is not yet satisfied: fewer than two "
-                "specialist roles have made real MCP calls. Delegate now to at least one of "
-                f"these remaining specialists and retrieve its completed result: {missing_roles}. "
-                "Do not invent the result yourself.",
+                harness_delegation_repair_prompt(missing_roles),
                 session=session,
             )
-        evidence_allowlist = "\n".join(
-            f"- {role.value}: {sorted(runtime.mcp.observed_evidence_ids)}"
-            for role, runtime in sorted(roles.items(), key=lambda item: item[0].value)
-            if runtime.mcp.called_tools
-        )
+        observations = _role_observations(roles)
+        require_harness_delegation(observations)
+        evidence_allowlist = harness_evidence_allowlist(observations)
         response = await commander.run(
-            "Using only the completed background-task results already in this session, return "
-            "the HarnessProposal now. Include no finding that was not returned by a specialist. "
-            "Opaque evidence IDs must be copied byte-for-byte; do not replace them with dates, "
-            "descriptions, or invented aliases. The control plane observed this role-specific "
-            f"evidence-ID allowlist:\n{evidence_allowlist}\n"
-            "Every finding must cite one or more exact IDs from its own role's list, and the "
-            "commander synthesis must cite exact IDs from at least two included roles.",
+            harness_synthesis_prompt(evidence_allowlist),
             session=session,
             options={
                 **maf_request_options(request.manifest.model),
@@ -336,30 +246,32 @@ async def run_live_approved(
             },
         )
         proposal = HarnessProposal.model_validate(response.value)
-        try:
-            _validate_role_provenance(proposal, roles)
-        except ValueError as exc:
-            response = await commander.run(
-                "The previous structured proposal failed the deterministic provenance "
-                f"validator: {exc}. Return one corrected HarnessProposal. Copy only exact "
-                "evidence IDs from this role-specific allowlist and keep findings scoped to "
-                f"their roles:\n{evidence_allowlist}",
-                session=session,
-                options={
-                    **maf_request_options(request.manifest.model),
-                    "response_format": HarnessProposal,
-                    "tool_choice": "none",
-                },
-            )
-            proposal = HarnessProposal.model_validate(response.value)
-            _validate_role_provenance(proposal, roles)
+        correction_attempt = 0
+        while True:
+            try:
+                validate_harness_role_provenance(proposal, observations)
+                break
+            except ValueError as exc:
+                if correction_attempt >= HARNESS_PROVENANCE_CORRECTION_TURNS:
+                    raise
+                correction_attempt += 1
+                response = await commander.run(
+                    harness_provenance_correction_prompt(exc, evidence_allowlist),
+                    session=session,
+                    options={
+                        **maf_request_options(request.manifest.model),
+                        "response_format": HarnessProposal,
+                        "tool_choice": "none",
+                    },
+                )
+                proposal = HarnessProposal.model_validate(response.value)
         for finding in proposal.findings:
             await telemetry.handoff(
                 source_actor=finding.role.value,
                 target_actor=AgentRole.INCIDENT_COMMANDER.value,
                 phase="specialist_finding_returned",
             )
-        evidence = evaluate_harness_proposal(proposal)
+        evidence = evaluate_harness_proposal(proposal, attempt=correction_attempt)
         if not evidence.passed:
             raise ValueError(f"harness evidence gate failed: {evidence.gate_reasons}")
 
@@ -411,7 +323,7 @@ async def run_live_approved(
                 **{
                     role.value: {
                         "model_calls": runtime.client.model_calls,
-                        "tool_calls": len(runtime.mcp.called_tools),
+                        "tool_calls": runtime.mcp.tool_calls,
                         "input_tokens": runtime.client.input_tokens,
                         "output_tokens": runtime.client.output_tokens,
                     }

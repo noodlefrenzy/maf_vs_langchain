@@ -1,8 +1,9 @@
 # Microsoft Agent Framework vs the LangChain stack: findings
 
 Status: engineering findings from smoke, stabilization, tracing-ablation, and
-instrumentation-verification runs through 2026-08-02. This is not a measured
-benchmark or a framework ranking.
+instrumentation-verification runs through 2026-08-02, plus adapter-contract
+hardening through 2026-08-03. This is not a measured benchmark or a framework
+ranking.
 
 ## Executive summary
 
@@ -36,6 +37,14 @@ guards. Deep Agents needed an explicit structured-output strategy, a native
 coordinator call limiter, and removal of an unmatched default subagent. MAF
 needed exact evidence-ID allowlists, one bounded correction turn, and model-call
 metering below its function-invocation layer.
+
+The 2026-08-03 parity hardening moved delegation repair, strict role-scoped
+tool/evidence provenance, one correction turn, and phase call limits into one
+hashed shared harness contract. Both lanes now fail explicitly after the same
+under-delegation allowance, and the Deep model adapter has a hermetic
+per-dispatch budget/stream-fallback probe matching MAF's. No paired result has
+yet been collected under this corrected contract. Earlier harness cohorts are
+therefore stabilization evidence only, not a head-to-head outcome.
 
 A particularly important instrumentation defect was found and fixed in the MAF
 Harness adapter. Metering the public `get_response()` call counted one entire
@@ -72,10 +81,27 @@ The practical conclusion is to choose at the layer and operating-model level:
 
 ## What was compared
 
-### Two tracks, kept separate
+### Three tracks, kept separate
 
-The experiment deliberately does not combine the two tracks into a single
+The experiment deliberately does not combine the tracks into a single
 “MAF score” or “LangChain score.”
+
+The third matched track is now implemented but has no measured result: one MAF
+primitive `Agent` versus one LangChain `create_agent`, each with the same union
+discovery catalog, source-endpoint provenance validation, outer approval path,
+and either compute-matched or unrestricted preregistered ceilings. Source roles
+in its findings are evidence origins, not delegated agents. Both adapters use
+unstructured discovery followed by tool-disabled structured synthesis so a
+schema-valid response cannot bypass real MCP use.
+
+A non-measurement live compatibility pair completed both baseline lanes against
+the local Qwen endpoint under the current capped contract. MAF made five model
+calls, 21 attempted MCP calls, and emitted 1,765 output tokens; LangChain made
+nine model calls, 26 attempted MCP calls, and emitted 1,896 output tokens. Each
+lane's role summary exactly matched normalized protocol usage, both individual
+bundles and their pair validated, and both twin seeded worlds recovered under
+the fixture-truth approval edit. These greedy-sampling values verify the
+adapters and accounting only, not comparative quality or efficiency.
 
 The explicit-workflow track expresses the same logical graph in MAF Workflows
 and LangGraph:
@@ -587,31 +613,44 @@ They do **not** establish that:
 
 Limitations are substantial: one incident seed, one model profile, no injected
 faults in the smoke cohort, repeated stochastic executions rather than a
-powered sample, evolving source during early stabilization, no single-agent
-baselines, no paired Qwen3.5-9B pilot, no preregistered primary outcome, and no
-completed measured-study report. The model seed is requested but does not make
-GPU generation bitwise deterministic.
+powered sample, evolving source during early stabilization, no measured
+single-agent baseline cohort, no paired Qwen3.5-9B pilot, no preregistered
+primary outcome, and no completed measured-study report. The model seed is
+requested but does not make GPU generation bitwise deterministic.
+
+Additional methodology constraints are explicit before the pilot:
+
+- the pre-parity harness cohorts are confounded by unequal adapter guards and
+  are excluded from comparative inference;
+- component-level score distributions must be reported to show whether each
+  scorer component actually discriminates among pilot outcomes;
+- a matched prompt-paraphrase perturbation is required before treating one
+  frozen wording as representative harness behavior;
+- retrospective developer-effort data are descriptive only because MAF lanes
+  were implemented and debugged first; a future effort study must balance
+  implementation order.
 
 ## Recommended next work
 
 1. Freeze the corrected adapters, contracts, model/server flags, and scorer at
    one clean source tree.
-2. Run the compute-matched and unrestricted single-agent baselines before
+2. Freeze and run the now-implemented paired MAF `Agent` vs LangChain
+   `create_agent` compute-matched and unrestricted single-agent profiles before
    making any multi-agent-value claim.
 3. Execute the five-seed, three-repetition paired pilot with the standard
    transient-fault profile and balanced lane order.
 4. Repeat the full-workflow tracing on/off ablation; report absolute deltas,
    span volume, and model/tool latency separately.
-5. Add an explicit harness policy experiment for provenance correction (for
-   example zero versus one versus two correction turns) and apply it symmetrically
-   where the semantics are comparable.
+5. Add symmetric harness-policy ablations for provenance correction (zero,
+   one, and two turns) and matched prompt paraphrases.
 6. Validate restart/resume using production-intended checkpoint backends; do
    not generalize from the compatibility file savers.
-7. Characterize the planned Qwen3.5-9B fit/pilot profile and record exact model
-   revision, server build, parsers, and GPU memory behavior.
-8. Build the offline paired report with raw paired points, operational failures
-   retained in denominators, paired effect sizes, uncertainty intervals, and
-   audit samples for derived metrics.
+7. Run the paired task-quality pilot on the accepted Qwen3.5-9B 32K fit profile;
+   retain its fit-check designation until that operating-point gate passes.
+8. Run the implemented offline paired report builder on the clean-source pilot
+   indices. It retains raw paired points and operational failures, computes
+   paired effects and deterministic bootstrap intervals, reports component
+   discrimination, and preserves bundle links for audit.
 
 ## Reproducibility map
 
@@ -627,7 +666,9 @@ Primary implementation and evidence references:
 - tracing ablation: [research/native-tracing-overhead.md](research/native-tracing-overhead.md)
 - experiment profiles:
   [`explicit-smoke.toml`](../configs/experiments/explicit-smoke.toml) and
-  [`harness-smoke.toml`](../configs/experiments/harness-smoke.toml)
+  [`harness-smoke.toml`](../configs/experiments/harness-smoke.toml), plus the
+  [compute-matched single-agent smoke](../configs/experiments/single-agent-compute-matched-smoke.toml)
+  and separately executable Qwen3.5-9B pilot profiles under `configs/experiments/`
 - normalized runner protocol: [runner-protocol.md](runner-protocol.md)
 - immutable artifact contract: [run-bundle.md](run-bundle.md)
 

@@ -32,6 +32,14 @@ addopts = "-q"
 testpaths = ["tests"]
 pythonpath = ["services/incident_mcp/src"]
 
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+fail_under = 55
+show_missing = true
+skip_covered = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

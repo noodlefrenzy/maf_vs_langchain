@@ -20,6 +20,7 @@ from agent_lab.bundle_validation import (
     validate_pair,
 )
 from agent_lab.config import load_experiment, load_model_profile
+from agent_lab.report_builder import build_paired_report, write_paired_report
 from agent_lab.scenario import generate_incident
 
 _DEFAULT_REPOSITORY_ROOT = Path.cwd()
@@ -32,10 +33,12 @@ experiment_app = typer.Typer(
     no_args_is_help=True,
     help="Launch framework-neutral experiment control-plane operations.",
 )
+report_app = typer.Typer(no_args_is_help=True, help="Build offline paired reports.")
 app.add_typer(scenario_app, name="scenario")
 app.add_typer(config_app, name="config")
 app.add_typer(bundle_app, name="bundle")
 app.add_typer(experiment_app, name="experiment")
+app.add_typer(report_app, name="report")
 console = Console()
 
 
@@ -119,7 +122,7 @@ def validate_run_pair(
         typer.Option(help="Do not write pair validation sidecars."),
     ] = False,
 ) -> None:
-    """Validate a matched explicit-workflow or harness pair."""
+    """Validate a matched explicit-workflow, harness, or single-agent pair."""
 
     result = validate_pair(left, right, mark=not no_mark)
     if json_output:
@@ -272,6 +275,45 @@ def run_native_workflow_experiment(
             console.print(result.stderr.rstrip())
         raise typer.Exit(code=1) from exc
     console.print_json(data=payload)
+
+
+@report_app.command("build")
+def build_report(
+    indices: Annotated[
+        list[Path],
+        typer.Option(
+            "--index",
+            "-i",
+            help="Native-workflow experiment index; repeat for multiple tracks.",
+        ),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", "-o", help="New report output directory."),
+    ] = Path("reports/latest"),
+    bootstrap_seed: Annotated[
+        int,
+        typer.Option(help="Deterministic paired-bootstrap seed."),
+    ] = 1729,
+    bootstrap_resamples: Annotated[
+        int,
+        typer.Option(help="Number of paired-bootstrap resamples."),
+    ] = 10_000,
+) -> None:
+    """Revalidate immutable pairs and produce JSON plus self-contained HTML."""
+
+    try:
+        report = build_paired_report(
+            indices,
+            bootstrap_seed=bootstrap_seed,
+            bootstrap_resamples=bootstrap_resamples,
+        )
+        json_path, html_path = write_paired_report(report, output_dir)
+    except (OSError, ValidationError, ValueError) as exc:
+        console.print(f"[red]Could not build report:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(f"Wrote {json_path}")
+    console.print(f"Wrote {html_path}")
 
 
 @app.command()

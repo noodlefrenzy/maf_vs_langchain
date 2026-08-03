@@ -8,6 +8,7 @@ import json
 import sys
 import traceback
 from collections.abc import Awaitable, Callable, Mapping
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -77,8 +78,14 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         self.sequence = 0
         self.usage = RunnerUsage()
         self.events: list[NormalizedEvent] = []
-        self._agent_events: dict[str, list[NormalizedEvent]] = {}
-        self._model_events: dict[str, NormalizedEvent] = {}
+        self._model_events: dict[
+            str,
+            list[tuple[NormalizedEvent, NormalizedEvent]],
+        ] = {}
+        self._model_turn_context: ContextVar[dict[str, list[object]] | None] = ContextVar(
+            f"agent_lab_model_turns_{id(self)}",
+            default=None,
+        )
         self._tool_events: dict[tuple[str, str], list[NormalizedEvent]] = {}
         self._last_failed_operation: TerminalStatus | None = None
 
@@ -116,7 +123,6 @@ class WorkflowProtocolSession(WorkflowTelemetry):
             actor=actor,
             payload={"phase": "model_turn", "namespace": self._actor_namespace(actor)},
         )
-        self._agent_events.setdefault(actor, []).append(agent_event)
         event = self.emit(
             EventKind.MODEL_REQUESTED,
             actor=actor,
@@ -126,7 +132,13 @@ class WorkflowProtocolSession(WorkflowTelemetry):
                 "namespace": self._actor_namespace(actor),
             },
         )
-        self._model_events[actor] = event
+        self._model_events.setdefault(actor, []).append((agent_event, event))
+        context_turns = {
+            context_actor: list(event_ids)
+            for context_actor, event_ids in (self._model_turn_context.get() or {}).items()
+        }
+        context_turns.setdefault(actor, []).append(event.event_id)
+        self._model_turn_context.set(context_turns)
 
     async def model_finished(
         self,
@@ -137,7 +149,32 @@ class WorkflowProtocolSession(WorkflowTelemetry):
         output_tokens: int,
     ) -> None:
         output_limit_exceeded = self._record_usage("output_tokens", output_tokens)
-        parent = self._model_events.pop(actor, None)
+        pending_models = self._model_events.get(actor, [])
+        context_turns = {
+            context_actor: list(event_ids)
+            for context_actor, event_ids in (self._model_turn_context.get() or {}).items()
+        }
+        context_event_ids = context_turns.get(actor, [])
+        context_event_id = context_event_ids.pop() if context_event_ids else None
+        turn_index = next(
+            (
+                index
+                for index, (_agent_event, model_event) in enumerate(pending_models)
+                if model_event.event_id == context_event_id
+            ),
+            0 if pending_models else None,
+        )
+        agent_parent = None
+        parent = None
+        if turn_index is not None:
+            agent_parent, parent = pending_models.pop(turn_index)
+        if not pending_models:
+            self._model_events.pop(actor, None)
+        if context_event_ids:
+            context_turns[actor] = context_event_ids
+        else:
+            context_turns.pop(actor, None)
+        self._model_turn_context.set(context_turns)
         self.emit(
             EventKind.MODEL_RESPONDED,
             actor=actor,
@@ -149,10 +186,6 @@ class WorkflowProtocolSession(WorkflowTelemetry):
                 "output_tokens": output_tokens,
             },
         )
-        pending_agents = self._agent_events.get(actor, [])
-        agent_parent = pending_agents.pop(0) if pending_agents else None
-        if not pending_agents:
-            self._agent_events.pop(actor, None)
         self.emit(
             EventKind.AGENT_FINISHED,
             actor=actor,

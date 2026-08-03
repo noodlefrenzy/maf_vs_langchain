@@ -40,17 +40,17 @@ def _instrument_langchain(
             hide_llm_invocation_parameters=hide_sensitive,
             hide_llm_tools=hide_sensitive,
             hide_inputs=hide_sensitive,
-            hide_outputs=True,
+            hide_outputs=hide_sensitive,
             hide_input_messages=hide_sensitive,
-            hide_output_messages=True,
+            hide_output_messages=hide_sensitive,
             hide_input_images=hide_sensitive,
             hide_input_text=hide_sensitive,
-            hide_output_text=True,
+            hide_output_text=hide_sensitive,
             hide_embedding_vectors=True,
             hide_embeddings_vectors=True,
             hide_embeddings_text=hide_sensitive,
             hide_prompts=hide_sensitive,
-            hide_choices=True,
+            hide_choices=hide_sensitive,
         ),
     )
     return instrumentor.uninstrument
@@ -65,6 +65,8 @@ async def _execute_workflow(
         from langgraph_runner.workflow_lane import run_live_approved
     elif request.manifest.lane is FrameworkLane.DEEP_AGENTS:
         from langgraph_runner.harness_lane import run_live_approved
+    elif request.manifest.lane is FrameworkLane.LANGCHAIN_SINGLE_AGENT:
+        from langgraph_runner.baseline_lane import run_live_approved
     else:
         raise ValueError(f"unsupported LangGraph-family lane {request.manifest.lane.value}")
 
@@ -77,6 +79,7 @@ def descriptor() -> NativeRunnerDescriptor:
         supported_lanes=(
             FrameworkLane.LANGGRAPH,
             FrameworkLane.DEEP_AGENTS,
+            FrameworkLane.LANGCHAIN_SINGLE_AGENT,
         ),
         framework_versions={
             "deepagents": version("deepagents"),
@@ -112,10 +115,24 @@ def descriptor() -> NativeRunnerDescriptor:
                     "reliability_reviewer",
                 ],
             },
+            FrameworkLane.LANGCHAIN_SINGLE_AGENT: {
+                "kind": "single_agent_baseline",
+                "runtime": "langchain_create_agent",
+                "agent": "incident_commander",
+                "delegation": False,
+                "source_capabilities": [
+                    "telemetry_investigator",
+                    "change_investigator",
+                    "reliability_reviewer",
+                ],
+            },
         },
         normalized_topology={
             FrameworkLane.LANGGRAPH: normalized_topology_for_lane(FrameworkLane.LANGGRAPH),
             FrameworkLane.DEEP_AGENTS: normalized_topology_for_lane(FrameworkLane.DEEP_AGENTS),
+            FrameworkLane.LANGCHAIN_SINGLE_AGENT: normalized_topology_for_lane(
+                FrameworkLane.LANGCHAIN_SINGLE_AGENT
+            ),
         },
         checkpoint={
             FrameworkLane.LANGGRAPH: CheckpointCapability(
@@ -127,6 +144,11 @@ def descriptor() -> NativeRunnerDescriptor:
                 resumable=False,
                 restart_safe=False,
                 format="deep-agents-process-local/v1",
+            ),
+            FrameworkLane.LANGCHAIN_SINGLE_AGENT: CheckpointCapability(
+                resumable=False,
+                restart_safe=False,
+                format="langchain-create-agent-process-local/v1",
             ),
         },
     )

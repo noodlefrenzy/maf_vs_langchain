@@ -1,4 +1,4 @@
-from agent_lab.contracts import FrameworkLane, ModelProfile
+from agent_lab.contracts import AgentRole, FrameworkLane, ModelProfile
 from agent_lab.model_request_policy import (
     ADAPTER_SUPPORTED_MODEL_FIELDS,
     MODEL_PROFILE_FIELD_MAPPING,
@@ -81,3 +81,13 @@ def test_policy_hash_is_serialization_stable_and_matched() -> None:
         "maf_workflow": left["policy_sha256"],
         "langgraph": right["policy_sha256"],
     }
+
+
+def test_single_agent_policy_contains_only_one_model_driven_actor() -> None:
+    profile = _profile()
+
+    maf = effective_request_policy(profile, FrameworkLane.MAF_SINGLE_AGENT)
+    langchain = effective_request_policy(profile, FrameworkLane.LANGCHAIN_SINGLE_AGENT)
+
+    assert set(maf["actors"]) == {AgentRole.INCIDENT_COMMANDER.value}
+    assert maf["policy_sha256"] == langchain["policy_sha256"]
