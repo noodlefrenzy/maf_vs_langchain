@@ -40,10 +40,11 @@ samples of one hidden world as independent cases. The measured-study floor is
 
 ## Pilot sizing gate
 
-The existing five-seed, three-repetition profiles are pilots only. Once a
-quality-tier model clears both lanes of the paired gate, build one fail-closed
-`paired-report/v3` containing the explicit and harness pilots. Then set the
-still-blocked protocol's `model_profile` and `model_gate_passed = true` and run:
+The existing five-seed, three-repetition profiles are pilots only. The
+Qwen3.5-27B Q4_K_M llama.cpp profile has cleared both lanes of the paired gate,
+and the still-blocked protocol now freezes that profile with
+`model_gate_passed = true`. Build one fail-closed `paired-report/v3` containing
+the explicit and harness pilots, then run:
 
 ```bash
 uv run agent-lab study size \
@@ -107,6 +108,6 @@ because implementation order and debugging history were not randomized.
 - Require observed component-level discrimination in the accepted pilot.
 - Record reviewer identity and approval time before the first measured launch.
 
-The protocol remains blocked today because Qwen3.5-9B did not clear the paired
-quality gate, the 35B-A3B GPTQ candidate did not fit the runtime, no accepted
-five-seed pilot exists, and reviewer approval has not been recorded.
+The protocol remains blocked today because no accepted five-seed pilot exists
+for variance/runtime sizing and reviewer approval has not been recorded. The
+model-selection blocker is closed by the accepted Qwen3.5-27B gate.

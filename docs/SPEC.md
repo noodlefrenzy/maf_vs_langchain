@@ -227,11 +227,13 @@ compatibility but failed the paired task-quality gate.
 bounded CPU offload into the 128 GB system RAM. It loaded but failed engine
 initialization because the pinned Triton kernels could not consume offloaded
 tensors, while no-offload loading cannot preserve useful KV-cache headroom on
-the 24 GB RTX 4090. Model selection remains gated on a different measured
-candidate or serving topology, not parameter count. The next frozen candidate
-is a pinned Qwen3.5-27B Q4_K_M GGUF at a 16K/two-slot local llama.cpp operating
-point; it is not promoted unless restart characterization, compatibility, and
-both paired task-quality lanes pass.
+the 24 GB RTX 4090. Model selection remained gated on a different measured
+candidate or serving topology, not parameter count. A pinned Qwen3.5-27B
+Q4_K_M GGUF at a 16K/two-slot local llama.cpp operating point then passed two
+restart-separated characterizations, the complete live client compatibility
+suite, and both lanes of the paired task-quality gate. That exact artifact and
+runtime profile is the promoted five-seed pilot model; the roughly 1.3 GiB
+whole-device margin prohibits concurrent non-study GPU workloads.
 
 Execution provenance records the model repository revision, weight digest,
 server version and flags, CUDA/driver versions, quantization, context limit,

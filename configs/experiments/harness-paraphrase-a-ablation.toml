@@ -6,7 +6,7 @@ seeds = [101, 202, 303, 400, 505]
 repetitions = 3
 order = "randomized"
 case_manifest = "configs/cases/pilot-v1.json"
-model_profile = "configs/models/qwen35_9b_vllm.toml"
+model_profile = "configs/models/qwen35_27b_llamacpp_q4km.toml"
 fault_profile = "standard"
 approval_policy = "scripted"
 capture_sensitive = false
@@ -19,11 +19,9 @@ reviewer_enabled = true
 context_compaction = "native"
 
 [inference_runtime]
-server_kind = "vllm"
+server_kind = "llama_cpp"
 compute_backend = "nvidia"
-process_name = "vllm"
-container_name = "agent-lab-qwen35-9b-vllm"
-container_image_digest = "sha256:674c5aa666d38c07a0dc779f8c77a05c2b859617410d16dcdd8a8776166c92b9"
+process_name = "llama-server"
 command_timeout_seconds = 10
 
 [tracing]

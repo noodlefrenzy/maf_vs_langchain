@@ -108,8 +108,9 @@ def test_blocked_study_protocol_is_valid_and_references_exist() -> None:
 
     assert protocol.status.value == "blocked"
     assert protocol.primary_outcome == "task_success"
-    assert protocol.model_profile is None
-    assert len(protocol.blocked_reasons) == 3
+    assert protocol.model_profile == "configs/models/qwen35_27b_llamacpp_q4km.toml"
+    assert protocol.model_gate_passed is True
+    assert len(protocol.blocked_reasons) == 2
 
 
 def test_approved_study_protocol_fails_closed_without_gate_evidence() -> None:
@@ -145,10 +146,7 @@ def test_seed_cluster_sizing_uses_repetitions_as_clusters() -> None:
 def test_study_sizing_hashes_report_and_uses_larger_track_requirement(
     tmp_path: Path,
 ) -> None:
-    protocol_payload = load_study_protocol(PROTOCOL_PATH).model_dump(mode="json")
-    protocol_payload["model_profile"] = "configs/models/qwen35_9b_vllm.toml"
-    protocol_payload["model_gate_passed"] = True
-    protocol = StudyProtocol.model_validate(protocol_payload)
+    protocol = load_study_protocol(PROTOCOL_PATH)
     report = PairedReport(
         source_indices=["pilot-explicit.json", "pilot-harness.json"],
         source_index_paths=["/private/pilot-explicit.json", "/private/pilot-harness.json"],
@@ -174,7 +172,10 @@ def test_study_sizing_hashes_report_and_uses_larger_track_requirement(
 
 
 def test_study_sizing_rejects_unaccepted_model(tmp_path: Path) -> None:
-    protocol = load_study_protocol(PROTOCOL_PATH)
+    protocol_payload = load_study_protocol(PROTOCOL_PATH).model_dump(mode="json")
+    protocol_payload["model_profile"] = None
+    protocol_payload["model_gate_passed"] = False
+    protocol = StudyProtocol.model_validate(protocol_payload)
     report_path = tmp_path / "paired-report.json"
     report_path.write_text("{}", encoding="utf-8")
     report = PairedReport(

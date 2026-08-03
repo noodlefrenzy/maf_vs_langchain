@@ -17,6 +17,8 @@ decision requires a superseding ADR rather than rewriting its history.
 | [0009](0009-runner-process-protocol.md) | Use a versioned JSON-lines runner process protocol |
 | [0010](0010-symmetric-harness-contract.md) | Freeze a symmetric two-phase harness adapter contract |
 | [0011](0011-cosmos-checkpoint-backend.md) | Select Cosmos DB for production-intended workflow checkpoints |
+| [0012](0012-promote-qwen35-27b-llamacpp.md) | Promote the pinned Qwen3.5-27B Q4_K_M llama.cpp operating point to measured pilots |
 
-ADR 0008 supersedes ADR 0004's one-runtime sequencing while preserving its
-Qwen3.5-9B fit-check requirement.
+ADR 0012 supersedes ADR 0008 for measured-pilot runtime selection while
+preserving the earlier fit-check and development-smoke evidence as separate
+historical cohorts.

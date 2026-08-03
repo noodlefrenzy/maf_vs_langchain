@@ -595,17 +595,13 @@ engineering risks—not to select a universal winner.
 
 # Recommended next phase
 
-1. Select and characterize a different quality-tier model or serving topology;
-   Qwen3.5-9B failed the paired task-quality gate and the 35B-A3B GPTQ-Int4
-   candidate failed the single-4090 runtime-fit gate.
-2. Only after both gate lanes succeed on an accepted candidate, run the
-   five-seed explicit, harness, compute-matched, and unrestricted single-agent
-   profiles.
-3. Execute the frozen provenance-correction, prompt-paraphrase, no-review, and
+1. Run the five-seed explicit, harness, compute-matched, and unrestricted
+   single-agent profiles on the accepted Qwen3.5-27B Q4_K_M llama.cpp point.
+2. Execute the frozen provenance-correction, prompt-paraphrase, no-review, and
    no-compaction profiles.
-4. Repeat the Cosmos restart gate against the intended Azure account and
+3. Repeat the Cosmos restart gate against the intended Azure account and
    managed identity before enabling a production runner profile.
-5. Publish paired raw points, operational failures, effect sizes, uncertainty,
+4. Publish paired raw points, operational failures, effect sizes, uncertainty,
    and metric audit samples.
 
 ---

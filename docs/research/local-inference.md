@@ -178,15 +178,17 @@ the present single-4090/pinned-vLLM topology. See the
 [failed quality-tier gate record](qwen35-35b-a3b-gate.md). A different model,
 multi-GPU serving, or a server with supported layer-aware offload is required.
 
-## Candidate quality-tier topology: Qwen3.5-27B Q4_K_M on llama.cpp
+## Accepted quality-tier topology: Qwen3.5-27B Q4_K_M on llama.cpp
 
-A pinned 17.98 GB GGUF conversion of the official dense Qwen3.5-27B model is
-the next local candidate. It changes the failed vLLM/offload topology to a
-fully GPU-resident llama.cpp path at a first 16K/two-slot operating point. The
+A pinned 17.98 GB GGUF conversion of the official dense Qwen3.5-27B model
+changes the failed vLLM/offload topology to a fully GPU-resident llama.cpp path
+at a 16K/two-slot operating point. The
 artifact is third-party and is therefore frozen by repository revision and
 content SHA-256; no result is accepted from an unpinned alias. The
-restart-separated characterization, compatibility, and paired task gate are
-specified in
+restart-separated characterizations, full client compatibility suite, and both
+paired task-quality lanes passed at source `6989bb0`, promoting this exact
+artifact/runtime profile to the five-seed pilots. Its 23,229 MiB observed peak
+leaves only about 1.3 GiB of whole-device margin. The full record is in
 [qwen35-27b-llamacpp-gate.md](qwen35-27b-llamacpp-gate.md).
 
 ## Why not pick the largest model immediately

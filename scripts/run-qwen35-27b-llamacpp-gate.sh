@@ -10,14 +10,15 @@ readonly PORT="8002"
 readonly CONTEXT_TOKENS="16384"
 readonly SERVER_CONTEXT_TOKENS="32768"
 
-if [[ $# -ne 3 ]]; then
-  echo "usage: $0 <before_restart|after_restart> <evidence-directory> <runs-directory>" >&2
+if [[ $# -lt 3 || $# -gt 4 ]]; then
+  echo "usage: $0 <before_restart|after_restart> <evidence-directory> <runs-directory> [experiment-profile]" >&2
   exit 2
 fi
 
 readonly RESTART_PHASE="$1"
 readonly EVIDENCE_DIR="$2"
 readonly RUNS_DIR="$3"
+readonly EXPERIMENT_PROFILE="${4:-configs/experiments/qwen35-27b-task-quality-gate.toml}"
 readonly CHARACTERIZATION_OUTPUT="${EVIDENCE_DIR}/characterization.json"
 readonly COMPAT_OUTPUT="${EVIDENCE_DIR}/model-compatibility.json"
 readonly SERVER_LOG="${EVIDENCE_DIR}/server.log"
@@ -33,6 +34,10 @@ if [[ -z "${AGENT_LAB_GGUF_MODEL:-}" || ! -f "$AGENT_LAB_GGUF_MODEL" ]]; then
 fi
 if [[ -z "${AGENT_LAB_LLAMA_SERVER:-}" || ! -x "$AGENT_LAB_LLAMA_SERVER" ]]; then
   echo "AGENT_LAB_LLAMA_SERVER must name the pinned llama-server executable" >&2
+  exit 2
+fi
+if [[ ! -f "$EXPERIMENT_PROFILE" ]]; then
+  echo "experiment profile does not exist: $EXPERIMENT_PROFILE" >&2
   exit 2
 fi
 if [[ "$(sha256sum "$AGENT_LAB_GGUF_MODEL" | cut -d ' ' -f 1)" != "$MODEL_SHA256" ]]; then
@@ -129,7 +134,7 @@ if ! curl --fail --silent --max-time 2 "http://127.0.0.1:${PORT}/health" >/dev/n
 fi
 
 uv run --frozen python -m agent_lab.local_inference_benchmark \
-  --model-profile configs/models/qwen35_27b_llamacpp_q4km_experimental.toml \
+  --model-profile configs/models/qwen35_27b_llamacpp_q4km.toml \
   --context-tokens "$CONTEXT_TOKENS" \
   --output-caps 512 2048 \
   --concurrencies 1 2 \
@@ -141,12 +146,12 @@ uv run --frozen python -m agent_lab.local_inference_benchmark \
 
 if [[ "$RESTART_PHASE" == "after_restart" ]]; then
   uv run --frozen python -m agent_lab.model_compat_suite \
-    --model-profile configs/models/qwen35_27b_llamacpp_q4km_experimental.toml \
+    --model-profile configs/models/qwen35_27b_llamacpp_q4km.toml \
     --server-kind llama_cpp \
     --output "$COMPAT_OUTPUT"
 
   uv run --frozen agent-lab experiment run \
-    --experiment configs/experiments/qwen35-27b-task-quality-gate.toml \
+    --experiment "$EXPERIMENT_PROFILE" \
     --runs-dir "$RUNS_DIR" \
     --order-seed 1729
 fi

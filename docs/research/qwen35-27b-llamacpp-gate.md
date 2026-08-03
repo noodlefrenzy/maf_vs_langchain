@@ -1,6 +1,6 @@
 # Qwen3.5-27B llama.cpp quality-tier gate
 
-Status: artifact verified; corrected runtime gate pending
+Status: Accepted on 2026-08-03 at source `6989bb0`
 
 Qwen3.5-9B fit the RTX 4090 but failed to produce two successful lanes in
 either clean task-quality pair. Qwen3.5-35B-A3B GPTQ Int4 then failed inside
@@ -74,6 +74,51 @@ the mismatch before any characterization request. The retained failure log is
 not acceptance evidence; the corrected preregistered launch uses 32,768 total
 tokens to preserve the intended 16,384-token per-request contract.
 
+## Accepted result
+
+Both corrected launches started with zero server request counters, produced
+complete source/runtime provenance, ran every requested characterization cell,
+and were marked measurement-eligible with no skips. The before/after launches
+peaked at 23,221/23,229 MiB of whole-device GPU memory. Each completed the 512-
+and 2,048-token output-cap cells at concurrency one and two without a deferred
+request. Cancellation disconnected after the first visible token, drained the
+server, and left it healthy; malformed-tool correction passed with a separate
+reasoning channel on both launches.
+
+The restart launch then passed every MAF and LangChain actor, plain, streaming,
+structured-output, one-tool, multi-tool, multi-turn, and malformed-tool client
+probe. The final randomized pair used retry-storm seed 42, ran LangGraph first,
+and validated both bundles under pair ID
+`qwen35_27b_task_quality_gate_v1:explicit_workflow:seed-42:rep-0`:
+
+- LangGraph run `b3800985-1983-4e49-9c59-ae6c9e7316d8`: task success,
+  score 0.916667, expected 0.952381 trace completeness;
+- MAF Workflow run `767160e6-9390-4f69-b8da-d06523718156`: task success,
+  score 1.0, expected 0.952381 trace completeness.
+
+Both selected `rollback_checkout_retry_policy`, passed approval, applied the
+mitigation, and verified recovery. The offline v3 report revalidated the pair,
+reported zero operational failures and one success for each lane, and retained
+the single observed root-cause component difference without treating one seed
+as a powered comparison.
+
+Retained evidence SHA-256 values:
+
+| Evidence | SHA-256 |
+| --- | --- |
+| Before-restart characterization | `3257d2b8162dda4432e817ef5f1fd8dcc812fbcfb24f237e1a8dca54387051db` |
+| After-restart characterization | `e0838d99de16c7ef04b9ed85251c4d1b8434aae8b8fb78152ec98d568dceaf68` |
+| Live client compatibility | `d020bc7fc29dd148f4547eb93b614c8c37df7f9bc50af7b95b21f718adf2e445` |
+| Frozen execution plan | `cec38434ef14326f89f695c572cad1563c8cd39aa9dda043b2649b58988808c1` |
+| Validated experiment index | `f646eb41e03fbd768559e5f8089fd71ec414c1707443d4ebaf99d1c2ea6406ae` |
+| Revalidated paired report JSON | `7952b7829ca590af53943d9ed36c83f14e3ac15afb0108f1985326fcc6f6e718` |
+| Self-contained paired report HTML | `5e1eaa5a5de150722e7ffa371f00a31c05678a6c8e99e96a6e0b6e5cf8d6fbff` |
+
+This accepts only the pinned Q4_K_M artifact and exact llama.cpp operating
+point. The roughly 1.3 GiB whole-device margin is adequate for the sequential
+pilot path demonstrated here but is narrow; concurrent non-study GPU workloads
+remain prohibited during measurement.
+
 ## Acquisition and execution
 
 Download the exact revision to a path containing the immutable snapshot ID:
@@ -113,10 +158,10 @@ task gate.
 
 ## Acceptance rule
 
-Promotion remains fail closed. Both restart characterizations must be eligible,
+Promotion was fail closed. Both restart characterizations are eligible,
 the compatibility suite must pass, source and runtime attestation must be
 complete, both paired task lanes must validate and achieve `task_success`, and
-runtime/VRAM must leave a credible path to the repeated pilot. A load, parser,
-budget, provenance, or one-lane quality failure rejects this operating point;
-it does not justify weakening the task threshold or silently changing the
-quantization.
+runtime/VRAM must leave a credible path to the repeated pilot. The retained
+evidence satisfies those conditions, so this exact profile is promoted to the
+five-seed pilot. The rule remains unchanged for any future artifact, server,
+context, or quantization change.

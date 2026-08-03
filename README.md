@@ -97,8 +97,11 @@ with two corrected Qwen3.5-9B task-quality gates. The first contained one
 LangGraph task success and one valid MAF evidence-gate failure; the second
 reversed the split, with MAF succeeding while LangGraph completed without
 effective containment or recovery. Neither pair had two successful lanes, so
-Qwen3.5-9B remains a fit-check model and none of the larger profiles were
-promoted. The clean second pair also validates the versioned per-call,
+Qwen3.5-9B remains a fit-check model. A pinned Qwen3.5-27B Q4_K_M GGUF on local
+llama.cpp subsequently cleared both restart characterizations, the full
+MAF/LangChain compatibility suite, and a paired task-quality gate with two
+successful lanes; that exact operating point is promoted to the five-seed
+pilots. The clean second 9B pair also validates the versioned per-call,
 host/GPU, and control-plane ledgers documented in the
 [native run-observability validation](docs/research/run-observability-validation.md).
 A subsequent balanced 16-launch tracing ablation measured a consistent fixed
@@ -106,10 +109,9 @@ control-path cost: median paired increases of 134 ms for MAF and 423 ms for
 LangGraph, including only 6--7 ms of explicit trace flush. Native tracing stays
 enabled for measured pilots; the full method and limits are in the
 [tracing study](docs/research/native-tracing-overhead.md).
-The next quality-tier candidate is a pinned Qwen3.5-27B Q4_K_M GGUF on local
-llama.cpp; its restart, compatibility, and one-seed paired gate are specified
-but not yet accepted. See the
-[candidate gate](docs/research/qwen35-27b-llamacpp-gate.md). Cosmos DB is now
+The accepted profile leaves only about 1.3 GiB of whole-device GPU margin, so
+measured execution prohibits concurrent non-study GPU workloads. See the
+[accepted gate](docs/research/qwen35-27b-llamacpp-gate.md). Cosmos DB is now
 the selected production-intended checkpoint
 substrate for both explicit lanes; both provider adapters passed a pinned
 emulator restart gate, while real Azure deployment acceptance remains separate.

@@ -6,6 +6,9 @@ Date: 2026-08-03
 
 Supersedes: ADR 0004
 
+Superseded for measured-pilot runtime selection by ADR 0012. The fit-check and
+development-smoke cohort distinctions remain historical requirements.
+
 ## Context
 
 ADR 0004 selected a local vLLM Chat Completions endpoint and Qwen3.5-9B as the

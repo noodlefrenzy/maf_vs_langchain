@@ -2,7 +2,6 @@ schema_version = "agent-lab-study-protocol/v1"
 study_id = "maf_vs_langchain_measured_v1"
 status = "blocked"
 blocked_reasons = [
-  "No quality-tier model has cleared the paired task-success gate.",
   "No accepted-model five-seed pilot exists for seed-cluster variance and runtime sizing.",
   "Independent reviewer approval has not been recorded.",
 ]
@@ -29,7 +28,8 @@ ablation_policy = "matched_exploratory"
 developer_effort_policy = "descriptive_only"
 evidence_retention = "portable_redacted_plus_owner_only_raw"
 component_discrimination_passed = false
-model_gate_passed = false
+model_profile = "configs/models/qwen35_27b_llamacpp_q4km.toml"
+model_gate_passed = true
 frozen_experiment_profiles = [
   "configs/experiments/explicit-pilot.toml",
   "configs/experiments/harness-pilot.toml",

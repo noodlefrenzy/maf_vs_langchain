@@ -101,8 +101,10 @@ implemented. Current milestone status is:
    LangGraph completed at 0.6 without effective containment or recovery. Since
    neither pair had two successful lanes, Qwen3.5-9B remains the fit-check model.
    The pinned Qwen3.5-35B-A3B GPTQ-Int4 follow-up loaded at both tested CPU-
-   offload points but failed engine initialization, so no larger pilot profile
-   was promoted.
+   offload points but failed engine initialization. The pinned Qwen3.5-27B
+   Q4_K_M llama.cpp follow-up then passed both restart characterizations, the
+   complete client suite, and both lanes of its paired task-quality gate at
+   source `6989bb0`; that exact profile is promoted to the five-seed pilots.
 4. The symmetric canonical/paraphrase-A, zero/one/two-turn, no-review, and
    no-compaction harness ablation controls and profiles are implemented and
    protocol-probed, but unmeasured. Active roles, prompts, and native compaction
@@ -120,7 +122,7 @@ implemented. Current milestone status is:
    copy of every raw bundle. The archive no longer depends on workstation paths;
    transfer and publication rules are documented in `evidence-retention.md`.
    A final powered paired report and component-discrimination analysis still
-   require an accepted model and pilot.
+   require the accepted-model pilots.
 7. The rolling 72-hour dependency quarantine is now enforced in every uv
    project and as a prerequisite CI job. It covers direct and transitive locked
    registry artifacts without adding package or index exclusions.
@@ -128,8 +130,8 @@ implemented. Current milestone status is:
    seed 400 replaces the duplicate retry-storm seed 404. Every experiment
    profile passes the no-service execution planner in CI, and actual execution
    exclusively records the resolved case/ordering/contract plan before starting
-   services. The empirical pilot remains blocked on an accepted model and the
-   other documented P1 readiness gates.
+   services. The quality-tier model gate is now closed; the empirical pilot and
+   the other documented P1 readiness gates remain.
 9. Run evidence now carries monotonic normalized-event timestamps, separately
    timed control-plane phases, per-call model JSONL with optional
    cached/reasoning usage, and fixed-cadence host/GPU JSONL with measured
@@ -156,7 +158,7 @@ implemented. Current milestone status is:
     developer effort. Approval fails closed without a passed model gate, pilot
     report hash, computed seed/runtime plan, component discrimination, clean
     source, and reviewer sign-off. Sample sizing remains correctly blocked
-    until an accepted-model pilot exists; see
+    until the accepted-model pilot exists; see
     `measured-study-preregistration.md`. Report schema v3 makes the frozen
     analysis unit executable: repetitions are averaged within seed, bootstrap
     intervals resample seeds, paired sign-flip p-values operate on seed-level

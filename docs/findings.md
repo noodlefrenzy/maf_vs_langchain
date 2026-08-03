@@ -690,6 +690,16 @@ offloaded. A no-offload run cannot leave useful KV-cache headroom on this host,
 so this candidate was rejected before client compatibility or task-quality
 measurement.
 
+The pinned Qwen3.5-27B Q4_K_M follow-up changed to a fully GPU-resident
+llama.cpp topology and cleared the gate at source `6989bb0`. Both corrected
+restart launches completed every characterization cell with no skips, the full
+MAF/LangChain client matrix passed, and the retry-storm seed-42 pair produced
+two validated task successes: LangGraph scored 0.916667 and MAF Workflow 1.0.
+The profile is therefore promoted to the five-seed pilots. Its 23,229 MiB
+observed whole-device peak leaves only about 1.3 GiB of margin, so this is an
+accepted but deliberately exclusive GPU operating point rather than evidence
+of spare capacity.
+
 The neutral paired observer is now operational independently of that model
 gate. It discovers both preallocated lane bundles, replays or tails public
 normalized events with sequence-addressable SSE, exposes Phoenix and attested
@@ -703,23 +713,18 @@ pair ID; see
 
 ## Recommended next work
 
-1. Select and characterize a different quality-tier candidate or serving
-   topology; Qwen3.5-9B failed the paired task-quality gate and the 35B-A3B
-   GPTQ-Int4 candidate failed the single-4090 runtime-fit gate. A pinned local
-   Qwen3.5-27B Q4_K_M llama.cpp candidate is now specified and awaiting its
-   restart-separated runtime, compatibility, and paired task gates.
-2. Only after both gate lanes succeed on an accepted candidate, run the
-   implemented five-seed explicit,
+1. Run the implemented five-seed explicit,
    harness, compute-matched single-agent, and unrestricted single-agent
-   profiles with the standard fault schedule and balanced lane order.
-3. After the same gate, execute the implemented symmetric
+   profiles on the accepted Qwen3.5-27B llama.cpp operating point with the
+   standard fault schedule and balanced lane order.
+2. Execute the implemented symmetric
    harness-policy ablations for zero/one/two provenance-correction turns and
    the matched paraphrase-A, no-review, and no-compaction variants.
-4. Repeat the validated Cosmos restart/resume gate against the intended Azure
+3. Repeat the validated Cosmos restart/resume gate against the intended Azure
    account and managed identity before enabling a production runner profile;
    the pinned emulator closes provider compatibility, not deployment
    acceptance. See [production-checkpoints.md](production-checkpoints.md).
-5. Run the implemented offline paired report builder on the clean-source pilot
+4. Run the implemented offline paired report builder on the clean-source pilot
    indices. It retains raw paired points and operational failures, computes
    seed-cluster paired effects, deterministic seed-bootstrap intervals,
    sign-flip and Holm inference, reports component discrimination, and
