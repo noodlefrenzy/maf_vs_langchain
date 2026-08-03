@@ -724,10 +724,10 @@ pair ID; see
 
 ## Recommended next work
 
-1. Treat the canonical harness pilot's zero-variance result as a design gate:
-   use the retained per-run evidence to revise and re-freeze the shared phase
-   ceiling and canonical harness interaction, then require a clean paired gate
-   before another five-seed harness pilot.
+1. Run ADR 0015's clean harness-specific paired gate. Its newly hash-frozen
+   prompts make the unchanged hard phase bound actionable and provide the exact
+   role tool/evidence allowlist enforced by synthesis and correction. Do not
+   start another five-seed harness pilot unless that gate succeeds.
 2. Use the implemented matched correction-turn, paraphrase-A, no-review, and
    no-compaction profiles as diagnostic sensitivity checks; do not substitute
    them post hoc for the canonical confirmatory profile.

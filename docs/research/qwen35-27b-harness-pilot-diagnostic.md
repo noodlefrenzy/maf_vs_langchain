@@ -119,7 +119,9 @@ fails closed with `opinionated_harness pilot has zero paired seed variance;
 sample size is unidentified`. This is the intended statistical guard: the
 replacement closes ADR 0014's lifecycle-integrity defect, but it does not
 qualify the canonical harness operating point for a measured comparison.
-Before another five-seed harness pilot, the shared phase ceiling and canonical
-harness interaction must be revised from this retained failure evidence (or a
-different accepted model must pass the same gate), then frozen under a new
-contract hash and re-gated at clean source.
+ADR 0015 revises the canonical shared interaction from this retained failure
+evidence without relaxing the hard ceiling or validator: bounded completion is
+explicit in the prompts and synthesis/correction receive exact role tool and
+evidence allowlists. A new clean one-pair harness gate must pass under that
+contract hash before another five-seed harness pilot (or a different accepted
+model must pass the same gate).

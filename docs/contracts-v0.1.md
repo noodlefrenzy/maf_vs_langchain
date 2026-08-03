@@ -30,11 +30,14 @@ and their locks remain readable.
 Both framework runner packages expose a small `shared_contract_snapshot`
 adapter. The parity test compares their rendered prompts and all bundle hashes
 byte-for-byte. Opinionated-harness instructions and parity-critical control
-policy are part of the shared bundle. The single-agent adapters likewise share
-one frozen baseline contract: MAF `Agent` and LangChain `create_agent` each run
-one model-driven incident commander with the same discovery-tool union and no
-delegation. An unstructured first phase must make real MCP calls through at
-least two capability sources; a tool-disabled structured phase receives the
+policy are part of the shared bundle. The harness prompts disclose the hard
+six-response phase bound, reserve specialist completion capacity after at most
+four tool-calling responses, and render exact role-specific tool/evidence
+provenance for synthesis and correction. The single-agent adapters likewise
+share one frozen baseline contract: MAF `Agent` and LangChain `create_agent`
+each run one model-driven incident commander with the same discovery-tool union
+and no delegation. An unstructured first phase must make real MCP calls through
+at least two capability sources; a tool-disabled structured phase receives the
 observed source-specific evidence allowlist. Both adapters enforce the same
 eight-dispatch per-phase model-call ceiling beneath the framework-neutral outer
 run budget. Framework-native implementation details remain captured in each

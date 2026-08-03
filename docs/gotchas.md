@@ -183,6 +183,15 @@ The MAF lane permits one tool-disabled correction turn containing the validator
 error and the same observed allowlist; a second mismatch remains a runner
 failure rather than being rewritten by adapter code.
 
+The accepted-model replacement pilot showed that an evidence-only allowlist
+was not enough: 11/15 MAF proposals cited blank, placeholder, management-plane,
+or otherwise unobserved tool/evidence provenance, even though the validator
+also enforced exact `tools_used`. The shared synthesis/correction prompt now
+renders both the per-role MCP tool names and evidence IDs and explicitly
+excludes planning, workspace, and background-agent control names. Specialists
+are also told that public brief/status calls are insufficient and must obtain a
+role-specific evidence ID. The validator remains unchanged and authoritative.
+
 Deep Agents 0.7.1 automatically adds a `general-purpose` subagent unless a
 matching `HarnessProfile` disables it. That would create a fifth, unmatched
 role, so the experiment registers an OpenAI-family profile that disables the
@@ -231,6 +240,15 @@ call limiter to that coordinator, ending a delegation invocation after six
 commander calls while retaining its task-result messages. The framework-neutral
 36-call outer budget still counts commander and specialist calls and remains
 the authoritative run limit.
+
+The same accepted-model pilot reached the six-call limit inside a Deep Agents
+specialist in all 15 runs. The hard limit was working, but the natural
+completion prompt did not tell the model to reserve a final response; each
+specialist used its sixth response for more tools and failed before dispatch
+seven. Both harnesses now receive the same explicit six-response notice and a
+soft maximum of four tool-calling responses before final JSON. This does not
+raise or silently catch the hard limit; it makes the already-frozen boundary
+possible for the model to obey.
 
 With those guards frozen, the order-seed-1737 paired smoke completed both
 lanes and produced inference-eligible bundles. Deep Agents scored `0.35` and

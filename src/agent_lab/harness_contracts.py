@@ -30,6 +30,7 @@ MIN_HARNESS_SPECIALIST_ROLES = 2
 HARNESS_DELEGATION_REPAIR_TURNS = 2
 HARNESS_PROVENANCE_CORRECTION_TURNS = 1
 HARNESS_PHASE_MODEL_CALL_LIMIT = 6
+HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT = 4
 HARNESS_DELEGATION_RECURSION_LIMIT = 64
 HARNESS_SYNTHESIS_RECURSION_LIMIT = 16
 
@@ -176,13 +177,16 @@ def validate_harness_role_provenance(
             )
 
 
-def harness_evidence_allowlist(
+def harness_provenance_allowlist(
     observations: Mapping[AgentRole, HarnessRoleObservation],
 ) -> str:
-    """Render the same deterministic role-scoped evidence allowlist for both lanes."""
+    """Render the same deterministic role-scoped provenance allowlist for both lanes."""
 
     return "\n".join(
-        f"- {role.value}: {sorted(observation.evidence_ids)}"
+        (
+            f"- {role.value}: tools_used={sorted(observation.called_tools)}; "
+            f"evidence_ids={sorted(observation.evidence_ids)}"
+        )
         for role, observation in sorted(observations.items(), key=lambda item: item[0].value)
         if observation.called_tools
     )
@@ -195,11 +199,12 @@ def harness_delegation_repair_prompt(missing_roles: list[str]) -> str:
         "The deterministic evidence gate is not yet satisfied: fewer than two specialist "
         "roles have made real MCP calls. Delegate now to at least one of these remaining "
         f"specialists and retrieve its completed result: {missing_roles}. Do not invent the "
-        "result yourself."
+        "result yourself. This repair phase has the same hard six-response limit; delegate "
+        "immediately instead of doing optional planning or workspace work first."
     )
 
 
-def harness_synthesis_prompt(evidence_allowlist: str) -> str:
+def harness_synthesis_prompt(provenance_allowlist: str) -> str:
     """Return the matched structured-synthesis instruction for both harness lanes."""
 
     return (
@@ -207,20 +212,24 @@ def harness_synthesis_prompt(evidence_allowlist: str) -> str:
         "the HarnessProposal now. Include no finding that was not returned by a specialist. "
         "Opaque evidence IDs must be copied byte-for-byte; do not replace them with dates, "
         "descriptions, or invented aliases. The control plane observed this role-specific "
-        f"evidence-ID allowlist:\n{evidence_allowlist}\nEvery finding must cite one or more "
-        "exact IDs from its own role's list, and the commander synthesis must cite exact IDs "
-        "from at least two included roles."
+        f"provenance allowlist:\n{provenance_allowlist}\nFor each finding, tools_used and "
+        "evidence_ids must contain only nonempty exact entries from that role's lists. Never "
+        "include planning, workspace, task-management, background-agent, placeholder, or blank "
+        "tool names. The commander synthesis must cite exact evidence IDs from at least two "
+        "included roles."
     )
 
 
-def harness_provenance_correction_prompt(error: ValueError, evidence_allowlist: str) -> str:
+def harness_provenance_correction_prompt(error: ValueError, provenance_allowlist: str) -> str:
     """Return the sole matched repair instruction after provenance validation fails."""
 
     return (
         "The previous structured proposal failed the deterministic provenance validator: "
-        f"{error}. Return one corrected HarnessProposal. Copy only exact evidence IDs from "
-        "this role-specific allowlist and keep findings scoped to their roles:\n"
-        f"{evidence_allowlist}"
+        f"{error}. Return one corrected HarnessProposal. Copy only exact nonempty tools_used "
+        "and evidence_ids entries from this role-specific provenance allowlist, keep findings "
+        "scoped to their roles, and remove all planning, workspace, task-management, "
+        "background-agent, placeholder, or blank names:\n"
+        f"{provenance_allowlist}"
     )
 
 
@@ -290,7 +299,9 @@ def harness_task_prompt(
             "proposed_mitigation_id and put the readable action in proposed_mitigation. Return "
             "one HarnessProposal containing the real findings from every consulted specialist "
             "and one commander synthesis. Approval, mitigation, and recovery belong to the "
-            "outer control plane and must not be claimed here."
+            "outer control plane and must not be claimed here. The delegation phase has a hard "
+            "six-response limit: delegate immediately before optional planning or workspace "
+            "work."
         )
     delegation = (
         "at least two of the role-scoped telemetry, change, and reliability specialists"
@@ -309,7 +320,8 @@ def harness_task_prompt(
         "description in proposed_mitigation. Return the HarnessProposal schema with "
         "each consulted specialist's actual finding and one commander synthesis. Do not claim "
         "that approval, mitigation, or recovery has occurred; the outer control plane owns those "
-        "steps."
+        "steps. The delegation phase has a hard six-response limit: delegate immediately before "
+        "optional planning or workspace work."
     )
 
 
@@ -330,19 +342,27 @@ def harness_specialist_prompt(
     if prompt_variant == "paraphrase_a":
         return (
             f"{render_role_prompt(role)}\n\n"
-            "Gather enough evidence with only your role-scoped MCP tools, then make no more "
-            "tool calls. Finish with a bare JSON object—no Markdown—whose fields are exactly "
+            "Gather enough evidence with only your role-scoped MCP tools. The public incident "
+            "brief and status are not sufficient: call at least one role-specific evidence "
+            f"tool. Use no more than {HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT} tool-calling "
+            "responses, then make no more tool calls. Finish with a bare JSON object—no "
+            "Markdown—whose fields are exactly "
             "role, summary, claims, evidence_ids, tools_used, and uncertainties. Use your role "
             "ID for role, copy only evidence IDs observed in your own tool results, and name "
-            "only MCP tools you actually invoked."
+            "only MCP tools you actually invoked. Your subtask has a hard six-response limit; "
+            "reserve the final response for this JSON even if uncertainty remains."
         )
     return (
         f"{render_role_prompt(role)}\n\n"
-        "Use your role-scoped MCP tools to gather sufficient evidence, then stop calling tools. "
-        "Your final assistant message must be one JSON object with exactly these fields: role, "
+        "Use your role-scoped MCP tools to gather sufficient evidence. The public incident brief "
+        "and status are not sufficient: call at least one role-specific evidence tool. Use no "
+        f"more than {HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT} tool-calling responses, then stop "
+        "calling tools. Your final assistant message must be one JSON object with exactly these "
+        "fields: role, "
         "summary, claims, evidence_ids, tools_used, and uncertainties. Set role to your role ID; "
         "cite only evidence IDs returned by your own MCP calls; list only MCP tools you actually "
-        "called. Do not wrap the JSON in Markdown."
+        "called. Do not wrap the JSON in Markdown. Your subtask has a hard six-response limit; "
+        "reserve the final response for this JSON even if uncertainty remains."
     )
 
 
@@ -370,10 +390,10 @@ def harness_ablation_payload(profile: HarnessAblationProfile) -> dict[str, objec
             "delegation_repair_template": harness_delegation_repair_prompt(
                 ["{remaining_specialist_roles}"]
             ),
-            "synthesis_template": harness_synthesis_prompt("{role_evidence_allowlist}"),
+            "synthesis_template": harness_synthesis_prompt("{role_provenance_allowlist}"),
             "provenance_correction_template": harness_provenance_correction_prompt(
                 ValueError("{validator_error}"),
-                "{role_evidence_allowlist}",
+                "{role_provenance_allowlist}",
             ),
         },
     }
@@ -402,6 +422,7 @@ def harness_contract_payload() -> dict[str, object]:
         },
         "phase_limits": {
             "model_calls": HARNESS_PHASE_MODEL_CALL_LIMIT,
+            "specialist_tool_calling_responses": HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT,
             "delegation_recursion": HARNESS_DELEGATION_RECURSION_LIMIT,
             "synthesis_recursion": HARNESS_SYNTHESIS_RECURSION_LIMIT,
         },
@@ -414,10 +435,10 @@ def harness_contract_payload() -> dict[str, object]:
             "delegation_repair_template": harness_delegation_repair_prompt(
                 ["{remaining_specialist_roles}"]
             ),
-            "synthesis_template": harness_synthesis_prompt("{role_evidence_allowlist}"),
+            "synthesis_template": harness_synthesis_prompt("{role_provenance_allowlist}"),
             "provenance_correction_template": harness_provenance_correction_prompt(
                 ValueError("{validator_error}"),
-                "{role_evidence_allowlist}",
+                "{role_provenance_allowlist}",
             ),
         },
         "ablation_space": {

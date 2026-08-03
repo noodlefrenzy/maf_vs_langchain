@@ -31,7 +31,7 @@ from agent_lab.harness_contracts import (
     active_harness_roles,
     evaluate_harness_proposal,
     harness_delegation_repair_prompt,
-    harness_evidence_allowlist,
+    harness_provenance_allowlist,
     harness_provenance_correction_prompt,
     harness_specialist_prompt,
     harness_specialist_roles,
@@ -297,7 +297,7 @@ async def run_live_approved(
     observations = _role_observations(trackers)
     require_harness_delegation(observations)
 
-    evidence_allowlist = harness_evidence_allowlist(observations)
+    evidence_allowlist = harness_provenance_allowlist(observations)
     synthesis_graph = create_deep_agent(
         model=commander_model,
         system_prompt=render_role_prompt(AgentRole.INCIDENT_COMMANDER),

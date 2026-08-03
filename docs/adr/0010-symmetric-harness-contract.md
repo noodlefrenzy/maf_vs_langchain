@@ -49,3 +49,7 @@ the opinionated behavior under test.
 - The two phases add coordinator turns and must be reported as harness cost.
 - Previous harness smoke cohorts remain engineering evidence, not comparable
   post-parity measurements.
+
+ADR 0015 retains these hard limits and validators while making the limit
+actionable in shared coordinator/specialist prompts and expanding the rendered
+correction allowlist to cover both exact tools and evidence IDs.

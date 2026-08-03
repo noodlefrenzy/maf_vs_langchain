@@ -20,6 +20,7 @@ decision requires a superseding ADR rather than rewriting its history.
 | [0012](0012-promote-qwen35-27b-llamacpp.md) | Promote the pinned Qwen3.5-27B Q4_K_M llama.cpp operating point to measured pilots |
 | [0013](0013-bounded-explicit-tool-retry.md) | Apply one symmetric retry to explicitly retryable structured tool failures |
 | [0014](0014-bound-native-harness-subagent-lifecycle.md) | Enforce native specialist phase limits and settle all subagent work before harness phase exit |
+| [0015](0015-make-harness-bounds-and-provenance-actionable.md) | Expose bounded completion and exact role provenance in the shared harness prompts |
 
 ADR 0012 supersedes ADR 0008 for measured-pilot runtime selection while
 preserving the earlier fit-check and development-smoke evidence as separate

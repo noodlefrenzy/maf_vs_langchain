@@ -27,7 +27,7 @@ from agent_lab.harness_contracts import (
     active_harness_roles,
     evaluate_harness_proposal,
     harness_delegation_repair_prompt,
-    harness_evidence_allowlist,
+    harness_provenance_allowlist,
     harness_provenance_correction_prompt,
     harness_specialist_prompt,
     harness_specialist_roles,
@@ -316,7 +316,7 @@ async def run_live_approved(
             await _cancel_background_roles(roles)
         observations = _role_observations(roles)
         require_harness_delegation(observations)
-        evidence_allowlist = harness_evidence_allowlist(observations)
+        evidence_allowlist = harness_provenance_allowlist(observations)
         with commander_client.bounded_phase():
             response = await commander.run(
                 harness_synthesis_prompt(evidence_allowlist),
