@@ -172,6 +172,8 @@ def test_harness_contract_freezes_symmetric_repairs_and_limits() -> None:
         "minimum_active_specialist_roles": 2,
         "repair_turns": 2,
         "activity_proof": "at_least_one_native_mcp_call",
+        "completion_barrier": "settle_all_started_specialist_tasks_before_gate",
+        "exceptional_exit": "cancel_and_drain_started_specialist_tasks",
         "failure_mode": "error",
     }
     assert payload["provenance"] == {

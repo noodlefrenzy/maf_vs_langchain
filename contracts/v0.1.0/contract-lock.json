@@ -1,9 +1,9 @@
 {
   "artifact_schemas_sha256": "19ce51c862902f8e31f8f1abb60904fa3f9b57f05992444a927ff9d9d25332a2",
   "baseline_contract_sha256": "260e32a1b671aefbfac59ca86cfd08665ee9e725d9ca1cfba0897640c77ab27d",
-  "contract_bundle_sha256": "0524c53e0d75575358ee9cb3590d1a069376f47421b366585473ac086d9e2fba",
+  "contract_bundle_sha256": "92c547cda14da102d1105f874fdb0dab01e3d0a80a62cb530fc054c256b03b9b",
   "error_taxonomy_sha256": "745145a68ca360b4854ee30beb6e0a27cc17f94cf583b254123073aac76b7c51",
-  "harness_contract_sha256": "3d77f61ec0840e5e8b10ffc5f8f27b725f8d452b9733e8c50bc76b680eb39997",
+  "harness_contract_sha256": "7a31ed1b38ef8158d5a0b9f44d973549d3fb79f8f42e9676059199a028c1ba88",
   "prompt_bundle_sha256": "864ed9ac2d825ff73b46747ed29039bc6da2b4505bca7a91b1bce34ac97ada9d",
   "schema_version": "0.1.0",
   "tool_catalog_sha256": "62adb0edbbe48bc58ee9644ce444d36b9ab03172ba93ba3d97161cde978ba898",

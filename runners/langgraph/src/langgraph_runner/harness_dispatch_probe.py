@@ -7,7 +7,12 @@ import asyncio
 import json
 from typing import Any
 
-from deepagents import create_deep_agent
+from deepagents import SubAgent, create_deep_agent
+from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 
 from agent_lab.model_compat_contracts import (
@@ -17,6 +22,10 @@ from agent_lab.model_compat_contracts import (
     fixture_prompt,
 )
 from langgraph_runner.chat_telemetry import InstrumentedChatOpenAI
+from langgraph_runner.harness_lane import (
+    _phase_model_call_limit_middleware,
+    _SubagentTaskTracker,
+)
 
 
 @tool(description="Look up an incident by identifier.")
@@ -76,6 +85,147 @@ class _RecordingTelemetry:
         return None
 
 
+class _DelegatingFakeModel(BaseChatModel):
+    """Issue one native Deep Agents task call."""
+
+    dispatches: int = 0
+
+    def bind_tools(self, tools: Any, *, tool_choice: Any = None, **kwargs: Any) -> BaseChatModel:
+        del tools, tool_choice, kwargs
+        return self
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del messages, stop, run_manager, kwargs
+        self.dispatches += 1
+        message = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "task",
+                    "args": {
+                        "description": "Keep checking the incident until it is stable.",
+                        "subagent_type": "looping_specialist",
+                    },
+                    "id": "call_delegate",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+    @property
+    def _llm_type(self) -> str:
+        return "delegating-fake-model"
+
+
+class _LoopingFakeModel(BaseChatModel):
+    """Request another tool call after every tool result."""
+
+    dispatches: int = 0
+
+    def bind_tools(self, tools: Any, *, tool_choice: Any = None, **kwargs: Any) -> BaseChatModel:
+        del tools, tool_choice, kwargs
+        return self
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del messages, stop, run_manager, kwargs
+        self.dispatches += 1
+        message = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "looping_lookup",
+                    "args": {"incident_id": "INC-42"},
+                    "id": f"call_loop_{self.dispatches}",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+    @property
+    def _llm_type(self) -> str:
+        return "looping-fake-model"
+
+
+async def _probe_subagent_phase_limit() -> dict[str, Any]:
+    tool_calls = 0
+
+    @tool(description="Look up an incident and keep the specialist loop active.")
+    def looping_lookup(incident_id: str) -> str:
+        nonlocal tool_calls
+        tool_calls += 1
+        return f"{incident_id} still requires another check"
+
+    parent_model = _DelegatingFakeModel()
+    specialist_model = _LoopingFakeModel()
+    graph = create_deep_agent(
+        model=parent_model,
+        system_prompt="Delegate the requested investigation.",
+        subagents=[
+            SubAgent(
+                name="looping_specialist",
+                description="Repeatedly checks an incident.",
+                system_prompt="Keep checking the incident with the supplied tool.",
+                tools=[looping_lookup],
+                model=specialist_model,
+                middleware=[_phase_model_call_limit_middleware()],
+            )
+        ],
+        name="subagent_limit_probe",
+    )
+    error = None
+    try:
+        await graph.ainvoke(
+            {"messages": [{"role": "user", "content": "Investigate INC-42."}]},
+            config={"recursion_limit": 50},
+        )
+    except ModelCallLimitExceededError as exc:
+        error = type(exc).__name__
+    return {
+        "error": error,
+        "parent_dispatches": parent_model.dispatches,
+        "specialist_dispatches": specialist_model.dispatches,
+        "tool_calls": tool_calls,
+    }
+
+
+async def _probe_subagent_task_drain() -> dict[str, Any]:
+    tracker = _SubagentTaskTracker()
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class _Request:
+        tool_call = {"name": "task"}
+
+    async def handler(_: Any) -> str:
+        started.set()
+        await release.wait()
+        return "finished"
+
+    task = asyncio.create_task(tracker.awrap_tool_call(_Request(), handler))
+    await started.wait()
+    drain = asyncio.create_task(tracker.cancel_and_drain())
+    try:
+        result = await task
+    except asyncio.CancelledError:
+        result = None
+    await drain
+    return {"cancelled": task.cancelled(), "result": result}
+
+
 async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, Any]:
     telemetry = _RecordingTelemetry(model_call_limit)
     profile = compatibility_model_profile(base_url, MODEL_NAME)
@@ -103,6 +253,8 @@ async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, A
         stream_text = "".join(chunk.text for chunk in chunks)
     except RuntimeError as exc:
         error = str(exc)
+    subagent_phase_limit = await _probe_subagent_phase_limit()
+    subagent_task_drain = await _probe_subagent_task_drain()
     return {
         "text": text,
         "stream_text": stream_text,
@@ -112,6 +264,8 @@ async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, A
         "output_tokens": model.lab_stats.output_tokens,
         "model_starts": telemetry.model_starts,
         "model_finishes": telemetry.model_finishes,
+        "subagent_phase_limit": subagent_phase_limit,
+        "subagent_task_drain": subagent_task_drain,
     }
 
 

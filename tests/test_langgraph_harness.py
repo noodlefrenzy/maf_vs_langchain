@@ -62,6 +62,16 @@ def test_deep_harness_counts_each_native_model_dispatch_and_stream_fallback() ->
         "streaming",
     ]
     assert records[-1]["redacted_request"].get("stream", False) is False
+    assert payload["subagent_phase_limit"] == {
+        "error": "ModelCallLimitExceededError",
+        "parent_dispatches": 1,
+        "specialist_dispatches": 6,
+        "tool_calls": 6,
+    }
+    assert payload["subagent_task_drain"] == {
+        "cancelled": True,
+        "result": None,
+    }
 
 
 def test_deep_harness_enforces_budget_before_next_native_dispatch() -> None:

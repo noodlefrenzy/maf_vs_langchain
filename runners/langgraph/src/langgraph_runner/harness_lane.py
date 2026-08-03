@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from deepagents import (
@@ -12,7 +13,7 @@ from deepagents import (
     register_harness_profile,
 )
 from deepagents.backends.filesystem import FilesystemBackend
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
 from langchain.agents.structured_output import ProviderStrategy
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -95,6 +96,36 @@ class _ToolTracker:
         )
 
 
+class _SubagentTaskTracker(AgentMiddleware):
+    """Retain native task-tool executions until exceptional exits are reaped."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._active_tasks: set[asyncio.Task[Any]] = set()
+
+    async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
+        if request.tool_call["name"] != "task":
+            return await handler(request)
+        task = asyncio.current_task()
+        if task is None:
+            return await handler(request)
+        self._active_tasks.add(task)
+        try:
+            return await handler(request)
+        finally:
+            self._active_tasks.discard(task)
+
+    async def cancel_and_drain(self) -> None:
+        """Cancel and reap task-tool executions left by parallel failure."""
+
+        await asyncio.sleep(0)
+        while self._active_tasks:
+            tasks = tuple(self._active_tasks)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
 def _chat_model(
     profile: ModelProfile,
     *,
@@ -106,6 +137,15 @@ def _chat_model(
         profile=profile,
         telemetry=telemetry,
         framework="deep-agents",
+    )
+
+
+def _phase_model_call_limit_middleware() -> ModelCallLimitMiddleware:
+    """Return a fresh native limiter for one harness actor phase."""
+
+    return ModelCallLimitMiddleware(
+        run_limit=HARNESS_PHASE_MODEL_CALL_LIMIT,
+        exit_behavior="error",
     )
 
 
@@ -199,6 +239,7 @@ async def run_live_approved(
                 ),
                 tools=await _role_tools(request.role_endpoints[role], role, tracker),
                 model=model,
+                middleware=[_phase_model_call_limit_middleware()],
             )
         )
 
@@ -208,52 +249,51 @@ async def run_live_approved(
         telemetry=telemetry,
     )
     backend = FilesystemBackend(root_dir=workspace, virtual_mode=True)
+    subagent_task_tracker = _SubagentTaskTracker()
     delegation_graph = create_deep_agent(
         model=commander_model,
         system_prompt=render_role_prompt(AgentRole.INCIDENT_COMMANDER),
-        middleware=[
-            ModelCallLimitMiddleware(
-                run_limit=HARNESS_PHASE_MODEL_CALL_LIMIT,
-                exit_behavior="error",
-            )
-        ],
+        middleware=[_phase_model_call_limit_middleware(), subagent_task_tracker],
         subagents=subagents,
         backend=backend,
         name=AgentRole.INCIDENT_COMMANDER.value,
     )
-    state = await delegation_graph.ainvoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": harness_task_prompt(
-                        request.public_ticket,
-                        request.harness_ablation.prompt_variant,
-                        request.harness_ablation.reviewer_enabled,
-                    ),
-                }
-            ]
-        },
-        config={"recursion_limit": HARNESS_DELEGATION_RECURSION_LIMIT},
-    )
-    for _attempt in range(HARNESS_DELEGATION_REPAIR_TURNS):
-        observations = _role_observations(trackers)
-        observed_roles = active_harness_roles(observations)
-        if len(observed_roles) >= 2:
-            break
-        missing_roles = sorted(role.value for role in configured_roles - observed_roles)
+    try:
         state = await delegation_graph.ainvoke(
             {
                 "messages": [
-                    *state["messages"],
                     {
                         "role": "user",
-                        "content": harness_delegation_repair_prompt(missing_roles),
-                    },
+                        "content": harness_task_prompt(
+                            request.public_ticket,
+                            request.harness_ablation.prompt_variant,
+                            request.harness_ablation.reviewer_enabled,
+                        ),
+                    }
                 ]
             },
             config={"recursion_limit": HARNESS_DELEGATION_RECURSION_LIMIT},
         )
+        for _attempt in range(HARNESS_DELEGATION_REPAIR_TURNS):
+            observations = _role_observations(trackers)
+            observed_roles = active_harness_roles(observations)
+            if len(observed_roles) >= 2:
+                break
+            missing_roles = sorted(role.value for role in configured_roles - observed_roles)
+            state = await delegation_graph.ainvoke(
+                {
+                    "messages": [
+                        *state["messages"],
+                        {
+                            "role": "user",
+                            "content": harness_delegation_repair_prompt(missing_roles),
+                        },
+                    ]
+                },
+                config={"recursion_limit": HARNESS_DELEGATION_RECURSION_LIMIT},
+            )
+    finally:
+        await subagent_task_tracker.cancel_and_drain()
     observations = _role_observations(trackers)
     require_harness_delegation(observations)
 
@@ -261,12 +301,7 @@ async def run_live_approved(
     synthesis_graph = create_deep_agent(
         model=commander_model,
         system_prompt=render_role_prompt(AgentRole.INCIDENT_COMMANDER),
-        middleware=[
-            ModelCallLimitMiddleware(
-                run_limit=HARNESS_PHASE_MODEL_CALL_LIMIT,
-                exit_behavior="error",
-            )
-        ],
+        middleware=[_phase_model_call_limit_middleware()],
         backend=backend,
         response_format=ProviderStrategy(HarnessProposal),
         name=AgentRole.INCIDENT_COMMANDER.value,

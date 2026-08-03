@@ -17,6 +17,7 @@ from agent_lab.model_compat_contracts import (
 )
 from agent_lab.model_request_policy import maf_request_options
 from maf_runner.chat_telemetry import InstrumentedChatClient
+from maf_runner.harness_lane import _TrackedBackgroundAgent
 
 
 @tool(description="Look up an incident by identifier.")
@@ -76,6 +77,37 @@ class _RecordingTelemetry:
         return None
 
 
+class _BlockingFakeAgent:
+    name = "blocking_specialist"
+    description = "Waits for an explicit release."
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    def create_session(self) -> object:
+        return object()
+
+    async def run(self, *_: Any, **__: Any) -> str:
+        self.started.set()
+        await self.release.wait()
+        return "finished"
+
+
+async def _probe_background_task_drain() -> dict[str, Any]:
+    agent = _BlockingFakeAgent()
+    tracked = _TrackedBackgroundAgent(agent)
+    task = asyncio.create_task(tracked.run("investigate"))
+    await agent.started.wait()
+    drain = asyncio.create_task(tracked.drain())
+    await asyncio.sleep(0)
+    drain_waited = not drain.done()
+    agent.release.set()
+    result = await task
+    await drain
+    return {"drain_waited": drain_waited, "result": result}
+
+
 async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, Any]:
     telemetry = _RecordingTelemetry(model_call_limit)
     profile = compatibility_model_profile(base_url, MODEL_NAME)
@@ -90,18 +122,20 @@ async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, A
     response = None
     error = None
     try:
-        response = await agent.run(
-            fixture_prompt(ModelFixture.MULTI_TURN),
-            options={
-                **maf_request_options(profile),
-                "tool_choice": "auto",
-                "allow_multiple_tool_calls": False,
-            },
-        )
+        with client.bounded_phase():
+            response = await agent.run(
+                fixture_prompt(ModelFixture.MULTI_TURN),
+                options={
+                    **maf_request_options(profile),
+                    "tool_choice": "auto",
+                    "allow_multiple_tool_calls": False,
+                },
+            )
     except RuntimeError as exc:
         error = str(exc)
     finally:
         await client.client.close()
+    background_task_drain = await _probe_background_task_drain()
     return {
         "text": response.text if response is not None else None,
         "error": error,
@@ -110,6 +144,7 @@ async def run(base_url: str, model_call_limit: int | None = None) -> dict[str, A
         "output_tokens": client.output_tokens,
         "model_starts": telemetry.model_starts,
         "model_finishes": telemetry.model_finishes,
+        "background_task_drain": background_task_drain,
     }
 
 

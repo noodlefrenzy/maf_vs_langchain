@@ -1,6 +1,6 @@
 # Qwen3.5-27B explicit pilot: diagnostic launch
 
-Status: diagnostic only; replacement gate and pilot required
+Status: diagnostic launch excluded; replacement gate and pilot complete
 
 Date: 2026-08-03
 
@@ -64,3 +64,25 @@ finalization. The original artifacts remain preserved as diagnostic evidence.
 They must not be included in pilot aggregates or pooled with the replacement
 cohort. A clean-source model gate must pass under the new workflow-contract hash
 before that replacement cohort starts.
+
+## Replacement result
+
+The replacement cohort ran at clean source `a18c076` after a clean gate. All 30
+lanes and all 15 pairs validated. MAF completed 14 lanes and retained one valid
+evidence-gate `runner_failure`; LangGraph completed all 15. Task success was
+3/15 (20%) for MAF and 5/15 (33.33%) for LangGraph. Both lanes exercised the
+new visible retry policy and showed component-level score discrimination.
+
+The offline pilot report is descriptive only. Its seed-level task-success risk
+difference was +0.1333 for LangGraph minus MAF, with exact sign p = 0.5 and a
+bootstrap interval of [0, 0.2667]. It is pilot evidence for sample sizing, not
+the preregistered final inference.
+
+| Replacement artifact | SHA-256 |
+| --- | --- |
+| `characterization.json` | `50eab85088909de2a95a9101d820bc14803c990ec3224e9223ce306396bc822d` |
+| `model-compatibility.json` | `80e2d2153772a63a0e481bf46f9bceed29503e094d0a219cd64b144b85a7e168` |
+| resolved execution plan | `a7bb3bff65a6b209c0d8122add1e49f13574fbc4b248d66e2426f96c4515d788` |
+| cohort index | `9957ea26e7bb4539ba09def94b19c4890eaf5052485cba7c71cac750c94fd781` |
+| paired report JSON | `815e78f4d84fbf1bb78de3452dbf3d91a8c2c7b36dfd21dfb6321b3a89e960d2` |
+| evidence index | `aa51808f12ee1985ebacc23618b10c48fde69db2869c4f16153cc00bafa002bc` |

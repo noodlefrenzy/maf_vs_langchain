@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from agent_framework import ChatContext, ChatMiddleware, ChatResponse
@@ -41,6 +42,22 @@ class ModelDispatchMiddleware(ChatMiddleware):
         self.model_calls = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        self._phase_limit: int | None = None
+        self._phase_calls = 0
+
+    @contextmanager
+    def bounded_phase(self, model_call_limit: int) -> Iterator[None]:
+        """Reserve dispatches against one adapter-defined model phase."""
+
+        if self._phase_limit is not None:
+            raise RuntimeError("nested model-call phases are not supported")
+        self._phase_limit = model_call_limit
+        self._phase_calls = 0
+        try:
+            yield
+        finally:
+            self._phase_limit = None
+            self._phase_calls = 0
 
     async def process(
         self,
@@ -49,6 +66,10 @@ class ModelDispatchMiddleware(ChatMiddleware):
     ) -> None:
         if context.stream:
             raise ValueError("the protocol adapter requires non-streaming model calls")
+        if self._phase_limit is not None:
+            if self._phase_calls >= self._phase_limit:
+                raise RuntimeError("model_call_phase_limit_exhausted")
+            self._phase_calls += 1
         await self.telemetry.model_started(actor=self.actor, model=self.profile.name)
         await call_next()
         if not isinstance(context.result, ChatResponse):
@@ -115,6 +136,14 @@ class InstrumentedChatClient(ProviderMetricsOpenAIChatCompletionClient):
             middleware=[dispatch],
         )
         self._dispatch = dispatch
+        self._model_call_limit = model_call_limit
+
+    @contextmanager
+    def bounded_phase(self) -> Iterator[None]:
+        """Apply the configured call ceiling across one complete native phase."""
+
+        with self._dispatch.bounded_phase(self._model_call_limit):
+            yield
 
     @property
     def model_calls(self) -> int:

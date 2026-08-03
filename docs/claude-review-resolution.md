@@ -3,8 +3,9 @@
 Status: implementation reconciliation through 2026-08-03
 
 This ledger maps the findings in `claude_repo_review.md` (reviewed at commit
-`90a9d91`) to the current implementation. It does not rewrite the original
-review and does not claim that post-fix empirical milestones have run.
+`90a9d91`) to the current implementation and retained empirical milestones. It
+does not rewrite the original review or pool diagnostic launches with accepted
+pilot evidence.
 
 ## Comparison fairness
 
@@ -13,8 +14,8 @@ review and does not claim that post-fix empirical milestones have run.
 | F-1 | MAF's non-configurable native connection-loss reconnect is preregistered as framework behavior; the shared prompt distinguishes it from the symmetric bounded application retry. |
 | F-2–F-4 | Tool errors, per-dispatch accounting, MCP result parsing, and the one-retry structured-error policy moved into the frozen shared explicit-workflow contract. |
 | F-5 | All harness actors consume the same shared model request/output policy. |
-| F-6–F-9 | Both harness adapters import one hashed delegation, strict tool/evidence provenance, one-correction, phase-limit, and explicit-failure policy. |
-| F-10 | Deep streaming is disabled/funneled through `_agenerate`; a hermetic tool-loop plus public-stream fallback probe verifies per-dispatch accounting and pre-dispatch budget failure. |
+| F-6–F-9 | Both harness adapters import one hashed delegation, strict tool/evidence provenance, one-correction, phase-limit, subagent-completion, and explicit-failure policy. Native specialist work settles before the gate and is canceled and drained on exceptional exit. |
+| F-10 | Deep streaming is disabled/funneled through `_agenerate`; hermetic probes verify per-dispatch accounting, pre-dispatch budget failure, the Deep specialist ceiling, MAF's aggregate native-loop ceiling, and exceptional subagent draining. |
 | F-11 | LangChain input and output hiding now both follow `capture_sensitive`; an isolated runner test covers both flag values. |
 
 The pre-fix harness runs remain stabilization evidence only. A comparable
@@ -134,8 +135,10 @@ implemented. Current milestone status is:
    as diagnostic-only evidence: the old zero-retry contract made the standard
    fault cadence guarantee failure, and undrained MAF fan-out siblings produced
    six invalid late-span bundles. ADR 0013 adds one symmetric, metered retry and
-   drains escaped fan-out failures; a clean gate and replacement pilot are
-   required before sample sizing.
+   drains escaped fan-out failures. The clean replacement gate and 30-lane pilot
+   at `a18c076` completed with every lane and pair valid. MAF task success was
+   3/15 and LangGraph task success was 5/15; the descriptive pilot report and
+   portable evidence archive are complete.
 9. Run evidence now carries monotonic normalized-event timestamps, separately
    timed control-plane phases, per-call model JSONL with optional
    cached/reasoning usage, and fixed-cadence host/GPU JSONL with measured
@@ -167,3 +170,11 @@ implemented. Current milestone status is:
     analysis unit executable: repetitions are averaged within seed, bootstrap
     intervals resample seeds, paired sign-flip p-values operate on seed-level
     effects, and the complete two-track family receives Holm adjustment.
+12. The first accepted-model matched-harness pilot launch at `a18c076` was
+    stopped during seed 101. Deep Agents omitted the frozen phase limiter from
+    native specialists, while MAF evaluated the gate and finalized traces before
+    background specialists settled. ADR 0014 moves the limiter inside every
+    Deep specialist, freezes a cross-framework completion barrier, drains both
+    native task mechanisms on exceptional exit, and bounds MAF's completion
+    loop across the whole phase. The retained launch is diagnostic-only; a new
+    clean gate and replacement harness pilot are required.

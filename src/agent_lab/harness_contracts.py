@@ -389,6 +389,8 @@ def harness_contract_payload() -> dict[str, object]:
             "minimum_active_specialist_roles": MIN_HARNESS_SPECIALIST_ROLES,
             "repair_turns": HARNESS_DELEGATION_REPAIR_TURNS,
             "activity_proof": "at_least_one_native_mcp_call",
+            "completion_barrier": "settle_all_started_specialist_tasks_before_gate",
+            "exceptional_exit": "cancel_and_drain_started_specialist_tasks",
             "failure_mode": "error",
         },
         "provenance": {

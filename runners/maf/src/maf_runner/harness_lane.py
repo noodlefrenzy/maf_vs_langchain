@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any, Literal
@@ -9,6 +10,8 @@ from typing import Any, Literal
 from agent_framework import (
     FileSystemAgentFileStore,
     MCPStreamableHTTPTool,
+    background_tasks_running,
+    background_tasks_running_message,
     create_harness_agent,
 )
 from httpx import AsyncClient, Timeout
@@ -89,6 +92,52 @@ class _TrackedRoleMCP(MCPStreamableHTTPTool):
         return result
 
 
+class _TrackedBackgroundAgent:
+    """Retain native background tasks until the adapter can drain them."""
+
+    def __init__(self, agent: Any) -> None:
+        self._agent = agent
+        self._active_tasks: set[asyncio.Task[Any]] = set()
+
+    @property
+    def name(self) -> str | None:
+        return self._agent.name
+
+    @property
+    def description(self) -> str | None:
+        return self._agent.description
+
+    def create_session(self) -> Any:
+        return self._agent.create_session()
+
+    async def run(self, *args: Any, **kwargs: Any) -> Any:
+        task = asyncio.current_task()
+        if task is None:
+            return await self._agent.run(*args, **kwargs)
+        self._active_tasks.add(task)
+        try:
+            return await self._agent.run(*args, **kwargs)
+        finally:
+            self._active_tasks.discard(task)
+
+    async def drain(self) -> None:
+        """Wait for every native task that was active at phase exit."""
+
+        await asyncio.sleep(0)
+        while self._active_tasks:
+            await asyncio.gather(*tuple(self._active_tasks), return_exceptions=True)
+
+    async def cancel_and_drain(self) -> None:
+        """Cancel and reap any task left after an exceptional phase exit."""
+
+        await asyncio.sleep(0)
+        while self._active_tasks:
+            tasks = tuple(self._active_tasks)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
 class _HarnessRoleRuntime:
     def __init__(
         self,
@@ -144,6 +193,7 @@ class _HarnessRoleRuntime:
             disable_tool_auto_approval=True,
             default_options=maf_request_options(profile),
         )
+        self.background_agent = _TrackedBackgroundAgent(self.agent)
 
     async def __aenter__(self) -> _HarnessRoleRuntime:
         await self._stack.enter_async_context(self._http)
@@ -165,6 +215,16 @@ def _role_observations(
         )
         for role, runtime in roles.items()
     }
+
+
+async def _drain_background_roles(roles: dict[AgentRole, _HarnessRoleRuntime]) -> None:
+    await asyncio.gather(*(runtime.background_agent.drain() for runtime in roles.values()))
+
+
+async def _cancel_background_roles(roles: dict[AgentRole, _HarnessRoleRuntime]) -> None:
+    await asyncio.gather(
+        *(runtime.background_agent.cancel_and_drain() for runtime in roles.values())
+    )
 
 
 async def run_live_approved(
@@ -219,43 +279,54 @@ async def run_live_approved(
             file_access_store=FileSystemAgentFileStore(workspace / "shared"),
             file_access_disable_readonly_tool_approval=True,
             file_access_disable_write_tool_approval=True,
-            background_agents=[runtime.agent for runtime in roles.values()],
+            background_agents=[runtime.background_agent for runtime in roles.values()],
             disable_web_search=True,
             disable_tool_auto_approval=True,
+            loop_should_continue=background_tasks_running(),
+            loop_next_message=background_tasks_running_message,
+            loop_max_iterations=HARNESS_PHASE_MODEL_CALL_LIMIT,
             default_options=maf_request_options(request.manifest.model),
         )
         await stack.enter_async_context(commander)
         session = commander.create_session()
-        await commander.run(
-            harness_task_prompt(
-                request.public_ticket,
-                request.harness_ablation.prompt_variant,
-                request.harness_ablation.reviewer_enabled,
-            ),
-            session=session,
-        )
-        for _attempt in range(HARNESS_DELEGATION_REPAIR_TURNS):
-            observations = _role_observations(roles)
-            observed_roles = active_harness_roles(observations)
-            if len(observed_roles) >= 2:
-                break
-            missing_roles = sorted(role.value for role in configured_roles - observed_roles)
-            await commander.run(
-                harness_delegation_repair_prompt(missing_roles),
-                session=session,
-            )
+        try:
+            with commander_client.bounded_phase():
+                await commander.run(
+                    harness_task_prompt(
+                        request.public_ticket,
+                        request.harness_ablation.prompt_variant,
+                        request.harness_ablation.reviewer_enabled,
+                    ),
+                    session=session,
+                )
+            await _drain_background_roles(roles)
+            for _attempt in range(HARNESS_DELEGATION_REPAIR_TURNS):
+                observations = _role_observations(roles)
+                observed_roles = active_harness_roles(observations)
+                if len(observed_roles) >= 2:
+                    break
+                missing_roles = sorted(role.value for role in configured_roles - observed_roles)
+                with commander_client.bounded_phase():
+                    await commander.run(
+                        harness_delegation_repair_prompt(missing_roles),
+                        session=session,
+                    )
+                await _drain_background_roles(roles)
+        finally:
+            await _cancel_background_roles(roles)
         observations = _role_observations(roles)
         require_harness_delegation(observations)
         evidence_allowlist = harness_evidence_allowlist(observations)
-        response = await commander.run(
-            harness_synthesis_prompt(evidence_allowlist),
-            session=session,
-            options={
-                **maf_request_options(request.manifest.model),
-                "response_format": HarnessProposal,
-                "tool_choice": "none",
-            },
-        )
+        with commander_client.bounded_phase():
+            response = await commander.run(
+                harness_synthesis_prompt(evidence_allowlist),
+                session=session,
+                options={
+                    **maf_request_options(request.manifest.model),
+                    "response_format": HarnessProposal,
+                    "tool_choice": "none",
+                },
+            )
         proposal = HarnessProposal.model_validate(response.value)
         correction_attempt = 0
         while True:
@@ -266,15 +337,16 @@ async def run_live_approved(
                 if correction_attempt >= request.harness_ablation.provenance_correction_turns:
                     raise
                 correction_attempt += 1
-                response = await commander.run(
-                    harness_provenance_correction_prompt(exc, evidence_allowlist),
-                    session=session,
-                    options={
-                        **maf_request_options(request.manifest.model),
-                        "response_format": HarnessProposal,
-                        "tool_choice": "none",
-                    },
-                )
+                with commander_client.bounded_phase():
+                    response = await commander.run(
+                        harness_provenance_correction_prompt(exc, evidence_allowlist),
+                        session=session,
+                        options={
+                            **maf_request_options(request.manifest.model),
+                            "response_format": HarnessProposal,
+                            "tool_choice": "none",
+                        },
+                    )
                 proposal = HarnessProposal.model_validate(response.value)
         for finding in proposal.findings:
             await telemetry.handoff(
