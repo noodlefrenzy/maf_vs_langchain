@@ -117,7 +117,10 @@ The pilot estimates variance and failure modes. Before the measured study:
 
 - choose the primary outcome and smallest practically meaningful difference;
 - estimate sample size from pilot paired differences;
-- preregister matched prompt-paraphrase perturbations for harness sensitivity;
+- run the preregistered canonical/paraphrase-A harness profiles with identical
+  paired seeds, repetition counts, budgets, and fault schedules;
+- run the preregistered zero/one/two-turn provenance-correction profiles, with
+  the effective shared policy hash frozen in each pair;
 - freeze exclusions and outlier handling;
 - freeze model/server/config/tool/prompt versions;
 - preregister which comparisons are confirmatory versus exploratory.

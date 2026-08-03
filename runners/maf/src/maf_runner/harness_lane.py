@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agent_framework import (
     FileSystemAgentFileStore,
@@ -17,7 +17,6 @@ from agent_lab.contracts import AgentRole, ApprovalDecision, ModelProfile
 from agent_lab.harness_contracts import (
     HARNESS_DELEGATION_REPAIR_TURNS,
     HARNESS_PHASE_MODEL_CALL_LIMIT,
-    HARNESS_PROVENANCE_CORRECTION_TURNS,
     SPECIALIST_ROLES,
     HarnessApprovalResponse,
     HarnessExecutionResult,
@@ -98,6 +97,7 @@ class _HarnessRoleRuntime:
         profile: ModelProfile,
         telemetry: WorkflowTelemetry,
         workspace: Path,
+        prompt_variant: Literal["canonical", "paraphrase_a"],
     ) -> None:
         if endpoint.role is not role:
             raise ValueError("role endpoint does not match the harness specialist")
@@ -130,7 +130,7 @@ class _HarnessRoleRuntime:
             self.client,
             name=role.value,
             description=get_role_definition(role).responsibility,
-            agent_instructions=harness_specialist_prompt(role),
+            agent_instructions=harness_specialist_prompt(role, prompt_variant),
             tools=[self.mcp],
             max_context_window_tokens=profile.context_window_tokens,
             max_output_tokens=profile.max_output_tokens,
@@ -190,6 +190,7 @@ async def run_live_approved(
                     request.manifest.model,
                     telemetry,
                     workspace,
+                    request.harness_ablation.prompt_variant,
                 )
             )
         commander_client = InstrumentedChatClient(
@@ -218,7 +219,10 @@ async def run_live_approved(
         await stack.enter_async_context(commander)
         session = commander.create_session()
         await commander.run(
-            harness_task_prompt(request.public_ticket),
+            harness_task_prompt(
+                request.public_ticket,
+                request.harness_ablation.prompt_variant,
+            ),
             session=session,
         )
         for _attempt in range(HARNESS_DELEGATION_REPAIR_TURNS):
@@ -252,7 +256,7 @@ async def run_live_approved(
                 validate_harness_role_provenance(proposal, observations)
                 break
             except ValueError as exc:
-                if correction_attempt >= HARNESS_PROVENANCE_CORRECTION_TURNS:
+                if correction_attempt >= request.harness_ablation.provenance_correction_turns:
                     raise
                 correction_attempt += 1
                 response = await commander.run(

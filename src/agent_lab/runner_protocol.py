@@ -20,6 +20,7 @@ from agent_lab.contracts import (
     AgentRole,
     ApprovalDecision,
     FrameworkLane,
+    HarnessAblationProfile,
     NativeTracingProfile,
     NormalizedEvent,
     RunManifest,
@@ -87,6 +88,7 @@ class RunRequest(ProtocolModel):
     public_ticket: str
     order_seed: int
     tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
+    harness_ablation: HarnessAblationProfile = Field(default_factory=HarnessAblationProfile)
     capture_sensitive: bool = False
     capture_reasoning: Literal[False] = False
 
@@ -98,6 +100,12 @@ class RunRequest(ProtocolModel):
         for role, endpoint in self.role_endpoints.items():
             if endpoint.role != role:
                 raise ValueError("role endpoint key and role claim differ")
+        harness_lanes = {FrameworkLane.MAF_HARNESS, FrameworkLane.DEEP_AGENTS}
+        if (
+            self.harness_ablation != HarnessAblationProfile()
+            and self.manifest.lane not in harness_lanes
+        ):
+            raise ValueError("non-default harness ablation requires a harness lane")
         return self
 
 

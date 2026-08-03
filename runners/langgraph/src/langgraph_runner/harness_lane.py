@@ -22,7 +22,6 @@ from agent_lab.harness_contracts import (
     HARNESS_DELEGATION_RECURSION_LIMIT,
     HARNESS_DELEGATION_REPAIR_TURNS,
     HARNESS_PHASE_MODEL_CALL_LIMIT,
-    HARNESS_PROVENANCE_CORRECTION_TURNS,
     HARNESS_SYNTHESIS_RECURSION_LIMIT,
     SPECIALIST_ROLES,
     HarnessApprovalResponse,
@@ -185,7 +184,10 @@ async def run_live_approved(
             SubAgent(
                 name=role.value,
                 description=get_role_definition(role).responsibility,
-                system_prompt=harness_specialist_prompt(role),
+                system_prompt=harness_specialist_prompt(
+                    role,
+                    request.harness_ablation.prompt_variant,
+                ),
                 tools=await _role_tools(request.role_endpoints[role], role, tracker),
                 model=model,
             )
@@ -215,7 +217,10 @@ async def run_live_approved(
             "messages": [
                 {
                     "role": "user",
-                    "content": harness_task_prompt(request.public_ticket),
+                    "content": harness_task_prompt(
+                        request.public_ticket,
+                        request.harness_ablation.prompt_variant,
+                    ),
                 }
             ]
         },
@@ -275,7 +280,7 @@ async def run_live_approved(
             validate_harness_role_provenance(proposal, observations)
             break
         except ValueError as exc:
-            if correction_attempt >= HARNESS_PROVENANCE_CORRECTION_TURNS:
+            if correction_attempt >= request.harness_ablation.provenance_correction_turns:
                 raise
             correction_attempt += 1
             synthesis_state = await synthesis_graph.ainvoke(

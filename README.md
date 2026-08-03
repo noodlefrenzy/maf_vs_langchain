@@ -181,6 +181,20 @@ baseline, and unrestricted-baseline pilot profiles:
 - `configs/experiments/single-agent-compute-matched-pilot.toml`
 - `configs/experiments/single-agent-unrestricted-pilot.toml`
 
+The larger profiles are not promoted when either task-quality-gate lane fails
+to complete successfully. Harness sensitivity profiles freeze the same seeds,
+repetitions, budgets, and fault schedule while changing exactly one shared
+prompt/correction control:
+
+- `configs/experiments/harness-correction-zero-ablation.toml`
+- `configs/experiments/harness-correction-two-ablation.toml`
+- `configs/experiments/harness-paraphrase-a-ablation.toml`
+
+The effective prompt/policy payload is hashed into both paired manifests and
+the pair preflight. Both native adapters consume the same validated
+`harness_ablation` request object; supported provenance-correction counts are
+zero, one, and two turns.
+
 Measured execution refuses a dirty Git worktree. Commit the reviewed source
 freeze before running those profiles; protocol probes remain explicitly
 non-measurement evidence.

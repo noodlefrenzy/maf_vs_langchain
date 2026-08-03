@@ -72,14 +72,21 @@ The review's code and documentation findings are resolved or explicitly
 governed above. The following are experiment work, not unresolved repository
 defects. The single-agent adapters, two-phase source-evidence gate, paired live
 compatibility probe, preregistered profiles, and offline report builder are
-implemented; their measured runs still require the clean source freeze below:
+implemented. Current milestone status is:
 
-1. collect a post-parity harness pair;
-2. freeze and run the implemented, contract-matched MAF `Agent` vs LangChain
-   `create_agent` compute-matched and unrestricted single-agent profiles;
-3. run the Qwen3.5-9B 32K task-quality pilot;
-4. execute the five-seed × three-repetition paired pilot with fault injection;
-5. run full-workflow tracing and prompt/correction-policy ablations;
-6. validate production-intended checkpoint backends;
-7. run the implemented fail-closed offline builder on measured indices and
-   publish the final paired report and component discrimination analysis.
+1. A post-parity harness pair was collected at source `2b1a7e9`; its MAF lane
+   failed provenance validation and its Deep Agents lane completed at 0.35, so
+   the failure remains in the denominator.
+2. A compute-matched single-agent smoke pair was collected at `2b1a7e9`; MAF
+   completed successfully at 0.916667 while LangChain failed its evidence gate.
+   The unrestricted and five-seed profiles remain unmeasured.
+3. The corrected Qwen3.5-9B 32K gate at `bb61e34` produced one successful
+   LangGraph run (0.916667) and one valid MAF evidence-gate failure. Qwen3.5-9B
+   therefore remains a fit-check model and the larger pilot was not promoted.
+4. The symmetric canonical/paraphrase-A and zero/one/two-turn harness ablation
+   controls and profiles are implemented and protocol-probed, but unmeasured.
+5. Production-intended checkpoint backends remain unselected and unvalidated;
+   the compatibility file savers do not close that milestone.
+6. The fail-closed offline builder successfully revalidated the available
+   clean-source smoke and Qwen-gate indices. A final powered paired report and
+   component-discrimination analysis still require an accepted model and pilot.

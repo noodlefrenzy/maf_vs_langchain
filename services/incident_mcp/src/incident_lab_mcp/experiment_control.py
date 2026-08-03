@@ -191,6 +191,7 @@ async def _run_experiment(
                     model=model,
                     budget=experiment.budget,
                     fault_profile=experiment.fault_profile,
+                    harness_ablation=experiment.harness_ablation,
                     source_commit=source_commit,
                     source_tree_sha256=source_tree_sha256,
                     execution_provenance_by_lane=execution_provenance_by_lane,
@@ -250,7 +251,7 @@ async def _run_experiment(
                         source_tree_sha256=source_tree_sha256,
                         framework_versions=descriptor.framework_versions,
                         dependency_lock_sha256=_file_sha256(repository_root / project / "uv.lock"),
-                        prompt_bundle_sha256=hashes["prompt_bundle_sha256"],
+                        prompt_bundle_sha256=preflight["role_prompts_sha256"],
                         tool_catalog_sha256=hashes["tool_catalog_sha256"],
                         effective_request_policy_sha256=preflight["effective_request_policy"][
                             "lane_policy_sha256"
@@ -279,6 +280,7 @@ async def _run_experiment(
                         public_ticket=str(run.world.incident.public_view()["brief"]),
                         order_seed=block_order_seed,
                         tracing=experiment.tracing,
+                        harness_ablation=experiment.harness_ablation,
                         capture_sensitive=experiment.capture_sensitive,
                         capture_reasoning=experiment.capture_reasoning,
                     )

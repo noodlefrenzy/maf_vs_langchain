@@ -11,7 +11,7 @@ import pytest
 from agent_lab.async_cleanup import shutdown_server
 from agent_lab.bundle_validation import validate_bundle
 from agent_lab.contract_bundle import contract_bundle_hashes, sha256_payload
-from agent_lab.contracts import Budget, FrameworkLane, ModelProfile
+from agent_lab.contracts import Budget, FrameworkLane, HarnessAblationProfile, ModelProfile
 from agent_lab.matched_contracts import normalized_topology_for_lane, preflight_pair_contract
 from agent_lab.runner_host import NativeRunnerDescriptor
 from agent_lab.runner_protocol import CheckpointCapability
@@ -278,6 +278,7 @@ def test_pair_contract_preflight_fails_closed_on_runner_drift(drift: str) -> Non
                 approval_requests=1,
             ),
             fault_profile="none",
+            harness_ablation=HarnessAblationProfile(),
             source_commit="0" * 40,
             source_tree_sha256="1" * 64,
             execution_provenance_by_lane=execution_by_lane,

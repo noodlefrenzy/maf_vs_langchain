@@ -6,7 +6,8 @@ from copy import deepcopy
 from typing import Any, Protocol
 
 from agent_lab.contract_bundle import sha256_payload
-from agent_lab.contracts import Budget, FrameworkLane, ModelProfile
+from agent_lab.contracts import Budget, FrameworkLane, HarnessAblationProfile, ModelProfile
+from agent_lab.harness_contracts import harness_ablation_payload
 from agent_lab.model_request_policy import matched_effective_request_policy
 
 _SPECIALIST_ROLES = [
@@ -77,6 +78,7 @@ def preflight_pair_contract(
     model: ModelProfile,
     budget: Budget,
     fault_profile: str,
+    harness_ablation: HarnessAblationProfile,
     source_commit: str,
     source_tree_sha256: str,
     execution_provenance_by_lane: dict[FrameworkLane, dict[str, Any]],
@@ -97,6 +99,14 @@ def preflight_pair_contract(
             raise ValueError(f"{lane.value} runner normalized topology differs within {track}")
 
     request_policy = matched_effective_request_policy(model, left_lane, right_lane)
+    role_prompts_sha256 = expected_contract_hashes["prompt_bundle_sha256"]
+    if track == "opinionated_harness":
+        role_prompts_sha256 = sha256_payload(
+            {
+                "role_prompt_bundle_sha256": role_prompts_sha256,
+                "harness_ablation": harness_ablation_payload(harness_ablation),
+            }
+        )
     left_execution = execution_provenance_by_lane[left_lane]
     right_execution = execution_provenance_by_lane[right_lane]
     for lane, execution in (
@@ -125,13 +135,14 @@ def preflight_pair_contract(
             "model": model.model_dump(mode="json"),
             "budget": budget.model_dump(mode="json"),
             "fault_profile": fault_profile,
+            "harness_ablation": harness_ablation.model_dump(mode="json"),
             "source_commit": source_commit,
             "source_tree_sha256": source_tree_sha256,
             "execution_provenance": left_execution,
             "world_manifest_sha256": world_manifest_sha256,
             "contract_hashes": expected_contract_hashes,
         },
-        "role_prompts_sha256": expected_contract_hashes["prompt_bundle_sha256"],
+        "role_prompts_sha256": role_prompts_sha256,
         "tool_schemas_sha256": expected_contract_hashes["tool_catalog_sha256"],
         "completion_schema_sha256": expected_contract_hashes["artifact_schemas_sha256"],
         "workflow_contract_sha256": expected_contract_hashes["workflow_contract_sha256"],

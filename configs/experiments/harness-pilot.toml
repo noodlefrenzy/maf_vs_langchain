@@ -10,6 +10,10 @@ fault_profile = "standard"
 capture_sensitive = false
 capture_reasoning = false
 
+[harness_ablation]
+prompt_variant = "canonical"
+provenance_correction_turns = 1
+
 [inference_runtime]
 server_kind = "vllm"
 compute_backend = "nvidia"

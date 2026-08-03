@@ -226,6 +226,15 @@ class InferenceRuntimeProfile(BaseModel):
         return self
 
 
+class HarnessAblationProfile(BaseModel):
+    """Matched prompt and correction policy for opinionated-harness runs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    prompt_variant: Literal["canonical", "paraphrase_a"] = "canonical"
+    provenance_correction_turns: int = Field(default=1, ge=0, le=2)
+
+
 class ExperimentSpec(BaseModel):
     """Validated experiment configuration loaded from TOML."""
 
@@ -243,8 +252,18 @@ class ExperimentSpec(BaseModel):
     budget: Budget
     tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
     inference_runtime: InferenceRuntimeProfile = Field(default_factory=InferenceRuntimeProfile)
+    harness_ablation: HarnessAblationProfile = Field(default_factory=HarnessAblationProfile)
     capture_sensitive: bool = False
     capture_reasoning: Literal[False] = False
+
+    @model_validator(mode="after")
+    def require_harness_lane_for_ablation(self) -> ExperimentSpec:
+        harness_lanes = {FrameworkLane.MAF_HARNESS, FrameworkLane.DEEP_AGENTS}
+        if self.harness_ablation != HarnessAblationProfile() and not (
+            set(self.lanes) & harness_lanes
+        ):
+            raise ValueError("non-default harness ablation requires a harness lane pair")
+        return self
 
 
 class RunManifest(BaseModel):

@@ -8,7 +8,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agent_lab.contracts import AgentRole, ApprovalDecision, ApprovalRequest
+from agent_lab.contracts import (
+    AgentRole,
+    ApprovalDecision,
+    ApprovalRequest,
+    HarnessAblationProfile,
+)
 from agent_lab.prompt_bundle import render_role_prompt
 from agent_lab.scenario import MitigationActionId
 from agent_lab.tool_catalog import MitigationResult, RecoveryCheckResult
@@ -83,7 +88,7 @@ class HarnessEvidencePacket(HarnessModel):
     evidence_ids: list[str]
     independent_roles: list[AgentRole]
     gate_reasons: list[str]
-    attempt: int = Field(default=0, ge=0, le=1)
+    attempt: int = Field(default=0, ge=0, le=2)
 
 
 class HarnessApprovalResponse(HarnessModel):
@@ -261,9 +266,26 @@ def evaluate_harness_proposal(
     )
 
 
-def harness_task_prompt(public_ticket: str) -> str:
+def harness_task_prompt(
+    public_ticket: str,
+    prompt_variant: Literal["canonical", "paraphrase_a"] = "canonical",
+) -> str:
     """Render the byte-identical user-authored coordinator task for both harnesses."""
 
+    if prompt_variant == "paraphrase_a":
+        return (
+            f"Incident ticket:\n{public_ticket}\n\n"
+            "Act as the incident commander and investigate with the harness's native planning "
+            "and workspace features. Evidence gathering must be delegated to at least two "
+            "role-scoped specialists chosen from telemetry, change, and reliability; never do "
+            "their MCP work yourself or fabricate a specialist response. Establish event order "
+            "from at least two independent evidence IDs, then select the least-destructive "
+            "reversible mitigation. Copy its canonical runbook action ID into "
+            "proposed_mitigation_id and put the readable action in proposed_mitigation. Return "
+            "one HarnessProposal containing the real findings from every consulted specialist "
+            "and one commander synthesis. Approval, mitigation, and recovery belong to the "
+            "outer control plane and must not be claimed here."
+        )
     return (
         f"Public ticket:\n{public_ticket}\n\n"
         "Investigate and respond as incident commander. Use the native harness planning and "
@@ -280,9 +302,21 @@ def harness_task_prompt(public_ticket: str) -> str:
     )
 
 
-def harness_specialist_prompt(role: AgentRole) -> str:
+def harness_specialist_prompt(
+    role: AgentRole,
+    prompt_variant: Literal["canonical", "paraphrase_a"] = "canonical",
+) -> str:
     """Render the matched natural-text completion contract for harness specialists."""
 
+    if prompt_variant == "paraphrase_a":
+        return (
+            f"{render_role_prompt(role)}\n\n"
+            "Gather enough evidence with only your role-scoped MCP tools, then make no more "
+            "tool calls. Finish with a bare JSON object—no Markdown—whose fields are exactly "
+            "role, summary, claims, evidence_ids, tools_used, and uncertainties. Use your role "
+            "ID for role, copy only evidence IDs observed in your own tool results, and name "
+            "only MCP tools you actually invoked."
+        )
     return (
         f"{render_role_prompt(role)}\n\n"
         "Use your role-scoped MCP tools to gather sufficient evidence, then stop calling tools. "
@@ -291,6 +325,31 @@ def harness_specialist_prompt(role: AgentRole) -> str:
         "cite only evidence IDs returned by your own MCP calls; list only MCP tools you actually "
         "called. Do not wrap the JSON in Markdown."
     )
+
+
+def harness_ablation_payload(profile: HarnessAblationProfile) -> dict[str, object]:
+    """Return the exact matched harness prompts and bounded correction policy."""
+
+    return {
+        "schema_version": "harness-ablation/v1",
+        "prompt_variant": profile.prompt_variant,
+        "provenance_correction_turns": profile.provenance_correction_turns,
+        "prompts": {
+            "task_template": harness_task_prompt("{public_ticket}", profile.prompt_variant),
+            "specialists": {
+                role.value: harness_specialist_prompt(role, profile.prompt_variant)
+                for role in sorted(SPECIALIST_ROLES, key=lambda item: item.value)
+            },
+            "delegation_repair_template": harness_delegation_repair_prompt(
+                ["{remaining_specialist_roles}"]
+            ),
+            "synthesis_template": harness_synthesis_prompt("{role_evidence_allowlist}"),
+            "provenance_correction_template": harness_provenance_correction_prompt(
+                ValueError("{validator_error}"),
+                "{role_evidence_allowlist}",
+            ),
+        },
+    }
 
 
 def harness_contract_payload() -> dict[str, object]:
@@ -307,6 +366,7 @@ def harness_contract_payload() -> dict[str, object]:
         },
         "provenance": {
             "correction_turns": HARNESS_PROVENANCE_CORRECTION_TURNS,
+            "supported_correction_turns": [0, 1, 2],
             "claimed_tools_must_be_observed": True,
             "claimed_evidence_ids_must_be_observed_for_same_role": True,
             "failure_mode": "error",
@@ -330,6 +390,10 @@ def harness_contract_payload() -> dict[str, object]:
                 ValueError("{validator_error}"),
                 "{role_evidence_allowlist}",
             ),
+        },
+        "ablation_space": {
+            "prompt_variants": ["canonical", "paraphrase_a"],
+            "effective_payload_schema": "harness-ablation/v1",
         },
         "schemas": {
             "proposal": HarnessProposal.model_json_schema(),

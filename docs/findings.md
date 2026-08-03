@@ -630,6 +630,30 @@ Additional methodology constraints are explicit before the pilot:
   were implemented and debugged first; a future effort study must balance
   implementation order.
 
+## 2026-08-03 clean-source continuation
+
+The post-review continuation produced three small, auditable cohorts rather
+than a promoted pilot:
+
+- At source `2b1a7e9`, the post-parity harness pair retained a MAF provenance
+  failure and a completed Deep Agents score of 0.35.
+- At the same source, the compute-matched single-agent smoke retained a
+  LangChain evidence-gate failure and a successful MAF score of 0.916667.
+- The first Qwen3.5-9B gate exposed a MAF checkpoint-selection race. After the
+  request-bound resume fix, the clean `bb61e34` rerun produced LangGraph task
+  success at 0.916667 and a valid MAF failure because the commander cited only
+  one specialist role. The pair stayed inference-eligible and the failure
+  remains in the denominator.
+
+Qwen3.5-9B therefore remains the fit-check model; it did not clear the paired
+task-quality operating point, so the five-seed pilots and their ablations were
+not run. The offline report builder revalidated the available clean-source
+indices and emitted ignored local HTML/JSON audit reports. The harness ablation
+surface is now mechanical: `harness_ablation` freezes either canonical or
+paraphrase-A prompts and zero, one, or two provenance-correction turns into the
+pair preflight and both manifests. All three non-measurement lifecycle probes
+passed.
+
 ## Recommended next work
 
 1. Freeze the corrected adapters, contracts, model/server flags, and scorer at
@@ -641,8 +665,9 @@ Additional methodology constraints are explicit before the pilot:
    transient-fault profile and balanced lane order.
 4. Repeat the full-workflow tracing on/off ablation; report absolute deltas,
    span volume, and model/tool latency separately.
-5. Add symmetric harness-policy ablations for provenance correction (zero,
-   one, and two turns) and matched prompt paraphrases.
+5. Once a model clears the task-quality gate, execute the implemented symmetric
+   harness-policy ablations for zero/one/two provenance-correction turns and
+   the matched paraphrase-A prompt variant.
 6. Validate restart/resume using production-intended checkpoint backends; do
    not generalize from the compatibility file savers.
 7. Run the paired task-quality pilot on the accepted Qwen3.5-9B 32K fit profile;

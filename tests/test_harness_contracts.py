@@ -1,13 +1,14 @@
 import pytest
 from pydantic import ValidationError
 
-from agent_lab.contracts import AgentRole
+from agent_lab.contracts import AgentRole, HarnessAblationProfile
 from agent_lab.harness_contracts import (
     HarnessCommanderSynthesis,
     HarnessProposal,
     HarnessRoleObservation,
     HarnessSpecialistFinding,
     evaluate_harness_proposal,
+    harness_ablation_payload,
     harness_contract_payload,
     harness_evidence_allowlist,
     require_harness_delegation,
@@ -174,11 +175,30 @@ def test_harness_contract_freezes_symmetric_repairs_and_limits() -> None:
     }
     assert payload["provenance"] == {
         "correction_turns": 1,
+        "supported_correction_turns": [0, 1, 2],
         "claimed_tools_must_be_observed": True,
         "claimed_evidence_ids_must_be_observed_for_same_role": True,
         "failure_mode": "error",
     }
     assert payload["phase_limits"]["model_calls"] == 6
+    assert payload["ablation_space"]["prompt_variants"] == ["canonical", "paraphrase_a"]
+
+
+def test_harness_ablation_payload_freezes_paraphrase_and_correction_policy() -> None:
+    canonical = harness_ablation_payload(HarnessAblationProfile())
+    ablated = harness_ablation_payload(
+        HarnessAblationProfile(
+            prompt_variant="paraphrase_a",
+            provenance_correction_turns=0,
+        )
+    )
+
+    assert canonical["prompt_variant"] == "canonical"
+    assert canonical["provenance_correction_turns"] == 1
+    assert ablated["prompt_variant"] == "paraphrase_a"
+    assert ablated["provenance_correction_turns"] == 0
+    assert canonical["prompts"]["task_template"] != ablated["prompts"]["task_template"]
+    assert canonical["prompts"]["specialists"] != ablated["prompts"]["specialists"]
 
 
 def test_harness_evidence_packet_records_provenance_correction_attempt() -> None:
