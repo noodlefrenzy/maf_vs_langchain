@@ -111,6 +111,13 @@ credit, but no containment or recovery credit. Both bundles and the pair were
 provenance-valid. An operational summary status of `ok` must not be confused
 with `task_success`.
 
+The optional neutral-observer path is deliberately a different development
+policy. A profile must set `approval_policy = "observer"`; the API then waits
+for a loopback bearer-authenticated decision file, while the outer deadline
+still ends an unanswered request as `approval_timeout`. Never silently use that
+profile for an unattended or measured run. Every comparison profile explicitly
+freezes `approval_policy = "scripted"`.
+
 ### Single-agent structured output also needs a discovery phase
 
 Attaching the baseline proposal schema to the initial primitive-agent turn can

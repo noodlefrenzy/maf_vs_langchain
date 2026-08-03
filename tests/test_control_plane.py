@@ -214,6 +214,30 @@ def test_mock_runner_approval_timeout_has_distinct_terminal_state(tmp_path: Path
 
     assert result.terminal.status is TerminalStatus.APPROVAL_TIMEOUT
     assert result.terminal.reason == "approval_deadline_exhausted"
+    closed = json.loads((result.paths.bundle / "control" / "approval-closed.json").read_text())
+    assert closed["reason"] == "approval_deadline_exhausted"
+    assert "approval_token" not in closed
+    _assert_bundle_valid(result)
+
+
+def test_blocking_approval_handler_cannot_outlive_wall_clock_budget(tmp_path: Path) -> None:
+    control_plane = ControlPlane(tmp_path, graceful_shutdown_seconds=0.5)
+    request = _request(control_plane, _manifest(wall_clock_seconds=1))
+
+    async def never_decides(_event):
+        await asyncio.sleep(30)
+        raise AssertionError("approval wait should have been cancelled at the run deadline")
+
+    result = asyncio.run(
+        control_plane.execute(
+            _command("approval_success"),
+            request,
+            approval_handler=never_decides,
+        )
+    )
+
+    assert result.terminal.status is TerminalStatus.APPROVAL_TIMEOUT
+    assert result.terminal.reason == "approval_deadline_exhausted"
     _assert_bundle_valid(result)
 
 

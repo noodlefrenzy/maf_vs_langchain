@@ -8,6 +8,7 @@ order = "randomized"
 case_manifest = "configs/cases/pilot-v1.json"
 model_profile = "configs/models/qwen35_9b_vllm.toml"
 fault_profile = "standard"
+approval_policy = "scripted"
 capture_sensitive = false
 capture_reasoning = false
 

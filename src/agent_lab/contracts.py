@@ -270,6 +270,7 @@ class ExperimentSpec(BaseModel):
     case_manifest: str | None = None
     model_profile: str
     fault_profile: Literal["none", "standard", "adversarial"]
+    approval_policy: Literal["scripted", "observer"] = "scripted"
     budget: Budget
     tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
     inference_runtime: InferenceRuntimeProfile = Field(default_factory=InferenceRuntimeProfile)

@@ -23,8 +23,13 @@ dev = [
   "pytest-cov>=7.0,<8",
   "ruff>=0.14,<1",
 ]
+observer = [
+  "fastapi>=0.141.1,<1",
+  "uvicorn>=0.47,<1",
+]
 
 [tool.uv]
+default-groups = ["dev", "observer"]
 exclude-newer = "72 hours"
 
 [tool.hatch.build.targets.wheel]

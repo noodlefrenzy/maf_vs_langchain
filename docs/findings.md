@@ -690,6 +690,13 @@ offloaded. A no-offload run cannot leave useful KV-cache headroom on this host,
 so this candidate was rejected before client compatibility or task-quality
 measurement.
 
+The neutral paired observer is now operational independently of that model
+gate. It discovers both preallocated lane bundles, replays or tails public
+normalized events with sequence-addressable SSE, exposes Phoenix and attested
+artifact links, and drives both its browser and Rich views from the same
+content-redacted API. Optional interactive approvals use an owner-only,
+loopback-authenticated inbox and remain separate from scripted measured runs.
+
 ## Recommended next work
 
 1. Select and characterize a different quality-tier candidate or serving
@@ -701,7 +708,7 @@ measurement.
    profiles with the standard fault schedule and balanced lane order.
 3. After the same gate, execute the implemented symmetric
    harness-policy ablations for zero/one/two provenance-correction turns and
-   the matched paraphrase-A prompt variant.
+   the matched paraphrase-A, no-review, and no-compaction variants.
 4. Validate restart/resume using production-intended checkpoint backends; do
    not generalize from the compatibility file savers.
 5. Run the implemented offline paired report builder on the clean-source pilot

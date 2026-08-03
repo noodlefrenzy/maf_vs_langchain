@@ -185,20 +185,24 @@ Native telemetry and normalized events are complementary:
 
 ## Live observer
 
-The recommended implementation is a local FastAPI service plus a small web
-client:
+The implemented observer is a local FastAPI service plus a small web client:
 
 - Server-Sent Events for append-only event delivery;
-- WebSocket or POST only for approval/control messages;
+- bearer-authenticated loopback POST for approval/control messages;
 - two synchronized lane columns;
 - topology, evidence, tool, budget, and state projections;
 - deep links into Phoenix and local artifacts;
 - replay mode over completed `events.jsonl`;
-- no direct connection to model or MCP services.
+- no direct connection to model or MCP services;
+- event-kind payload allowlisting that drops raw text, arbitrary extensions,
+  and every non-public event.
 
-A terminal renderer should consume the same event API for SSH/headless use, but
-the browser view is the primary design because side-by-side temporal
-comparison and drilldown benefit from screen space.
+A Rich renderer consumes the same sanitized pair API for SSH/headless use, but
+the browser view is primary because side-by-side temporal comparison and
+drilldown benefit from screen space. Both lane bundles and their shared live
+discovery context are allocated before ordered execution begins. Interactive
+decisions cross an owner-only file inbox into the existing control-plane
+approval handler and remain bounded by the run deadline.
 
 ## Post-hoc pipeline
 

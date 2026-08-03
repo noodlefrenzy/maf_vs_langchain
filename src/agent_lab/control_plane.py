@@ -287,6 +287,10 @@ class ControlPlane:
                     if awaiting_approval:
                         terminal_status = TerminalStatus.APPROVAL_TIMEOUT
                         terminal_reason = "approval_deadline_exhausted"
+                        _close_approval_inbox(
+                            request.paths.bundle,
+                            reason=terminal_reason,
+                        )
                     else:
                         terminal_status = TerminalStatus.BUDGET_EXHAUSTED
                         terminal_reason = "wall_clock_budget_exhausted"
@@ -385,7 +389,13 @@ class ControlPlane:
                         awaiting_approval = True
                         if approval_handler is not None:
                             try:
-                                approval = await approval_handler(event)
+                                remaining = max(0.0, deadline - time.monotonic())
+                                if remaining == 0:
+                                    raise TimeoutError
+                                approval = await asyncio.wait_for(
+                                    approval_handler(event),
+                                    timeout=remaining,
+                                )
                                 request_id = event.payload.get("request_id")
                                 if (
                                     not isinstance(request_id, str)
@@ -407,6 +417,14 @@ class ControlPlane:
                                         approval_token=approval.approval_token,
                                     ),
                                 )
+                            except TimeoutError:
+                                terminal_status = TerminalStatus.APPROVAL_TIMEOUT
+                                terminal_reason = "approval_deadline_exhausted"
+                                _close_approval_inbox(
+                                    request.paths.bundle,
+                                    reason=terminal_reason,
+                                )
+                                break
                             except Exception as exc:
                                 terminal_status = TerminalStatus.RUNNER_FAILURE
                                 terminal_reason = f"approval_handler_failed:{type(exc).__name__}"
@@ -745,6 +763,25 @@ class ControlPlane:
                 process.kill()
                 await process.wait()
             return False
+
+
+def _close_approval_inbox(bundle: Path, *, reason: str) -> None:
+    control = bundle / "control"
+    control.mkdir(mode=0o700, exist_ok=True)
+    control.chmod(0o700)
+    destination = control / "approval-closed.json"
+    payload = {
+        "schema_version": "observer-approval-closed/v1",
+        "reason": reason,
+        "closed_at_unix_seconds": time.time(),
+    }
+    try:
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+        handle.write("\n")
 
 
 def _usage_violation(

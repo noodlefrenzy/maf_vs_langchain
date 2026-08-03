@@ -45,6 +45,18 @@ def test_full_workflow_tracing_ablation_profiles_change_only_tracing() -> None:
     assert enabled.resource_metrics.enabled is True
 
 
+def test_only_interactive_observer_profile_changes_approval_policy() -> None:
+    profiles = {
+        path.name: load_experiment(path)
+        for path in (REPOSITORY_ROOT / "configs/experiments").glob("*.toml")
+    }
+
+    interactive = profiles.pop("qwen35-9b-observer-interactive-smoke.toml")
+
+    assert interactive.approval_policy == "observer"
+    assert all(profile.approval_policy == "scripted" for profile in profiles.values())
+
+
 @pytest.mark.parametrize(
     ("profile_name", "changed_field", "changed_value"),
     [
@@ -215,6 +227,7 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
         "measurement_eligible": False,
     }
     assert preflight["execution_provenance_sha256"] == execution_provenance["provenance_sha256"]
+    observer_contexts = []
     for run in summary["runs"]:
         bundle = Path(run["bundle"])
         checkpoint = Path(run["world_checkpoint"])
@@ -231,6 +244,7 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
             json.loads((bundle / "native" / "pair-contract-preflight.json").read_text())
             == preflight
         )
+        observer_contexts.append(json.loads((bundle / "native" / "observer-pair.json").read_text()))
         request = (bundle / "native" / "run-request.redacted.json").read_text()
         assert '"token": "[REDACTED]"' in request
         assert "v1." not in request
@@ -243,6 +257,8 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
             "scores_missing",
             "completed_artifacts_missing",
         }
+    assert observer_contexts[0] == observer_contexts[1]
+    assert set(observer_contexts[0]["run_ids"]) == {run["run_id"] for run in summary["runs"]}
     assert Path(summary["index"]).is_file()
     assert Path(summary["plan"]).is_file()
 
@@ -333,6 +349,7 @@ def test_pair_contract_preflight_fails_closed_on_runner_drift(drift: str) -> Non
                 approval_requests=1,
             ),
             fault_profile="none",
+            approval_policy="scripted",
             harness_ablation=HarnessAblationProfile(),
             resource_metrics=ResourceMetricsProfile(),
             source_commit="0" * 40,
@@ -393,6 +410,7 @@ def test_harness_preflight_freezes_effective_ablation_topology() -> None:
             approval_requests=1,
         ),
         fault_profile="none",
+        approval_policy="scripted",
         harness_ablation=ablation,
         resource_metrics=ResourceMetricsProfile(),
         source_commit="0" * 40,
@@ -407,6 +425,7 @@ def test_harness_preflight_freezes_effective_ablation_topology() -> None:
         "telemetry_investigator",
     ]
     assert preflight["normalized_topology"]["native_context_compaction"] == "disabled"
+    assert preflight["held_constants"]["approval_policy"] == "scripted"
     assert preflight["held_constants"]["harness_ablation"] == ablation.model_dump(mode="json")
 
 

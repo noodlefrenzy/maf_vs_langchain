@@ -19,6 +19,7 @@ Each execution writes an immutable directory under `runs/<run-id>/`.
 │   └── index.json
 ├── native/
 │   ├── trace-link.json
+│   ├── observer-pair.json
 │   ├── tracing-profile.json
 │   ├── tracing-profile.sha256
 │   ├── traces/
@@ -29,6 +30,13 @@ Each execution writes an immutable directory under `runs/<run-id>/`.
     ├── host.jsonl
     └── control.jsonl
 ```
+
+Interactive development runs may also contain owner-only
+`control/approval-<request-digest>.json` and
+`control/approval-api-audit.jsonl`. A timed-out handler also closes the inbox
+with owner-only `control/approval-closed.json` before terminal teardown, so a
+late decision cannot be accepted. The credential itself is never written to a
+bundle.
 
 The core writer creates this full directory shape and writes immutable
 manifests, events, JSON artifacts, scores, terminal records, and three
@@ -59,6 +67,11 @@ Written before execution and never updated. It contains:
 
 The separately hashed `native/tracing-profile.json` records the tracing
 endpoint, timeout, and capture/redaction policy before runner launch.
+
+`native/observer-pair.json` is a non-evidentiary live-discovery sidecar. Both
+paired bundles receive the same opaque pair ID and run IDs before the first
+ordered lane starts; the final experiment index remains authoritative for
+replay and inference.
 
 Mutable terminal status belongs in `terminal.json`, not the manifest.
 

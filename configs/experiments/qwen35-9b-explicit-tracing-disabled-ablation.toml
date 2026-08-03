@@ -7,6 +7,7 @@ repetitions = 1
 order = "randomized"
 model_profile = "configs/models/qwen35_9b_vllm.toml"
 fault_profile = "none"
+approval_policy = "scripted"
 capture_sensitive = false
 capture_reasoning = false
 

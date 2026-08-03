@@ -3,7 +3,7 @@ revision = 3
 requires-python = "==3.12.*"
 
 [options]
-exclude-newer = "2026-07-31T03:34:11Z"
+exclude-newer = "2026-07-31T06:27:05.532908453Z"
 exclude-newer-span = "PT72H"
 
 [[package]]
@@ -28,6 +28,10 @@ dev = [
     { name = "pytest", specifier = ">=9.0,<10" },
     { name = "pytest-cov", specifier = ">=7.0,<8" },
     { name = "ruff", specifier = ">=0.14,<1" },
+]
+observer = [
+    { name = "fastapi", specifier = ">=0.141.1,<1" },
+    { name = "uvicorn", specifier = ">=0.47,<1" },
 ]
 
 [[package]]

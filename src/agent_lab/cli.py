@@ -6,6 +6,7 @@ import json
 import platform
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Annotated
 
@@ -34,12 +35,104 @@ experiment_app = typer.Typer(
     help="Launch framework-neutral experiment control-plane operations.",
 )
 report_app = typer.Typer(no_args_is_help=True, help="Build offline paired reports.")
+observer_app = typer.Typer(no_args_is_help=True, help="Observe paired runs live or by replay.")
 app.add_typer(scenario_app, name="scenario")
 app.add_typer(config_app, name="config")
 app.add_typer(bundle_app, name="bundle")
 app.add_typer(experiment_app, name="experiment")
 app.add_typer(report_app, name="report")
+app.add_typer(observer_app, name="observer")
 console = Console()
+
+
+@observer_app.command("serve")
+def serve_observer(
+    runs_dir: Annotated[
+        Path,
+        typer.Option(help="Run-bundle and native-workflow index directory."),
+    ] = Path("runs"),
+    host: Annotated[
+        str,
+        typer.Option(help="Loopback interface; non-loopback binds are rejected."),
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option(min=1, max=65535)] = 8787,
+    credential_file: Annotated[
+        Path | None,
+        typer.Option(help="Owner-only approval credential file."),
+    ] = None,
+    operator_id: Annotated[
+        str,
+        typer.Option(help="Audited local identity attached to approval decisions."),
+    ] = "local-observer-operator",
+    read_only: Annotated[
+        bool,
+        typer.Option(help="Disable approval controls and serve only replay/live reads."),
+    ] = False,
+) -> None:
+    """Serve the framework-neutral browser and SSE API on loopback."""
+
+    from agent_lab.observer import build_observer_app, load_or_create_observer_token
+
+    if host != "127.0.0.1":
+        console.print("[red]Observer host must be 127.0.0.1.[/red]")
+        raise typer.Exit(code=1)
+    resolved_runs = runs_dir.resolve()
+    token = None
+    token_path = None
+    if not read_only:
+        token_path = (
+            credential_file.resolve()
+            if credential_file is not None
+            else resolved_runs / ".observer-token"
+        )
+        try:
+            token = load_or_create_observer_token(token_path)
+        except (OSError, ValueError) as exc:
+            console.print(f"[red]Cannot load observer credential:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+    app_instance = build_observer_app(
+        resolved_runs,
+        approval_token=token,
+        operator_id=operator_id,
+    )
+    if token_path is not None:
+        console.print(f"Approval credential: {token_path}")
+    console.print(f"Observer: http://{host}:{port}")
+    import uvicorn
+
+    uvicorn.run(app_instance, host=host, port=port, log_level="info")
+
+
+@observer_app.command("render")
+def render_observer_pair(
+    pair_id: Annotated[str, typer.Argument(help="Opaque pair ID returned by /api/pairs.")],
+    base_url: Annotated[
+        str,
+        typer.Option(help="Loopback observer URL."),
+    ] = "http://127.0.0.1:8787",
+    watch: Annotated[
+        bool,
+        typer.Option(help="Refresh the headless rendering until both lanes are terminal."),
+    ] = False,
+    interval_seconds: Annotated[
+        float,
+        typer.Option(min=0.1, max=60),
+    ] = 1.0,
+) -> None:
+    """Render the same sanitized pair API consumed by the browser UI."""
+
+    from agent_lab.observer import fetch_pair_snapshot, render_pair_snapshot
+
+    while True:
+        try:
+            snapshot = fetch_pair_snapshot(base_url, pair_id)
+            render_pair_snapshot(snapshot, console=console)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            console.print(f"[red]Observer read failed:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+        if not watch or snapshot.get("complete") is True:
+            return
+        time.sleep(interval_seconds)
 
 
 @scenario_app.command("generate")

@@ -112,6 +112,18 @@ deployment decision.
 Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 
+Watch paired bundles live or replay completed evidence through the neutral
+loopback observer:
+
+```bash
+uv run agent-lab observer serve --runs-dir runs
+```
+
+It provides a two-column browser timeline, sequence-addressable SSE, Phoenix
+and artifact links, an equivalent Rich renderer, and optional authenticated
+local approval controls without rendering raw model reasoning. See
+[neutral-observer.md](docs/neutral-observer.md).
+
 Exercise the four multi-agent lanes' process boundary without loading a model:
 
 ```bash

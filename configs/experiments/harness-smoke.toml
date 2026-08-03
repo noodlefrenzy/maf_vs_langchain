@@ -7,6 +7,7 @@ repetitions = 1
 order = "alternating"
 model_profile = "configs/models/qwen3_next_80b_lonestar_llamacpp.toml"
 fault_profile = "none"
+approval_policy = "scripted"
 capture_sensitive = false
 capture_reasoning = false
 

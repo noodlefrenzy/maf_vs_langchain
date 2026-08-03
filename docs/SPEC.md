@@ -350,6 +350,8 @@ default view is a synchronized two-column timeline with:
 - tool name, redacted arguments, result summary, latency, and error/retry;
 - evidence ledger and hypothesis revisions;
 - approval requests and decisions;
+- neutral paired live/replay views with sequence-addressable SSE and audited,
+  loopback-authenticated interactive approval controls;
 - elapsed budget, calls, tokens, and model queue time;
 - checkpoint/pause/resume state;
 - final score once the evaluator completes.

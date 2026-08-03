@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from agent_lab.contract_bundle import sha256_payload
 from agent_lab.contracts import (
@@ -84,6 +84,7 @@ def preflight_pair_contract(
     model: ModelProfile,
     budget: Budget,
     fault_profile: str,
+    approval_policy: Literal["scripted", "observer"],
     harness_ablation: HarnessAblationProfile,
     resource_metrics: ResourceMetricsProfile,
     source_commit: str,
@@ -153,6 +154,7 @@ def preflight_pair_contract(
             "model": model.model_dump(mode="json"),
             "budget": budget.model_dump(mode="json"),
             "fault_profile": fault_profile,
+            "approval_policy": approval_policy,
             "harness_ablation": harness_ablation.model_dump(mode="json"),
             "resource_metrics": resource_metrics.model_dump(mode="json"),
             "source_commit": source_commit,

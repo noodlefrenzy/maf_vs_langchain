@@ -7,6 +7,7 @@ repetitions = 1
 order = "randomized"
 model_profile = "configs/models/qwen35_35b_a3b_gptq_int4_experimental.toml"
 fault_profile = "none"
+approval_policy = "scripted"
 capture_sensitive = false
 capture_reasoning = false
 

@@ -57,6 +57,13 @@ a rolling 72-hour `exclude-newer` cooldown, every locked registry artifact's
 upload time is audited fail-closed, and every dependency-installing CI job
 depends on that audit.
 
+The related P1 neutral-observability backlog is also implemented: completed
+bundle replay and live paired timelines use one FastAPI/SSE surface, with
+Phoenix/artifact links and a Rich renderer over the same sanitized API.
+Optional operator approvals are loopback bearer-authenticated, owner-only,
+audited, and deadline-bound; unattended profiles continue to freeze the
+scripted policy.
+
 ## Documentation and methodology
 
 | Finding | Resolution |

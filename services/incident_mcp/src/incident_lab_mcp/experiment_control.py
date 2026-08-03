@@ -34,9 +34,14 @@ from agent_lab.execution_provenance import (
     verify_execution_provenance,
 )
 from agent_lab.matched_contracts import preflight_pair_contract
+from agent_lab.observer_contracts import observer_pair_context, wait_for_observer_approval
 from agent_lab.runner_host import NativeRunnerDescriptor
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
-from agent_lab.scenario import build_case_manifest, load_case_manifest
+from agent_lab.scenario import (
+    build_case_manifest,
+    load_case_manifest,
+    mitigation_action_description,
+)
 from incident_lab_mcp.http_auth import RunCredentialSigner, RunWorldRegistry
 from incident_lab_mcp.http_service import build_http_app, issue_endpoint_credentials
 from incident_lab_mcp.roles import ROLE_TO_AGENT_ROLE
@@ -282,6 +287,7 @@ def _prepare_block(
             model=prepared.model,
             budget=experiment.budget,
             fault_profile=experiment.fault_profile,
+            approval_policy=experiment.approval_policy,
             harness_ablation=experiment.harness_ablation,
             resource_metrics=experiment.resource_metrics,
             source_commit=prepared.source_commit,
@@ -321,6 +327,7 @@ def _plan_payload(prepared: _PreparedExperiment, *, order_seed: int) -> dict[str
         "status": "ok",
         "experiment_id": prepared.experiment.experiment_id,
         "execution_mode": prepared.experiment.execution_mode,
+        "approval_policy": prepared.experiment.approval_policy,
         "experiment_profile": _display_path(
             prepared.experiment_path, repository_root=prepared.repository_root
         ),
@@ -405,6 +412,7 @@ async def _run_experiment(
                     port=port,
                 )
                 block_runs = []
+                staged_runs: dict[FrameworkLane, tuple[Any, ...]] = {}
                 for lane in order.lanes:
                     if lane not in pair_by_lane:
                         continue
@@ -455,6 +463,23 @@ async def _run_experiment(
                         paths.bundle / "native" / "pair-contract-preflight.json",
                         preflight,
                     )
+                    pair_lanes = next(
+                        (left, right)
+                        for candidate_track, left, right in tracks
+                        if candidate_track == track
+                    )
+                    pair_run_ids = tuple(pair_by_lane[item][1].run_id for item in pair_lanes)
+                    _write_json_exclusive(
+                        paths.bundle / "native" / "observer-pair.json",
+                        observer_pair_context(
+                            index_file=index_path.name,
+                            pair_key=track,
+                            track=track,
+                            seed=seed,
+                            repetition=repetition,
+                            run_ids=pair_run_ids,
+                        ),
+                    )
                     request = RunRequest(
                         manifest=manifest,
                         paths=paths,
@@ -481,14 +506,49 @@ async def _run_experiment(
                         module,
                         "--protocol-probe" if execution_mode == "protocol_probe" else "--run",
                     ]
-                    if execution_mode == "native_workflow":
+                    staged_runs[lane] = (
+                        track,
+                        receipt,
+                        run,
+                        preflight,
+                        paths,
+                        request,
+                        command,
+                    )
 
-                        async def approve(event, *, world=run.world):
-                            return world.decide_mitigation(
-                                str(event.payload["request_id"]),
-                                ApprovalDecision.APPROVE,
-                                decided_by="scripted-approval-policy-v1",
-                            )
+                for lane in order.lanes:
+                    if lane not in staged_runs:
+                        continue
+                    track, receipt, run, preflight, paths, request, command = staged_runs[lane]
+                    if execution_mode == "native_workflow":
+                        if experiment.approval_policy == "observer":
+
+                            async def approve(event, *, world=run.world, bundle=paths.bundle):
+                                decision = await wait_for_observer_approval(
+                                    bundle,
+                                    str(event.payload["request_id"]),
+                                )
+                                edited_action = (
+                                    mitigation_action_description(decision.edited_action_id)
+                                    if decision.edited_action_id is not None
+                                    else None
+                                )
+                                return world.decide_mitigation(
+                                    decision.request_id,
+                                    decision.decision,
+                                    decided_by=decision.decided_by,
+                                    edited_action_id=decision.edited_action_id,
+                                    edited_action=edited_action,
+                                )
+
+                        else:
+
+                            async def approve(event, *, world=run.world):
+                                return world.decide_mitigation(
+                                    str(event.payload["request_id"]),
+                                    ApprovalDecision.APPROVE,
+                                    decided_by="scripted-approval-policy-v1",
+                                )
 
                         async def complete(_event, *, world=run.world, request=request):
                             return await finalize_workflow_bundle(request, world)
