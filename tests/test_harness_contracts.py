@@ -11,6 +11,7 @@ from agent_lab.harness_contracts import (
     harness_ablation_payload,
     harness_contract_payload,
     harness_evidence_allowlist,
+    harness_specialist_roles,
     require_harness_delegation,
     validate_harness_role_provenance,
 )
@@ -182,6 +183,8 @@ def test_harness_contract_freezes_symmetric_repairs_and_limits() -> None:
     }
     assert payload["phase_limits"]["model_calls"] == 6
     assert payload["ablation_space"]["prompt_variants"] == ["canonical", "paraphrase_a"]
+    assert payload["ablation_space"]["reviewer_enabled"] == [True, False]
+    assert payload["ablation_space"]["context_compaction"] == ["native", "disabled"]
 
 
 def test_harness_ablation_payload_freezes_paraphrase_and_correction_policy() -> None:
@@ -195,10 +198,35 @@ def test_harness_ablation_payload_freezes_paraphrase_and_correction_policy() -> 
 
     assert canonical["prompt_variant"] == "canonical"
     assert canonical["provenance_correction_turns"] == 1
+    assert canonical["reviewer_enabled"] is True
+    assert canonical["context_compaction"] == "native"
     assert ablated["prompt_variant"] == "paraphrase_a"
     assert ablated["provenance_correction_turns"] == 0
     assert canonical["prompts"]["task_template"] != ablated["prompts"]["task_template"]
     assert canonical["prompts"]["specialists"] != ablated["prompts"]["specialists"]
+
+
+def test_harness_ablation_payload_freezes_no_review_and_no_compaction() -> None:
+    no_review_profile = HarnessAblationProfile(reviewer_enabled=False)
+    no_review = harness_ablation_payload(no_review_profile)
+    no_compaction = harness_ablation_payload(HarnessAblationProfile(context_compaction="disabled"))
+
+    assert harness_specialist_roles(no_review_profile) == {
+        AgentRole.CHANGE_INVESTIGATOR,
+        AgentRole.TELEMETRY_INVESTIGATOR,
+    }
+    assert no_review["active_specialist_roles"] == [
+        "change_investigator",
+        "telemetry_investigator",
+    ]
+    assert set(no_review["prompts"]["specialists"]) == {
+        "change_investigator",
+        "telemetry_investigator",
+    }
+    assert (
+        "both role-scoped telemetry and change specialists" in no_review["prompts"]["task_template"]
+    )
+    assert no_compaction["context_compaction"] == "disabled"
 
 
 def test_harness_evidence_packet_records_provenance_correction_attempt() -> None:

@@ -13,7 +13,7 @@ from agent_lab.contracts import (
     ModelProfile,
     ResourceMetricsProfile,
 )
-from agent_lab.harness_contracts import harness_ablation_payload
+from agent_lab.harness_contracts import harness_ablation_payload, harness_specialist_roles
 from agent_lab.model_request_policy import matched_effective_request_policy
 
 _SPECIALIST_ROLES = [
@@ -106,6 +106,16 @@ def preflight_pair_contract(
         if descriptor.normalized_topology[lane] != expected_topology:
             raise ValueError(f"{lane.value} runner normalized topology differs within {track}")
 
+    effective_topology = expected_topology
+    if track == "opinionated_harness":
+        effective_topology = {
+            **expected_topology,
+            "specialists": sorted(
+                role.value for role in harness_specialist_roles(harness_ablation)
+            ),
+            "native_context_compaction": harness_ablation.context_compaction,
+        }
+
     request_policy = matched_effective_request_policy(model, left_lane, right_lane)
     role_prompts_sha256 = expected_contract_hashes["prompt_bundle_sha256"]
     if track == "opinionated_harness":
@@ -134,7 +144,7 @@ def preflight_pair_contract(
         "schema_version": "0.1.0",
         "track": track,
         "lanes": [left_lane.value, right_lane.value],
-        "normalized_topology": expected_topology,
+        "normalized_topology": effective_topology,
         "held_constants": {
             "experiment_id": experiment_id,
             "scenario": scenario,

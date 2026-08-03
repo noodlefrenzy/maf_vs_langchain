@@ -23,7 +23,6 @@ from agent_lab.harness_contracts import (
     HARNESS_DELEGATION_REPAIR_TURNS,
     HARNESS_PHASE_MODEL_CALL_LIMIT,
     HARNESS_SYNTHESIS_RECURSION_LIMIT,
-    SPECIALIST_ROLES,
     HarnessApprovalResponse,
     HarnessExecutionResult,
     HarnessProposal,
@@ -34,6 +33,7 @@ from agent_lab.harness_contracts import (
     harness_evidence_allowlist,
     harness_provenance_correction_prompt,
     harness_specialist_prompt,
+    harness_specialist_roles,
     harness_synthesis_prompt,
     harness_task_prompt,
     require_harness_delegation,
@@ -153,7 +153,11 @@ async def run_live_approved(
 ) -> dict[str, Any]:
     """Run native Deep Agents delegation, then shared approval and recovery."""
 
-    required_roles = (*SPECIALIST_ROLES, AgentRole.INCIDENT_COMMANDER)
+    configured_roles = harness_specialist_roles(request.harness_ablation)
+    required_roles = (
+        *sorted(configured_roles, key=lambda item: item.value),
+        AgentRole.INCIDENT_COMMANDER,
+    )
     missing = [role.value for role in required_roles if role not in request.role_endpoints]
     if missing:
         raise ValueError(f"run request is missing harness endpoints: {missing}")
@@ -165,13 +169,18 @@ async def run_live_approved(
         "openai",
         HarnessProfile(
             excluded_tools=frozenset({"execute"}),
+            excluded_middleware=(
+                frozenset({"SummarizationMiddleware"})
+                if request.harness_ablation.context_compaction == "disabled"
+                else frozenset()
+            ),
             general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
         ),
     )
     trackers: dict[AgentRole, _ToolTracker] = {}
     models: dict[AgentRole, InstrumentedChatOpenAI] = {}
     subagents: list[SubAgent] = []
-    for role in sorted(SPECIALIST_ROLES, key=lambda item: item.value):
+    for role in sorted(configured_roles, key=lambda item: item.value):
         tracker = _ToolTracker(role.value, telemetry)
         model = _chat_model(
             request.manifest.model,
@@ -220,6 +229,7 @@ async def run_live_approved(
                     "content": harness_task_prompt(
                         request.public_ticket,
                         request.harness_ablation.prompt_variant,
+                        request.harness_ablation.reviewer_enabled,
                     ),
                 }
             ]
@@ -228,10 +238,10 @@ async def run_live_approved(
     )
     for _attempt in range(HARNESS_DELEGATION_REPAIR_TURNS):
         observations = _role_observations(trackers)
-        active_roles = active_harness_roles(observations)
-        if len(active_roles) >= 2:
+        observed_roles = active_harness_roles(observations)
+        if len(observed_roles) >= 2:
             break
-        missing_roles = sorted(role.value for role in SPECIALIST_ROLES - active_roles)
+        missing_roles = sorted(role.value for role in configured_roles - observed_roles)
         state = await delegation_graph.ainvoke(
             {
                 "messages": [
@@ -359,7 +369,7 @@ async def run_live_approved(
                     "input_tokens": models[role].lab_stats.input_tokens,
                     "output_tokens": models[role].lab_stats.output_tokens,
                 }
-                for role in sorted(SPECIALIST_ROLES, key=lambda item: item.value)
+                for role in sorted(configured_roles, key=lambda item: item.value)
             },
             AgentRole.INCIDENT_COMMANDER.value: {
                 "model_calls": commander_model.lab_stats.model_calls,

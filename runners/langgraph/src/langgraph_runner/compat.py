@@ -7,7 +7,12 @@ from importlib.metadata import version
 
 
 def main() -> None:
-    from deepagents import create_deep_agent
+    from deepagents import (
+        GeneralPurposeSubagentProfile,
+        HarnessProfile,
+        create_deep_agent,
+        register_harness_profile,
+    )
     from langchain_mcp_adapters.client import MultiServerMCPClient
     from langchain_openai import ChatOpenAI
     from langgraph.graph import StateGraph
@@ -17,8 +22,22 @@ def main() -> None:
         MultiServerMCPClient,
         ChatOpenAI,
         StateGraph,
+        HarnessProfile,
     )
     assert all(required_symbols)
+    no_compaction = HarnessProfile(
+        excluded_tools=frozenset({"execute"}),
+        excluded_middleware=frozenset({"SummarizationMiddleware"}),
+        general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
+    )
+    register_harness_profile("openai", no_compaction)
+    model = ChatOpenAI(
+        model="compat-no-network",
+        api_key="compat-placeholder",
+        base_url="http://127.0.0.1:9/v1",
+        use_responses_api=False,
+    )
+    assert create_deep_agent(model=model)
     print(
         json.dumps(
             {

@@ -17,7 +17,6 @@ from agent_lab.contracts import AgentRole, ApprovalDecision, ModelProfile
 from agent_lab.harness_contracts import (
     HARNESS_DELEGATION_REPAIR_TURNS,
     HARNESS_PHASE_MODEL_CALL_LIMIT,
-    SPECIALIST_ROLES,
     HarnessApprovalResponse,
     HarnessExecutionResult,
     HarnessProposal,
@@ -28,6 +27,7 @@ from agent_lab.harness_contracts import (
     harness_evidence_allowlist,
     harness_provenance_correction_prompt,
     harness_specialist_prompt,
+    harness_specialist_roles,
     harness_synthesis_prompt,
     harness_task_prompt,
     require_harness_delegation,
@@ -98,6 +98,7 @@ class _HarnessRoleRuntime:
         telemetry: WorkflowTelemetry,
         workspace: Path,
         prompt_variant: Literal["canonical", "paraphrase_a"],
+        context_compaction: Literal["native", "disabled"],
     ) -> None:
         if endpoint.role is not role:
             raise ValueError("role endpoint does not match the harness specialist")
@@ -134,6 +135,7 @@ class _HarnessRoleRuntime:
             tools=[self.mcp],
             max_context_window_tokens=profile.context_window_tokens,
             max_output_tokens=profile.max_output_tokens,
+            disable_compaction=context_compaction == "disabled",
             file_memory_store=FileSystemAgentFileStore(workspace / "memory" / role.value),
             file_access_store=FileSystemAgentFileStore(workspace / "shared"),
             file_access_disable_readonly_tool_approval=True,
@@ -172,7 +174,11 @@ async def run_live_approved(
 ) -> dict[str, Any]:
     """Run native harness delegation, then the shared approval/recovery boundary."""
 
-    required_roles = (*SPECIALIST_ROLES, AgentRole.INCIDENT_COMMANDER)
+    configured_roles = harness_specialist_roles(request.harness_ablation)
+    required_roles = (
+        *sorted(configured_roles, key=lambda item: item.value),
+        AgentRole.INCIDENT_COMMANDER,
+    )
     missing = [role.value for role in required_roles if role not in request.role_endpoints]
     if missing:
         raise ValueError(f"run request is missing harness endpoints: {missing}")
@@ -182,7 +188,7 @@ async def run_live_approved(
 
     async with AsyncExitStack() as stack:
         roles: dict[AgentRole, _HarnessRoleRuntime] = {}
-        for role in sorted(SPECIALIST_ROLES, key=lambda item: item.value):
+        for role in sorted(configured_roles, key=lambda item: item.value):
             roles[role] = await stack.enter_async_context(
                 _HarnessRoleRuntime(
                     role,
@@ -191,6 +197,7 @@ async def run_live_approved(
                     telemetry,
                     workspace,
                     request.harness_ablation.prompt_variant,
+                    request.harness_ablation.context_compaction,
                 )
             )
         commander_client = InstrumentedChatClient(
@@ -207,6 +214,7 @@ async def run_live_approved(
             agent_instructions=render_role_prompt(AgentRole.INCIDENT_COMMANDER),
             max_context_window_tokens=request.manifest.model.context_window_tokens,
             max_output_tokens=request.manifest.model.max_output_tokens,
+            disable_compaction=request.harness_ablation.context_compaction == "disabled",
             file_memory_store=FileSystemAgentFileStore(workspace / "memory" / "commander"),
             file_access_store=FileSystemAgentFileStore(workspace / "shared"),
             file_access_disable_readonly_tool_approval=True,
@@ -222,17 +230,16 @@ async def run_live_approved(
             harness_task_prompt(
                 request.public_ticket,
                 request.harness_ablation.prompt_variant,
+                request.harness_ablation.reviewer_enabled,
             ),
             session=session,
         )
         for _attempt in range(HARNESS_DELEGATION_REPAIR_TURNS):
             observations = _role_observations(roles)
-            active_roles = active_harness_roles(observations)
-            if len(active_roles) >= 2:
+            observed_roles = active_harness_roles(observations)
+            if len(observed_roles) >= 2:
                 break
-            missing_roles = sorted(
-                (role.value for role in SPECIALIST_ROLES - active_roles),
-            )
+            missing_roles = sorted(role.value for role in configured_roles - observed_roles)
             await commander.run(
                 harness_delegation_repair_prompt(missing_roles),
                 session=session,

@@ -12,7 +12,8 @@ Its canonical sources are:
 - `agent_lab.workflow_contracts` for explicit-workflow schemas, observation
   policy, dynamic instructions, evidence gating, result parsing, and accounting;
 - `agent_lab.harness_contracts` for opinionated-harness delegation, provenance,
-  correction, phase-limit, prompt, and completion-schema policy;
+  correction, phase-limit, prompt, active-role, native-compaction, and
+  completion-schema policy;
 - `agent_lab.baseline_contracts` for the one-agent union catalog, source-scoped
   provenance, discovery repair, two-phase synthesis, correction, evidence gate,
   prompt, and completion-schema policy;

@@ -600,10 +600,10 @@ engineering risks—not to select a universal winner.
 2. Only after both gate lanes succeed on an accepted candidate, run the
    five-seed explicit, harness, compute-matched, and unrestricted single-agent
    profiles.
-3. Repeat tracing on/off on completed model-driven workflows.
-4. Execute the frozen provenance-correction and prompt-paraphrase profiles.
-5. Select and test intended production checkpoint/resume backends.
-6. Publish paired raw points, operational failures, effect sizes, uncertainty,
+3. Execute the frozen provenance-correction, prompt-paraphrase, no-review, and
+   no-compaction profiles.
+4. Select and test intended production checkpoint/resume backends.
+5. Publish paired raw points, operational failures, effect sizes, uncertainty,
    and metric audit samples.
 
 ---

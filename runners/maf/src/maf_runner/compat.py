@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from importlib.metadata import version
+from inspect import signature
 
 
 def main() -> None:
@@ -19,6 +20,7 @@ def main() -> None:
         HandoffBuilder,
     )
     assert all(required_symbols)
+    assert "disable_compaction" in signature(create_harness_agent).parameters
     print(
         json.dumps(
             {

@@ -26,6 +26,16 @@ then tool-disabled structured synthesis. Freeze the parity-critical policy in
 - delegation and synthesis use the same six-call semantic cap and error exit;
 - streaming cannot bypass dispatch-time accounting.
 
+The versioned harness ablation payload also owns the paired controls that must
+change both adapters together: canonical/paraphrase-A prompts, zero/one/two
+provenance-correction turns, three-role versus no-review topology, and native
+versus disabled context compaction. The no-review condition exposes only the
+telemetry and change specialists and requires both to prove real MCP activity.
+The no-compaction condition uses MAF's public `disable_compaction` option and
+Deep Agents' public `HarnessProfile.excluded_middleware` alias for
+`SummarizationMiddleware`. The pinned API compatibility probes assert those
+hooks remain available.
+
 Framework-native planning, workspace, scheduling, and context behavior remain
 the opinionated behavior under test.
 
@@ -34,6 +44,8 @@ the opinionated behavior under test.
 - Adapter guards can no longer silently favor one harness lane.
 - A parity-policy change invalidates the shared contract hash and pair
   preflight.
+- An ablation changes the effective normalized topology and prompt-policy hash,
+  so a mislabeled or one-sided run fails provenance checks.
 - The two phases add coordinator turns and must be reported as harness cost.
 - Previous harness smoke cohorts remain engineering evidence, not comparable
   post-parity measurements.

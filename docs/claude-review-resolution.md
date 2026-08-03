@@ -93,8 +93,10 @@ implemented. Current milestone status is:
    The pinned Qwen3.5-35B-A3B GPTQ-Int4 follow-up loaded at both tested CPU-
    offload points but failed engine initialization, so no larger pilot profile
    was promoted.
-4. The symmetric canonical/paraphrase-A and zero/one/two-turn harness ablation
-   controls and profiles are implemented and protocol-probed, but unmeasured.
+4. The symmetric canonical/paraphrase-A, zero/one/two-turn, no-review, and
+   no-compaction harness ablation controls and profiles are implemented and
+   protocol-probed, but unmeasured. Active roles, prompts, and native compaction
+   mode are hash-frozen into pair preflight and effective topology.
 5. Production-intended checkpoint backends remain unselected and unvalidated;
    the compatibility file savers do not close that milestone. Runner metadata
    now makes that boundary machine-readable with `production_ready = false`

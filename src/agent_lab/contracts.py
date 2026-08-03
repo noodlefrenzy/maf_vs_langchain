@@ -227,12 +227,14 @@ class InferenceRuntimeProfile(BaseModel):
 
 
 class HarnessAblationProfile(BaseModel):
-    """Matched prompt and correction policy for opinionated-harness runs."""
+    """Matched prompt, role, correction, and compaction policy for harness runs."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     prompt_variant: Literal["canonical", "paraphrase_a"] = "canonical"
     provenance_correction_turns: int = Field(default=1, ge=0, le=2)
+    reviewer_enabled: bool = True
+    context_compaction: Literal["native", "disabled"] = "native"
 
 
 class ResourceMetricsProfile(BaseModel):

@@ -182,6 +182,16 @@ role, so the experiment registers an OpenAI-family profile that disables the
 extra subagent and the unavailable `execute` tool while retaining native todo,
 filesystem, summarization, and specialist dispatch behavior.
 
+The matched no-compaction profile disables context reduction through public
+but framework-specific hooks. MAF receives `disable_compaction=True` on every
+specialist and coordinator Harness agent. Deep Agents receives the documented
+`"SummarizationMiddleware"` exclusion through its `HarnessProfile`, which
+applies to the coordinator and declarative subagents. Native runners accept one
+request per process, so Deep Agents' additive global profile registry cannot
+leak the disabled mode into a later condition. Do not execute both compaction
+conditions through one reused runner process without adding an explicit
+profile-registry reset contract.
+
 Using `response_format` on each declarative Deep Agents subagent caused the
 local OpenAI-compatible model to remain in an inner model/tool loop instead of
 returning to the coordinator; one smoke run reached the 36-call outer budget.
@@ -224,12 +234,11 @@ runaway coordinator turns. Treat those terminal states as experiment outcomes,
 not as reasons to relax provenance or silently raise a lane-specific outer
 budget.
 
-Deep Agents may truthfully include built-in workspace operations such as
-`grep` in a specialist's `tools_used`. These are native harness operations, not
-MCP evidence sources. Provenance validation therefore permits the known
-workspace-tool names but still requires at least one real role-scoped MCP call
-and requires every cited evidence ID to have appeared in that role's MCP
-result.
+Deep Agents may truthfully mention built-in workspace operations such as
+`grep`, but `HarnessSpecialistFinding.tools_used` is deliberately narrower: it
+may list only role-scoped MCP tools actually observed by the adapter. Workspace
+operations remain native trace evidence and are not accepted as provenance for
+an incident claim. MAF uses the same rule.
 
 LangChain's asynchronous callback manager logs and suppresses exceptions raised
 by callback hooks. A budget exception raised from `on_chat_model_start` was

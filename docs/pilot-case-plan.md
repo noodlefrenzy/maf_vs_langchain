@@ -49,7 +49,9 @@ unexecutable profile therefore fails before measurement.
 
 The old combined four-track `paired_pilot.toml` was removed. Explicit workflow,
 opinionated harness, compute-matched single-agent, and unrestricted single-agent
-profiles remain separate comparisons and must not be pooled.
+profiles remain separate comparisons and must not be pooled. Harness
+correction, paraphrase, no-review, and no-compaction profiles reuse the same
+case manifest and change one preregistered control from `harness-pilot.toml`.
 
 Planning proves structural readiness only. It does not waive the model-quality,
 checkpoint-backend, tracing/resource-metric, evidence-retention, or reviewer

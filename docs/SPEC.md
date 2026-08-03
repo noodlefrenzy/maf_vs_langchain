@@ -327,6 +327,7 @@ Report these separately rather than hiding them in one composite:
 - unrestricted single agent;
 - compute-matched single agent;
 - no-review role;
+- native context compaction disabled;
 - no-role-separation prompt-only run;
 - no-fault run;
 - framework-native tracing disabled to measure instrumentation overhead.

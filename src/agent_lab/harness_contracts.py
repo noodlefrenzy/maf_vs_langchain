@@ -269,15 +269,21 @@ def evaluate_harness_proposal(
 def harness_task_prompt(
     public_ticket: str,
     prompt_variant: Literal["canonical", "paraphrase_a"] = "canonical",
+    reviewer_enabled: bool = True,
 ) -> str:
     """Render the byte-identical user-authored coordinator task for both harnesses."""
 
     if prompt_variant == "paraphrase_a":
+        delegation = (
+            "at least two role-scoped specialists chosen from telemetry, change, and reliability"
+            if reviewer_enabled
+            else "both role-scoped telemetry and change specialists"
+        )
         return (
             f"Incident ticket:\n{public_ticket}\n\n"
             "Act as the incident commander and investigate with the harness's native planning "
-            "and workspace features. Evidence gathering must be delegated to at least two "
-            "role-scoped specialists chosen from telemetry, change, and reliability; never do "
+            f"and workspace features. Evidence gathering must be delegated to {delegation}; "
+            "never do "
             "their MCP work yourself or fabricate a specialist response. Establish event order "
             "from at least two independent evidence IDs, then select the least-destructive "
             "reversible mitigation. Copy its canonical runbook action ID into "
@@ -286,11 +292,16 @@ def harness_task_prompt(
             "and one commander synthesis. Approval, mitigation, and recovery belong to the "
             "outer control plane and must not be claimed here."
         )
+    delegation = (
+        "at least two of the role-scoped telemetry, change, and reliability specialists"
+        if reviewer_enabled
+        else "both role-scoped telemetry and change specialists"
+    )
     return (
         f"Public ticket:\n{public_ticket}\n\n"
         "Investigate and respond as incident commander. Use the native harness planning and "
-        "workspace facilities. You must delegate evidence collection to at least two of the "
-        "role-scoped telemetry, change, and reliability specialists; do not perform their MCP "
+        f"workspace facilities. You must delegate evidence collection to {delegation}; do not "
+        "perform their MCP "
         "work yourself and do not invent a finding for a specialist you did not call. Collect at "
         "least two independently sourced evidence identifiers, establish chronology, and choose "
         "the least-destructive reversible mitigation. Use the canonical action ID from the "
@@ -300,6 +311,14 @@ def harness_task_prompt(
         "that approval, mitigation, or recovery has occurred; the outer control plane owns those "
         "steps."
     )
+
+
+def harness_specialist_roles(profile: HarnessAblationProfile) -> frozenset[AgentRole]:
+    """Return the exact specialist set exposed by a matched harness ablation."""
+
+    if profile.reviewer_enabled:
+        return SPECIALIST_ROLES
+    return SPECIALIST_ROLES - {AgentRole.RELIABILITY_REVIEWER}
 
 
 def harness_specialist_prompt(
@@ -330,15 +349,23 @@ def harness_specialist_prompt(
 def harness_ablation_payload(profile: HarnessAblationProfile) -> dict[str, object]:
     """Return the exact matched harness prompts and bounded correction policy."""
 
+    active_roles = harness_specialist_roles(profile)
     return {
-        "schema_version": "harness-ablation/v1",
+        "schema_version": "harness-ablation/v2",
         "prompt_variant": profile.prompt_variant,
         "provenance_correction_turns": profile.provenance_correction_turns,
+        "reviewer_enabled": profile.reviewer_enabled,
+        "context_compaction": profile.context_compaction,
+        "active_specialist_roles": sorted(role.value for role in active_roles),
         "prompts": {
-            "task_template": harness_task_prompt("{public_ticket}", profile.prompt_variant),
+            "task_template": harness_task_prompt(
+                "{public_ticket}",
+                profile.prompt_variant,
+                profile.reviewer_enabled,
+            ),
             "specialists": {
                 role.value: harness_specialist_prompt(role, profile.prompt_variant)
-                for role in sorted(SPECIALIST_ROLES, key=lambda item: item.value)
+                for role in sorted(active_roles, key=lambda item: item.value)
             },
             "delegation_repair_template": harness_delegation_repair_prompt(
                 ["{remaining_specialist_roles}"]
@@ -393,7 +420,9 @@ def harness_contract_payload() -> dict[str, object]:
         },
         "ablation_space": {
             "prompt_variants": ["canonical", "paraphrase_a"],
-            "effective_payload_schema": "harness-ablation/v1",
+            "reviewer_enabled": [True, False],
+            "context_compaction": ["native", "disabled"],
+            "effective_payload_schema": "harness-ablation/v2",
         },
         "schemas": {
             "proposal": HarnessProposal.model_json_schema(),

@@ -45,6 +45,30 @@ def test_full_workflow_tracing_ablation_profiles_change_only_tracing() -> None:
     assert enabled.resource_metrics.enabled is True
 
 
+@pytest.mark.parametrize(
+    ("profile_name", "changed_field", "changed_value"),
+    [
+        ("harness-no-review-ablation.toml", "reviewer_enabled", False),
+        ("harness-no-compaction-ablation.toml", "context_compaction", "disabled"),
+    ],
+)
+def test_harness_role_and_compaction_ablations_change_one_control(
+    profile_name: str,
+    changed_field: str,
+    changed_value: object,
+) -> None:
+    baseline = load_experiment(REPOSITORY_ROOT / "configs/experiments/harness-pilot.toml")
+    ablated = load_experiment(REPOSITORY_ROOT / "configs/experiments" / profile_name)
+
+    assert getattr(ablated.harness_ablation, changed_field) == changed_value
+    assert baseline.model_dump(exclude={"experiment_id", "harness_ablation"}) == (
+        ablated.model_dump(exclude={"experiment_id", "harness_ablation"})
+    )
+    baseline_controls = baseline.harness_ablation.model_dump(exclude={changed_field})
+    ablated_controls = ablated.harness_ablation.model_dump(exclude={changed_field})
+    assert baseline_controls == ablated_controls
+
+
 def test_incident_server_shutdown_is_bounded_and_closes_listener() -> None:
     class Listener:
         closed = False
@@ -317,6 +341,73 @@ def test_pair_contract_preflight_fails_closed_on_runner_drift(drift: str) -> Non
             world_manifest_sha256="2" * 64,
             case_manifest_sha256="3" * 64,
         )
+
+
+def test_harness_preflight_freezes_effective_ablation_topology() -> None:
+    hashes = contract_bundle_hashes()
+    lanes = (FrameworkLane.MAF_HARNESS, FrameworkLane.DEEP_AGENTS)
+    descriptors = {
+        lane: SimpleNamespace(
+            contract_hashes=hashes,
+            normalized_topology={lane: normalized_topology_for_lane(lane)},
+        )
+        for lane in lanes
+    }
+    execution_snapshot = {
+        "schema_version": "execution-provenance/v1",
+        "execution_mode": "native_workflow",
+    }
+    execution = {
+        **execution_snapshot,
+        "provenance_sha256": sha256_payload(execution_snapshot),
+    }
+    ablation = HarnessAblationProfile(
+        reviewer_enabled=False,
+        context_compaction="disabled",
+    )
+
+    preflight = preflight_pair_contract(
+        track="opinionated_harness",
+        left_lane=lanes[0],
+        right_lane=lanes[1],
+        descriptors=descriptors,
+        expected_contract_hashes=hashes,
+        experiment_id="harness_ablation_test",
+        scenario="incident_response",
+        scenario_seed=42,
+        repetition=0,
+        model=ModelProfile(
+            name="local-test",
+            base_url="http://127.0.0.1:8000/v1",
+            temperature=0.2,
+            top_p=0.9,
+            max_output_tokens=1000,
+            context_window_tokens=8192,
+            request_timeout_seconds=60,
+        ),
+        budget=Budget(
+            wall_clock_seconds=10,
+            model_calls=4,
+            tool_calls=8,
+            output_tokens=2000,
+            approval_requests=1,
+        ),
+        fault_profile="none",
+        harness_ablation=ablation,
+        resource_metrics=ResourceMetricsProfile(),
+        source_commit="0" * 40,
+        source_tree_sha256="1" * 64,
+        execution_provenance_by_lane={lane: execution for lane in lanes},
+        world_manifest_sha256="2" * 64,
+        case_manifest_sha256="3" * 64,
+    )
+
+    assert preflight["normalized_topology"]["specialists"] == [
+        "change_investigator",
+        "telemetry_investigator",
+    ]
+    assert preflight["normalized_topology"]["native_context_compaction"] == "disabled"
+    assert preflight["held_constants"]["harness_ablation"] == ablation.model_dump(mode="json")
 
 
 def test_protocol_probe_refuses_to_overwrite_index(tmp_path: Path) -> None:

@@ -675,9 +675,11 @@ task-quality operating point, so the five-seed pilots and their ablations were
 not run. The offline report builder revalidated the available clean-source
 indices and emitted ignored local HTML/JSON audit reports. The harness ablation
 surface is now mechanical: `harness_ablation` freezes either canonical or
-paraphrase-A prompts and zero, one, or two provenance-correction turns into the
-pair preflight and both manifests. All three non-measurement lifecycle probes
-passed.
+paraphrase-A prompts, zero/one/two provenance-correction turns, the shared
+three-role or no-review topology, and native or disabled context compaction
+into each run request and pair preflight; their effective hashes are retained
+in both manifests. Separate matched profiles vary each control alone. All three
+non-measurement lifecycle probes passed.
 
 The pinned Qwen3.5-35B-A3B GPTQ-Int4 follow-up loaded all weights at both the
 16K/8 GiB-offload gate and an 8K/2 GiB-offload diagnostic, but vLLM engine

@@ -205,11 +205,13 @@ baseline, and unrestricted-baseline pilot profiles:
 The larger profiles are not promoted when either task-quality-gate lane fails
 to complete successfully. Harness sensitivity profiles freeze the same seeds,
 repetitions, budgets, and fault schedule while changing exactly one shared
-prompt/correction control:
+prompt, correction, role-topology, or native-compaction control:
 
 - `configs/experiments/harness-correction-zero-ablation.toml`
 - `configs/experiments/harness-correction-two-ablation.toml`
 - `configs/experiments/harness-paraphrase-a-ablation.toml`
+- `configs/experiments/harness-no-review-ablation.toml`
+- `configs/experiments/harness-no-compaction-ablation.toml`
 
 All pilot and ablation profiles share the equal-weight, five-family case
 manifest in `configs/cases/pilot-v1.json`. Resolve their runner support,
@@ -229,7 +231,9 @@ failed gate and immutable evidence identities remain documented in
 The effective prompt/policy payload is hashed into both paired manifests and
 the pair preflight. Both native adapters consume the same validated
 `harness_ablation` request object; supported provenance-correction counts are
-zero, one, and two turns.
+zero, one, and two turns. The same object can remove the reliability reviewer
+from both lanes or disable both frameworks' native context compaction; active
+roles and compaction mode are frozen into the effective normalized topology.
 
 Measured execution refuses a dirty Git worktree. Commit the reviewed source
 freeze before running those profiles; protocol probes remain explicitly

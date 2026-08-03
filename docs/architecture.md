@@ -120,16 +120,19 @@ untouched and are part of the comparison.
 Both harnesses get:
 
 - the same commander domain prompt;
-- the same three named specialist descriptions;
+- the same configured specialist set and descriptions (three normally, or the
+  same telemetry/change pair in the no-review ablation);
 - the same per-role MCP tools;
 - the same writable artifact directory shape;
 - the same context and output budgets;
 - the same structured completion contract;
 - an outer watchdog enforcing shared limits.
 
-Built-in harness instructions, planning mechanics, compaction, subagent
-protocol, and filesystem abstractions remain native. Their effective prompts
-and tool catalogs are captured for later interpretation.
+Built-in harness instructions, planning mechanics, subagent protocol, and
+filesystem abstractions remain native. Compaction is native in the primary
+profile and can be disabled through one matched ablation control. Effective
+roles, compaction mode, prompts, and tool catalogs are captured for later
+interpretation.
 
 ## MCP world isolation
 
