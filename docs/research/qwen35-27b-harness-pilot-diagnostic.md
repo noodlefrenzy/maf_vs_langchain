@@ -187,3 +187,9 @@ model operating point.
 | `model-compatibility.json` | `c9466b1446490fe031d158da7ae860bf853885ff50f6787e3571b956a30aabbd` |
 | resolved execution plan | `3ef31fdfa554a5f4caa0af2f5b6df7522259a2c84525aac6442369945947083b` |
 | cohort index | `3fe419efb954e8577777cb05eb0390585c1926fccfc7ff1368ae985335d91d59` |
+
+The separately preregistered two-turn correction profile was subsequently run
+as exploratory sensitivity evidence at the final contract. It produced scored
+successes in both lanes but also exercised outer and native call ceilings. It
+does not replace this failed canonical gate; see
+[qwen35-27b-harness-correction-two-diagnostic.md](qwen35-27b-harness-correction-two-diagnostic.md).

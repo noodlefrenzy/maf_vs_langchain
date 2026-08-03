@@ -735,6 +735,18 @@ model calls, 22 tool calls, and 3,981 output tokens were below the lower
 the call/token ceilings therefore did not create an effective budget contrast
 or rescue failures at this operating point.
 
+The preregistered two-turn harness-correction diagnostic at `c7e0f55` then
+completed all 30 runs and 15 inference-eligible pairs under the final ADR 0017
+contract. MAF Harness succeeded on 4/15 runs with three operational failures;
+Deep Agents succeeded on 7/15 with one. The seed-cluster Deep-minus-MAF risk
+difference is 0.2 with interval [0, 0.466667] and exact sign-flip `p = 0.5`.
+The extra turn exposed viable scored paths in both lanes but also drove one MAF
+run to the outer 32-call ceiling and one Deep specialist to its native six-call
+limit. Because the final canonical gate did not authorize a matched canonical
+cohort at the same source, this is exploratory sensitivity evidence rather
+than a causal correction-turn comparison; see
+[qwen35-27b-harness-correction-two-diagnostic.md](research/qwen35-27b-harness-correction-two-diagnostic.md).
+
 The neutral paired observer is now operational independently of that model
 gate. It discovers both preallocated lane bundles, replays or tails public
 normalized events with sequence-addressable SSE, exposes Phoenix and attested
@@ -754,9 +766,10 @@ pair ID; see
    an incorrect diagnosis/ineffective mitigation and MAF marked the evidence
    insufficient. Treat those as task-quality outcomes; do not tune the frozen
    contract against the observed gate seed.
-2. Use the implemented matched correction-turn, paraphrase-A, no-review, and
-   no-compaction profiles as diagnostic sensitivity checks; do not substitute
-   them post hoc for the canonical confirmatory profile.
+2. Retain the completed two-turn correction cohort as diagnostic sensitivity
+   evidence. The zero-turn, paraphrase-A, no-review, and no-compaction profiles
+   remain available for matched diagnostics; do not substitute any of them
+   post hoc for the canonical confirmatory profile.
 3. Rebuild the combined report and rerun fail-closed study sizing only after a
    replacement canonical harness pilot supplies nonzero seed-level variance
    and scored component evidence.

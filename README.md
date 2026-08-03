@@ -111,6 +111,11 @@ LangChain on 11/15. The unrestricted cohort's observed maxima remained below
 the lower compute-matched ceilings, so it supplies no budget-rescue evidence.
 The five-seed cluster results are descriptive; see the
 [single-agent pilot record](docs/research/qwen35-27b-single-agent-pilots.md).
+A preregistered two-turn harness-correction diagnostic then retained 30 valid
+bundles and 15 inference-eligible pairs at the final ADR 0017 contract. MAF
+Harness succeeded on 4/15 runs and Deep Agents on 7/15, but the extra turn also
+triggered outer/native call limits and cannot replace the failed canonical
+gate; see the [diagnostic record](docs/research/qwen35-27b-harness-correction-two-diagnostic.md).
 A subsequent balanced 16-launch tracing ablation measured a consistent fixed
 control-path cost: median paired increases of 134 ms for MAF and 423 ms for
 LangGraph, including only 6--7 ms of explicit trace flush. Native tracing stays

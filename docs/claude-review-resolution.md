@@ -119,8 +119,16 @@ implemented. Current milestone status is:
    source `6989bb0`; that exact profile is promoted to the five-seed pilots.
 4. The symmetric canonical/paraphrase-A, zero/one/two-turn, no-review, and
    no-compaction harness ablation controls and profiles are implemented and
-   protocol-probed, but unmeasured. Active roles, prompts, and native compaction
-   mode are hash-frozen into pair preflight and effective topology.
+   protocol-probed. The clean two-turn diagnostic at `c7e0f55` retained all 30
+   valid bundles and 15 inference-eligible pairs: MAF succeeded on 4/15 runs
+   with three operational failures and Deep Agents on 7/15 with one. Its
+   seed-cluster risk difference is 0.2 in Deep's direction with exact sign-flip
+   `p = 0.5`. One MAF run exhausted the outer 32-call budget and one Deep
+   specialist hit its native six-call limit, so the extra turn is neither free
+   nor reliably corrective. This exploratory result does not replace the
+   failed canonical gate. The other sensitivity profiles remain unmeasured;
+   active roles, prompts, and native compaction mode stay hash-frozen into pair
+   preflight and effective topology.
 5. Cosmos DB is selected as the symmetric production-intended checkpoint
    service. MAF's first-party provider and Microsoft's LangGraph provider each
    passed an HTTPS, fresh-process approval resume against a pinned emulator.
