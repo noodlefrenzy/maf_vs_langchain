@@ -1,6 +1,7 @@
 # Measured-study preregistration
 
-Status: blocked pending an accepted model pilot and independent review
+Status: blocked after accepted-model pilots; harness variance/discrimination
+and independent-review gates remain open
 
 The machine-readable source of truth is
 [`configs/studies/measured-v1.toml`](../configs/studies/measured-v1.toml).
@@ -40,16 +41,16 @@ samples of one hidden world as independent cases. The measured-study floor is
 
 ## Pilot sizing gate
 
-The existing five-seed, three-repetition profiles are pilots only. The
-Qwen3.5-27B Q4_K_M llama.cpp profile has cleared both lanes of the paired gate,
-and the still-blocked protocol now freezes that profile with
-`model_gate_passed = true`. Build one fail-closed `paired-report/v3` containing
-the explicit and harness pilots, then run:
+The five-seed, three-repetition profiles are pilots only. The Qwen3.5-27B
+Q4_K_M llama.cpp profile cleared both lanes of the paired gate, and the
+still-blocked protocol freezes that profile with `model_gate_passed = true`.
+The replacement explicit and harness pilots now exist in one fail-closed
+`paired-report/v3`; run:
 
 ```bash
 uv run agent-lab study size \
   configs/studies/measured-v1.toml \
-  --pilot-report reports/pilot/paired-report.json
+  --pilot-report reports/combined-pilot/paired-report.json
 ```
 
 For each track, the sizing command computes the sample standard deviation of
@@ -108,6 +109,17 @@ because implementation order and debugging history were not randomized.
 - Require observed component-level discrimination in the accepted pilot.
 - Record reviewer identity and approval time before the first measured launch.
 
-The protocol remains blocked today because no accepted five-seed pilot exists
-for variance/runtime sizing and reviewer approval has not been recorded. The
-model-selection blocker is closed by the accepted Qwen3.5-27B gate.
+The command currently fails closed because the harness pilot produced zero
+successes in both lanes and therefore zero paired seed variance. Its component
+maps are also empty because no harness lane reached deterministic scoring.
+Sample size and the required component-discrimination decision are therefore
+unidentified; treating the measured-study floor as an estimate would violate
+the preregistered rule. The explicit pilot remains usable evidence, but cannot
+substitute for the missing harness variance.
+
+The protocol remains blocked pending a newly frozen and clean-gated harness
+pilot that supplies nonzero seed-level variance and scored component evidence,
+plus independent reviewer approval. The model-selection blocker itself remains
+closed for the exact accepted Qwen3.5-27B runtime; the observed canonical
+harness/model interaction, rather than artifact fit or provenance integrity,
+is the empirical blocker.

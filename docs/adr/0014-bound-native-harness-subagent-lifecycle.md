@@ -60,3 +60,18 @@ matches the fresh Deep Agents graph invocation at those boundaries.
   replacement harness pilot begins.
 - Hermetic runner probes now exercise the Deep Agents specialist ceiling, both
   frameworks' exceptional task drain, and MAF's aggregate phase reservation.
+
+## Validation outcome
+
+The clean replacement gate and five-seed pilot completed at source `1020b6f`.
+All 30 pilot bundles and all 15 matched pairs were valid and inference-eligible;
+no native task appended spans after terminal trace finalization. This closes
+the lifecycle-integrity defect addressed by this ADR.
+
+The pilot did not pass the separate empirical study-sizing gate. Every Deep
+Agents run reached the six-call specialist ceiling, while every MAF Harness run
+failed either strict proposal provenance, a native-loop phase reservation, or
+structured proposal validation. Both lanes were 0/15, leaving zero paired seed
+variance and no scored harness components. Any phase-policy revision prompted
+by that result requires a new contract hash, clean gate, and replacement pilot;
+the valid zero-success cohort remains in the evidence record.

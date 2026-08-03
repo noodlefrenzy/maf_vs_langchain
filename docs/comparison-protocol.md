@@ -126,9 +126,10 @@ by `configs/studies/measured-v1.toml`. It freezes binary `task_success` as the
 primary outcome, a 10 percentage-point practical difference, seed-cluster
 analysis over five repetitions, two co-primary track contrasts with Holm
 familywise control, failure/outlier/stopping rules, and a fail-closed pilot
-sizing command. The protocol remains explicitly blocked until an accepted
-model pilot supplies variance/runtime evidence and a reviewer approves the
-frozen record.
+sizing command. The protocol remains explicitly blocked until accepted-model
+pilots supply usable variance/runtime and component-discrimination evidence for
+both tracks and a reviewer approves the frozen record. The current harness
+pilot fails closed on zero paired seed variance.
 
 The pilot estimates variance and failure modes. Before the measured study:
 

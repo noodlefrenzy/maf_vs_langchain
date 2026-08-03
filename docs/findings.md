@@ -2,7 +2,7 @@
 
 Status: engineering findings from smoke, stabilization, tracing-ablation,
 instrumentation-verification, and adapter-contract hardening through
-2026-08-03. This is not a measured benchmark or a framework ranking.
+2026-08-04. This is not a measured benchmark or a framework ranking.
 
 ## Executive summary
 
@@ -41,9 +41,20 @@ The 2026-08-03 parity hardening moved delegation repair, strict role-scoped
 tool/evidence provenance, one correction turn, and phase call limits into one
 hashed shared harness contract. Both lanes now fail explicitly after the same
 under-delegation allowance, and the Deep model adapter has a hermetic
-per-dispatch budget/stream-fallback probe matching MAF's. No paired result has
-yet been collected under this corrected contract. Earlier harness cohorts are
-therefore stabilization evidence only, not a head-to-head outcome.
+per-dispatch budget/stream-fallback probe matching MAF's. The first accepted-
+model launch then exposed missing native specialist limits and unsettled MAF
+background tasks; ADR 0014 repaired both before a replacement cohort.
+
+That replacement collected 15 matched pairs under the current contract. All
+30 bundles and every pair were valid and inference-eligible, closing the
+late-span and lifecycle defects, but neither lane achieved task success. Every
+Deep Agents run stopped when a specialist attempted dispatch seven under the
+six-call phase limit. MAF Harness produced eleven strict-provenance failures,
+three phase-limit failures, and one structured-proposal validation failure.
+The combined explicit-plus-harness report therefore fails the preregistered
+sample-sizing gate on zero harness paired seed variance. This is a pilot
+failure-mode result, not a framework ranking; earlier harness cohorts remain
+stabilization evidence only.
 
 A particularly important instrumentation defect was found and fixed in the MAF
 Harness adapter. Metering the public `get_response()` call counted one entire
@@ -713,22 +724,23 @@ pair ID; see
 
 ## Recommended next work
 
-1. Run the implemented five-seed explicit,
-   harness, compute-matched single-agent, and unrestricted single-agent
-   profiles on the accepted Qwen3.5-27B llama.cpp operating point with the
-   standard fault schedule and balanced lane order.
-2. Execute the implemented symmetric
-   harness-policy ablations for zero/one/two provenance-correction turns and
-   the matched paraphrase-A, no-review, and no-compaction variants.
-3. Repeat the validated Cosmos restart/resume gate against the intended Azure
+1. Treat the canonical harness pilot's zero-variance result as a design gate:
+   use the retained per-run evidence to revise and re-freeze the shared phase
+   ceiling and canonical harness interaction, then require a clean paired gate
+   before another five-seed harness pilot.
+2. Use the implemented matched correction-turn, paraphrase-A, no-review, and
+   no-compaction profiles as diagnostic sensitivity checks; do not substitute
+   them post hoc for the canonical confirmatory profile.
+3. Rebuild the combined report and rerun fail-closed study sizing only after a
+   replacement canonical harness pilot supplies nonzero seed-level variance
+   and scored component evidence.
+4. Run the implemented compute-matched and unrestricted single-agent pilot
+   profiles on the accepted Qwen3.5-27B operating point before claiming a
+   multi-agent advantage.
+5. Repeat the validated Cosmos restart/resume gate against the intended Azure
    account and managed identity before enabling a production runner profile;
    the pinned emulator closes provider compatibility, not deployment
    acceptance. See [production-checkpoints.md](production-checkpoints.md).
-4. Run the implemented offline paired report builder on the clean-source pilot
-   indices. It retains raw paired points and operational failures, computes
-   seed-cluster paired effects, deterministic seed-bootstrap intervals,
-   sign-flip and Holm inference, reports component discrimination, and
-   preserves bundle links for audit.
 
 ## Reproducibility map
 

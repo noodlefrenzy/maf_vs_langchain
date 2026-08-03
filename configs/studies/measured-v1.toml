@@ -2,7 +2,7 @@ schema_version = "agent-lab-study-protocol/v1"
 study_id = "maf_vs_langchain_measured_v1"
 status = "blocked"
 blocked_reasons = [
-  "No accepted-model five-seed pilot exists for seed-cluster variance and runtime sizing.",
+  "The accepted-model harness pilot produced zero paired task-success variance and no scored components, so sample size and component discrimination are unidentified.",
   "Independent reviewer approval has not been recorded.",
 ]
 report_schema_version = "paired-report/v3"

@@ -1,7 +1,7 @@
 # Frozen pilot cases and execution plan
 
-Status: implemented and protocol-validated; empirical pilot remains gated on an
-accepted quality-tier model.
+Status: implemented, protocol-validated, and exercised by both accepted-model
+five-seed pilots.
 
 The pilot and required harness ablations use one version-controlled case
 manifest, [`configs/cases/pilot-v1.json`](../configs/cases/pilot-v1.json). It

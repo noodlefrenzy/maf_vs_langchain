@@ -1,6 +1,6 @@
 # Claude repository review resolution
 
-Status: implementation reconciliation through 2026-08-03
+Status: implementation reconciliation through 2026-08-04
 
 This ledger maps the findings in `claude_repo_review.md` (reviewed at commit
 `90a9d91`) to the current implementation and retained empirical milestones. It
@@ -122,8 +122,10 @@ implemented. Current milestone status is:
    effects and creates portable redacted evidence plus a checksummed owner-only
    copy of every raw bundle. The archive no longer depends on workstation paths;
    transfer and publication rules are documented in `evidence-retention.md`.
-   A final powered paired report and component-discrimination analysis still
-   require the accepted-model pilots.
+   The combined accepted-model pilot report is now complete and checksummed.
+   It retains 30 explicit and 30 harness lanes; the harness component maps are
+   empty because all harness outcomes were operational failures, so the
+   component-discrimination gate remains open.
 7. The rolling 72-hour dependency quarantine is now enforced in every uv
    project and as a prerequisite CI job. It covers direct and transitive locked
    registry artifacts without adding package or index exclusions.
@@ -164,8 +166,9 @@ implemented. Current milestone status is:
     prompt sensitivity, ablations, evidence retention, and descriptive-only
     developer effort. Approval fails closed without a passed model gate, pilot
     report hash, computed seed/runtime plan, component discrimination, clean
-    source, and reviewer sign-off. Sample sizing remains correctly blocked
-    until the accepted-model pilot exists; see
+    source, and reviewer sign-off. Both accepted-model pilots and their combined
+    report now exist, but sample sizing correctly fails closed because the
+    harness track has zero paired seed variance; see
     `measured-study-preregistration.md`. Report schema v3 makes the frozen
     analysis unit executable: repetitions are averaged within seed, bootstrap
     intervals resample seeds, paired sign-flip p-values operate on seed-level
@@ -176,5 +179,13 @@ implemented. Current milestone status is:
     background specialists settled. ADR 0014 moves the limiter inside every
     Deep specialist, freezes a cross-framework completion barrier, drains both
     native task mechanisms on exceptional exit, and bounds MAF's completion
-    loop across the whole phase. The retained launch is diagnostic-only; a new
-    clean gate and replacement harness pilot are required.
+    loop across the whole phase. The retained launch is diagnostic-only. The
+    clean replacement gate and 30-lane pilot at `1020b6f` completed with every
+    bundle and pair valid and inference-eligible, closing the lifecycle and
+    late-span defects. Empirically, however, both canonical lanes were 0/15:
+    every Deep Agents run reached the specialist six-call ceiling, while MAF
+    produced eleven strict-provenance failures, three phase-limit failures, and
+    one structured-proposal validation failure. The combined report therefore
+    has zero harness paired seed variance and no harness component scores; a
+    revised, newly hash-frozen harness operating point must be clean-gated and
+    piloted before measured-study sizing can proceed.
