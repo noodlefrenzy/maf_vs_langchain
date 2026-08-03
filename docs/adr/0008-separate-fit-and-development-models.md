@@ -16,7 +16,15 @@ model-behavior and harness-integration failures, but its use was not recorded
 as a decision and could be mistaken for final model selection.
 
 Qwen3.5-9B has now completed reproducible 8K, 16K, and 32K vLLM fit tests and
-the full native-client compatibility gate. Task quality remains unmeasured.
+the full native-client compatibility gate.
+
+## Outcome update
+
+The corrected one-seed task-quality gate at source `bb61e34` produced a
+successful LangGraph lane and a valid MAF evidence-gate failure. Qwen3.5-9B
+therefore remains the accepted fit-check model but is not promoted as the
+quality-tier pilot model. The larger profiles remain gated pending another
+quality-tier candidate.
 
 ## Decision
 

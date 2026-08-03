@@ -52,10 +52,11 @@ records:
 
 The quality-tier candidate is
 `Qwen/Qwen3.5-35B-A3B-GPTQ-Int4`. Its repository is about 24.5 GB before
-runtime overhead, so it cannot be assumed to fit wholly in VRAM. Evaluate it
-separately with bounded CPU offload into the available 128 GB system RAM. The
-9B profile remains the required 4090 characterization candidate until
-measurements accept or reject it.
+runtime overhead, so it cannot be assumed to fit wholly in VRAM. The staged
+gate pins 8 GiB of CPU offload, a 16K context, and loopback port 8002; it runs
+native-client compatibility before task quality and does not coexist with the
+9B GPU server. Follow
+[`qwen35-35b-a3b-gate.md`](../../docs/research/qwen35-35b-a3b-gate.md).
 
 See [ADR 0004](../../docs/adr/0004-local-inference.md) for the decision and
 [local-model research](../../docs/research/local-inference.md) for sources.

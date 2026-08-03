@@ -348,9 +348,7 @@ def _select_approval_checkpoint(
     return matches[0]
 
 
-async def _approval_checkpoint(
-    storage: CheckpointStorage, request_id: str
-) -> WorkflowCheckpoint:
+async def _approval_checkpoint(storage: CheckpointStorage, request_id: str) -> WorkflowCheckpoint:
     checkpoints = await storage.list_checkpoints(workflow_name="agent-lab-maf-explicit-approved-v1")
     return _select_approval_checkpoint(checkpoints, request_id)
 

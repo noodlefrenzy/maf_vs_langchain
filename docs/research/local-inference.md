@@ -165,6 +165,13 @@ The available 128 GB host RAM makes bounded offload possible, but PCIe transfer,
 kernel support, latency, and context capacity must be characterized. MoE active
 parameter count does not reduce the need to store all expert weights.
 
+The staged gate now pins official revision
+`3af5ca2972faf6de1fd6f4efc4d8d319ca751e8b`, loopback port 8002, a 16K
+context, `moe_wna16`, and 8 GiB of CPU offload. See the
+[executable quality-tier gate](qwen35-35b-a3b-gate.md). These are candidate
+controls until the server and both native clients pass; they are not a selected
+measured-study operating point.
+
 ## Why not pick the largest model immediately
 
 The experiment needs many model calls and repetitions. A slower model can:

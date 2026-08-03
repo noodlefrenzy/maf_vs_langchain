@@ -100,8 +100,8 @@ the limitations slides intact.
    retry behavior changed operational outcomes.
 4. **Neither stack removes the need for external controls.** Budgets,
    provenance, approvals, and evaluation must fail closed.
-5. **No winner claim yet.** One seed, one model, tiny cohorts, no single-agent
-   baseline, and no powered measured study.
+5. **No winner claim yet.** One seed per retained smoke/gate, tiny cohorts, no
+   completed paired single-agent cohort, and no powered measured study.
 
 ---
 
@@ -594,14 +594,15 @@ engineering risks—not to select a universal winner.
 
 # Recommended next phase
 
-1. Freeze corrected adapters and contracts at one clean source tree.
-2. Run compute-matched and unrestricted single-agent baselines.
-3. Execute the five-seed × three-repetition paired pilot with transient faults.
+1. Select and characterize a quality-tier model candidate; Qwen3.5-9B remains
+   the accepted fit-check model but failed the paired task-quality gate.
+2. Rerun the one-seed paired task-quality gate at one clean source tree.
+3. Only after both gate lanes succeed, run the five-seed explicit, harness,
+   compute-matched, and unrestricted single-agent profiles.
 4. Repeat tracing on/off on completed model-driven workflows.
-5. Evaluate provenance-correction and prompt-paraphrase policy symmetrically.
-6. Test intended production checkpoint/resume backends.
-7. Run the paired task-quality pilot on the accepted Qwen3.5-9B 32K fit profile.
-8. Publish paired raw points, operational failures, effect sizes, uncertainty,
+5. Execute the frozen provenance-correction and prompt-paraphrase profiles.
+6. Select and test intended production checkpoint/resume backends.
+7. Publish paired raw points, operational failures, effect sizes, uncertainty,
    and metric audit samples.
 
 ---

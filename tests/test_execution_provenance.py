@@ -131,6 +131,34 @@ def _vllm_command_runner(command: list[str] | tuple[str, ...], _timeout: float) 
     raise AssertionError(f"unexpected command: {command}")
 
 
+def _vllm_35b_command_runner(command: list[str] | tuple[str, ...], _timeout: float) -> str:
+    revision = "e" * 40
+    if command[:2] == ["uname", "-a"]:
+        return "Linux tower 7.0 x86_64\n"
+    if command[:3] == ["ps", "-eo", "pid=,args="]:
+        return (
+            "789 /opt/vllm/bin/vllm serve Qwen/Qwen3.5-35B-A3B-GPTQ-Int4 "
+            "--served-model-name Qwen/Qwen3.5-35B-A3B-GPTQ-Int4 "
+            f"--revision {revision} --tokenizer-revision {revision} "
+            "--tokenizer Qwen/Qwen3.5-35B-A3B-GPTQ-Int4 --max-model-len 16384 "
+            "--max-num-batched-tokens 8192 --max-num-seqs 2 "
+            "--host 127.0.0.1 --port 8002 --dtype bfloat16 "
+            "--load-format safetensors --quantization moe_wna16 "
+            "--tensor-parallel-size 1 --gpu-memory-utilization 0.90 "
+            "--cpu-offload-gb 8 --seed 1729 --generation-config vllm "
+            "--reasoning-parser qwen3 --tool-call-parser qwen3_coder "
+            "--enable-auto-tool-choice --enable-chunked-prefill "
+            "--enable-prefix-caching --enable-tokenizer-info-endpoint "
+            "--enable-force-include-usage --enable-per-request-metrics "
+            "--enable-prompt-tokens-details --language-model-only\n"
+        )
+    if command[:2] == ["nvidia-smi", "--query-gpu=name,uuid,driver_version,memory.total"]:
+        return "NVIDIA GeForce RTX 4090, GPU-test, 610.74, 24564\n"
+    if command == ["nvidia-smi"]:
+        return "NVIDIA-SMI 610.53 Driver Version: 610.74 CUDA Version: 13.3\n"
+    raise AssertionError(f"unexpected command: {command}")
+
+
 def _vllm_container_command_runner(command: list[str] | tuple[str, ...], _timeout: float) -> str:
     revision = "b" * 40
     image_digest = "sha256:" + "c" * 64
@@ -344,6 +372,50 @@ def test_vllm_runtime_attestation_hashes_pinned_model_tokenizer_and_serve_contra
     assert result["compute_runtime"]["backend"] == "nvidia"
     assert len(result["chat_template"]["sha256"]) == 64
     assert len(result["attestation_sha256"]) == 64
+
+
+def test_vllm_runtime_attestation_accepts_pinned_35b_offload_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_name = "Qwen/Qwen3.5-35B-A3B-GPTQ-Int4"
+
+    def fetch(url: str, _timeout: float) -> dict[str, Any]:
+        if url.endswith("/models"):
+            return {"data": [{"id": model_name}]}
+        if url.endswith("/version"):
+            return {"version": "0.26.0.dev"}
+        if url.endswith("/tokenizer_info"):
+            return {"tokenizer_class": "Qwen2TokenizerFast", "chat_template": "template"}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr("agent_lab.execution_provenance._fetch_json", fetch)
+    monkeypatch.setattr(
+        "agent_lab.execution_provenance._post_json",
+        lambda _url, _payload, _timeout: {"count": 4, "max_model_len": 16384},
+    )
+    profile = _profile().model_copy(
+        update={
+            "name": model_name,
+            "base_url": "http://127.0.0.1:8002/v1",
+            "context_window_tokens": 16384,
+            "seed": 1729,
+        }
+    )
+
+    result = attest_model_runtime(
+        profile,
+        InferenceRuntimeProfile(
+            server_kind="vllm",
+            compute_backend="nvidia",
+            process_name="vllm",
+        ),
+        command_runner=_vllm_35b_command_runner,
+    )
+
+    assert result["artifact"]["revision"] == "e" * 40
+    assert result["artifact"]["load_format"] == "safetensors"
+    assert result["artifact"]["quantization"] == "moe_wna16"
+    assert result["server"]["serve_process"]["flags"]["--cpu-offload-gb"] == "8"
 
 
 def test_vllm_runtime_attestation_excludes_response_local_model_metadata(

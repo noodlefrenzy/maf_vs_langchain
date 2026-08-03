@@ -656,23 +656,21 @@ passed.
 
 ## Recommended next work
 
-1. Freeze the corrected adapters, contracts, model/server flags, and scorer at
-   one clean source tree.
-2. Freeze and run the now-implemented paired MAF `Agent` vs LangChain
-   `create_agent` compute-matched and unrestricted single-agent profiles before
-   making any multi-agent-value claim.
-3. Execute the five-seed, three-repetition paired pilot with the standard
-   transient-fault profile and balanced lane order.
+1. Select and characterize a quality-tier candidate; Qwen3.5-9B remains useful
+   for fit and compatibility but failed the paired task-quality gate.
+2. Rerun the one-seed task-quality gate at one clean source tree, with the
+   corrected adapters, contracts, server flags, and scorer frozen.
+3. Only after both gate lanes succeed, run the implemented five-seed explicit,
+   harness, compute-matched single-agent, and unrestricted single-agent
+   profiles with the standard fault schedule and balanced lane order.
 4. Repeat the full-workflow tracing on/off ablation; report absolute deltas,
    span volume, and model/tool latency separately.
-5. Once a model clears the task-quality gate, execute the implemented symmetric
+5. After the same gate, execute the implemented symmetric
    harness-policy ablations for zero/one/two provenance-correction turns and
    the matched paraphrase-A prompt variant.
 6. Validate restart/resume using production-intended checkpoint backends; do
    not generalize from the compatibility file savers.
-7. Run the paired task-quality pilot on the accepted Qwen3.5-9B 32K fit profile;
-   retain its fit-check designation until that operating-point gate passes.
-8. Run the implemented offline paired report builder on the clean-source pilot
+7. Run the implemented offline paired report builder on the clean-source pilot
    indices. It retains raw paired points and operational failures, computes
    paired effects and deterministic bootstrap intervals, reports component
    discrimination, and preserves bundle links for audit.

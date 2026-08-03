@@ -41,6 +41,7 @@ _SERVE_FLAGS_WITH_VALUES = {
     "--cache-reuse",
     "--chat-template",
     "--ctx-size",
+    "--cpu-offload-gb",
     "--host",
     "--model",
     "--n-gpu-layers",
@@ -721,6 +722,17 @@ def _require_vllm_serve_contract(
                 "--max-num-batched-tokens": str(min(max_model_len, 8192)),
             }
         )
+    elif model.name == "Qwen/Qwen3.5-35B-A3B-GPTQ-Int4":
+        required_values.update(
+            {
+                "--reasoning-parser": "qwen3",
+                "--tool-call-parser": "qwen3_coder",
+                "--load-format": "safetensors",
+                "--quantization": "moe_wna16",
+                "--max-num-batched-tokens": str(min(max_model_len, 8192)),
+                "--cpu-offload-gb": "8",
+            }
+        )
     else:
         required_values.update(
             {
@@ -746,6 +758,8 @@ def _require_vllm_serve_contract(
         raise ValueError("vLLM --gpu-memory-utilization must be in (0, 1]")
     if model.name == "Qwen/Qwen3.5-9B" and gpu_memory_utilization != 0.75:
         raise ValueError("Qwen3.5-9B vLLM --gpu-memory-utilization must be 0.75")
+    if model.name == "Qwen/Qwen3.5-35B-A3B-GPTQ-Int4" and gpu_memory_utilization != 0.9:
+        raise ValueError("Qwen3.5-35B-A3B vLLM --gpu-memory-utilization must be 0.9")
     for key in (
         "--enable-auto-tool-choice",
         "--enable-chunked-prefill",

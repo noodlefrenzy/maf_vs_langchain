@@ -86,8 +86,14 @@ provenance, and the same outer approval/recovery boundary. Both runner families
 now retain correlated, redacted native span ledgers, export best-effort to a
 pinned loopback Phoenix deployment, and record validated operation-level trace
 completeness without making collector availability run-critical. These smoke
-runs exercise the system but do not constitute a benchmark result. The next
-milestones are clean-source baseline and broader repeated experiment runs.
+runs exercise the system but do not constitute a benchmark result. Clean-source
+harness and compute-matched baseline smoke pairs have now been retained, along
+with a corrected Qwen3.5-9B task-quality gate. That gate contained one
+LangGraph task success and one valid MAF evidence-gate failure, so Qwen3.5-9B
+remains a fit-check model and none of the larger profiles were promoted. The
+next empirical milestone is a quality-tier model that clears the one-seed
+paired gate; production checkpoint-backend selection remains a separate
+deployment decision.
 Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 
@@ -189,6 +195,12 @@ prompt/correction control:
 - `configs/experiments/harness-correction-zero-ablation.toml`
 - `configs/experiments/harness-correction-two-ablation.toml`
 - `configs/experiments/harness-paraphrase-a-ablation.toml`
+
+Qwen3.5-9B did not clear that gate. The separately pinned 35B-A3B quality-tier
+candidate therefore has its own compatibility-first gate and runbook:
+
+- `configs/experiments/qwen35-35b-a3b-task-quality-gate.toml`
+- `docs/research/qwen35-35b-a3b-gate.md`
 
 The effective prompt/policy payload is hashed into both paired manifests and
 the pair preflight. Both native adapters consume the same validated
