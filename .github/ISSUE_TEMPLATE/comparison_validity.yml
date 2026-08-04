@@ -1,0 +1,64 @@
+name: Comparison validity problem
+description: Report a way the harness treats the two paired lanes unequally.
+title: "[validity] "
+labels: ["comparison-validity"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the highest-value issue type for this project. A result is only
+        meaningful if both lanes faced the same task, tools, budgets, and
+        scoring. If they did not, the finding is contaminated regardless of how
+        cleanly it was measured.
+
+        Please read [the comparison protocol](../../docs/comparison-protocol.md)
+        first — some asymmetries are deliberate and preregistered as framework
+        behavior under test.
+  - type: dropdown
+    id: track
+    attributes:
+      label: Affected track
+      options:
+        - Explicit workflows (MAF Workflows vs LangGraph)
+        - Opinionated harness (MAF Harness vs Deep Agents)
+        - Single agent (MAF Agent vs LangChain create_agent)
+        - Shared control plane / scorer / simulator
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: asymmetry
+    attributes:
+      label: The asymmetry
+      description: What differs between the lanes, and which lane it favours.
+      placeholder: |
+        e.g. the MAF lane receives a provenance-correction retry that the
+        LangGraph lane does not, at runners/maf/.../workflow_lane.py:NNN
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: >
+        File and line references, contract hashes, or run-bundle fields. If you
+        have a paired run that shows it, name the experiment profile and seed.
+    validations:
+      required: true
+  - type: textarea
+    id: deliberate
+    attributes:
+      label: Why you believe this is unintended
+      description: >
+        Some differences are framework-native behavior we intend to measure
+        rather than eliminate. Explain why this one looks like a harness defect
+        instead.
+    validations:
+      required: true
+  - type: textarea
+    id: affected
+    attributes:
+      label: Results you believe are affected
+      description: >
+        Which retained pilots, gates, or diagnostics would need to be
+        reclassified or re-run if this is confirmed?

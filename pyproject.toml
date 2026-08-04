@@ -8,11 +8,37 @@ version = "0.1.0"
 description = "Framework-neutral experiment harness for comparing Microsoft Agent Framework and the LangChain stack."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Michael Lanzetta" }]
+keywords = [
+  "agents",
+  "benchmark",
+  "evaluation",
+  "experiment-harness",
+  "langchain",
+  "langgraph",
+  "microsoft-agent-framework",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development :: Testing",
+]
 dependencies = [
   "pydantic>=2.13,<3",
   "rich>=14.2,<15",
   "typer>=0.27,<1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/noodlefrenzy/maf_vs_langchain"
+Repository = "https://github.com/noodlefrenzy/maf_vs_langchain"
+Issues = "https://github.com/noodlefrenzy/maf_vs_langchain/issues"
+Documentation = "https://github.com/noodlefrenzy/maf_vs_langchain/blob/main/docs/SPEC.md"
 
 [project.scripts]
 agent-lab = "agent_lab.cli:app"

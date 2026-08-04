@@ -18,6 +18,10 @@ build/
 # Runtime state and downloaded/private data.
 runs/
 reports/
+# Owner-only bundle copies inside generated reports. `reports/` already covers
+# the default location, but `report build --output-dir` accepts any path, so
+# match the subtree by name wherever it lands. See docs/evidence-retention.md.
+private-runs/
 data/private/
 infra/phoenix/data/
 .cache/

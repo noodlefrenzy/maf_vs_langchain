@@ -17,6 +17,40 @@ agents receive role-scoped MCP tools, investigate hidden state, tolerate
 transient tool failures, coordinate a diagnosis, and request approval for a
 mitigation. Each paired run gets an isolated copy of the same world.
 
+## How to read the numbers in this repository
+
+**Nothing here is a benchmark result.** This repository publishes pilots,
+gates, and diagnostics — small-N, descriptive, and preregistered as such. The
+success ratios below and throughout the docs are reported so the method can be
+audited, not so the frameworks can be ranked.
+
+Specifically, before quoting any figure from this repository:
+
+- **N is small.** The largest cohorts are five scenario seeds by three
+  repetitions, giving 15 inference-eligible pairs per arm. Seed-clustered
+  bootstrap intervals over 15 pairs are wide; run-level counts are explicitly
+  descriptive only.
+- **One model, one operating point.** All promoted results use a single pinned
+  Qwen3.5-27B Q4_K_M GGUF on local llama.cpp. Framework behavior at this
+  capability level need not generalize to frontier hosted models.
+- **The harness track is diagnostic, not confirmatory.** Its canonical gate has
+  not passed. Harness-lane numbers come from ablations retained as
+  stabilization evidence and cannot substitute for that gate.
+- **Some asymmetries are deliberate.** Where a framework's native behavior
+  cannot be matched without changing what it is, the difference is preregistered
+  as behavior under test rather than normalized away. Which are which is
+  recorded in [the comparison protocol](docs/comparison-protocol.md) and the
+  [ADRs](docs/adr/README.md).
+
+If you want a single sentence: this is a study of whether these frameworks can
+be compared fairly at all, and the apparatus for doing so, with early
+observations attached.
+
+This project is not affiliated with, endorsed by, or sponsored by Microsoft or
+LangChain. "Microsoft Agent Framework", "LangChain", "LangGraph", and all other
+marks belong to their respective owners and are used here only to identify the
+software under comparison.
+
 ## Start here
 
 1. Read the [experiment specification](docs/SPEC.md).
@@ -327,4 +361,26 @@ bundle, and a SHA-256 inventory. It is independent of the ignored `runs/` tree
 after transfer to access-controlled durable storage. Do not publish the
 `private-runs/` subtree; follow [the retention procedure](docs/evidence-retention.md).
 
-No license is granted by this private repository unless one is added later.
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The change rules there are not
+boilerplate: this project treats experiment validity as a product requirement,
+so paired-lane symmetry, contract versioning, and evidence retention are
+reviewed as carefully as correctness.
+
+If you believe the harness treats the two lanes unequally, that is the most
+valuable issue you can file. Use the comparison-validity issue template.
+
+## Security
+
+Everything in this repository is loopback-only by design and is not hardened for
+network-facing use. To report a vulnerability privately, and to see what is
+explicitly out of scope, read [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE) © Michael Lanzetta.
+
+The license covers the code and documentation in this repository. It does not
+cover the frameworks under comparison, the models used to produce results, or
+any model weights — each carries its own terms.

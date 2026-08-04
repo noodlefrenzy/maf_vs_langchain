@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in the harness, control plane, simulator, or tooling misbehaves.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a lane-fairness problem, please use the **Comparison validity**
+        template instead — those are triaged differently.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        Exact commands. Note that most of the core skeleton runs without either
+        agent framework or a downloaded model.
+      render: shell
+      placeholder: |
+        uv sync
+        uv run agent-lab scenario generate --seed 42
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: Output of `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Core (src/agent_lab)
+        - MAF runner (runners/maf)
+        - LangGraph runner (runners/langgraph)
+        - Incident MCP service (services/incident_mcp)
+        - Report builder / observer
+        - CI, packaging, or docs
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, and inference runtime if one was involved.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: >
+        Terminal output or a terminal.json. **Do not paste run bundles,
+        `private-runs/` content, raw model reasoning, or approval tokens.**
+      render: shell

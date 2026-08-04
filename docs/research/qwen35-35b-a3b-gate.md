@@ -34,7 +34,7 @@ Artifact acquisition is separate from measurement and pins an immutable model
 revision:
 
 ```bash
-export AGENT_LAB_HF_CACHE=/home/noodle/.cache/huggingface
+export AGENT_LAB_HF_CACHE=$HOME/.cache/huggingface
 
 docker run --rm --pull never \
   --entrypoint /usr/bin/python3 \
@@ -52,7 +52,7 @@ named 9B container, then run the fail-closed gate from a clean committed tree:
 docker stop --time 30 agent-lab-qwen35-9b-vllm
 docker rm agent-lab-qwen35-9b-vllm
 
-export AGENT_LAB_HF_CACHE=/home/noodle/.cache/huggingface
+export AGENT_LAB_HF_CACHE=$HOME/.cache/huggingface
 scripts/run-qwen35-35b-a3b-vllm-gate.sh \
   runs/model-compatibility/qwen35-35b-a3b-gate \
   runs/qwen35-35b-a3b-gate
