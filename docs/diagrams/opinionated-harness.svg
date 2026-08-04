@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 540" fill="#172033" role="img" aria-labelledby="title desc">
   <title id="title">Matched opinionated harness architecture</title>
   <desc id="desc">A native coordinator uses planning and context features to delegate to three specialists, while framework-neutral budgets, evidence provenance, approval, mitigation, and recovery remain outside the harness.</desc>
+  <rect width="100%" height="100%" fill="#ffffff"/>
   <defs>
     <linearGradient id="nativeBg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef5fb"/><stop offset="1" stop-color="#ecf8f4"/></linearGradient>
     <linearGradient id="guardBg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff8ef"/><stop offset="1" stop-color="#fff1e7"/></linearGradient>
