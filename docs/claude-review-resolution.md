@@ -136,9 +136,13 @@ implemented. Current milestone status is:
    failures. Its risk difference is 0.266667 with interval
    `[0.066667, 0.466667]` and exact sign-flip `p = 0.25`. This satisfies the
    planned prompt-robustness check by exposing material wording sensitivity,
-   not by qualifying either prompt family. The no-review and no-compaction
-   profiles remain unmeasured; active roles, prompts, and native compaction mode
-   stay hash-frozen into pair preflight and effective topology.
+   not by qualifying either prompt family. The clean no-review diagnostic at
+   `da77548` also retained all 30 valid bundles and 15 pairs. Each lane achieved
+   one task success in 15 runs, for risk difference `0`, interval
+   `[-0.2, 0.2]`, and exact sign-flip `p = 1.0`; operational failures differed
+   sharply at 2/15 for MAF and 13/15 for Deep. The no-compaction profile remains
+   unmeasured; active roles, prompts, and native compaction mode stay
+   hash-frozen into pair preflight and effective topology.
 5. Cosmos DB is selected as the symmetric production-intended checkpoint
    service. MAF's first-party provider and Microsoft's LangGraph provider each
    passed an HTTPS, fresh-process approval resume against a pinned emulator.

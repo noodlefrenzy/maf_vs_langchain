@@ -205,3 +205,9 @@ MAF produced no task successes and Deep produced four, while half of all runs
 ended in retained operational failure. It likewise does not qualify or replace
 the canonical gate; see
 [qwen35-27b-harness-paraphrase-a-diagnostic.md](qwen35-27b-harness-paraphrase-a-diagnostic.md).
+
+The no-review topology profile produced one task success in each lane but
+sharply asymmetric stability: MAF retained two operational failures and Deep
+retained thirteen. Equal aggregate success therefore does not qualify the
+topology or imply operational equivalence; see
+[qwen35-27b-harness-no-review-diagnostic.md](qwen35-27b-harness-no-review-diagnostic.md).

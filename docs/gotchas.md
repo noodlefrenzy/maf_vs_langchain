@@ -298,6 +298,22 @@ canonical cohort at the same source was blocked by the canonical gate. It does
 show that a single wording cannot be assumed representative for this local
 model and harness combination.
 
+### Fewer specialists do not guarantee shorter native loops
+
+The no-review profile removed the reliability reviewer symmetrically and kept
+the canonical prompts, one correction turn, native compaction, catalogs,
+budgets, and validators fixed. MAF normally completed 13/15 runs and Deep only
+2/15. Twelve Deep runs exhausted a native specialist's six-call middleware
+limit, while MAF had one evidence-insufficient failure and one outer 32-call
+budget exhaustion. Each lane nevertheless achieved exactly one task success,
+in a different seed cluster.
+
+Treat active topology as a versioned treatment variable and report operational
+failure separately from task success. Removing an actor changes delegation,
+context, and routing dynamics; it does not mechanically subtract that actor's
+calls from the original execution. A tied task-success total can conceal a
+large difference in whether the native workflow reaches a scored terminal.
+
 With those guards frozen, the order-seed-1737 paired smoke completed both
 lanes and produced inference-eligible bundles. Deep Agents scored `0.35` and
 MAF Harness scored `0.275`; both had `task_success = false` because their chosen
@@ -333,6 +349,21 @@ server before editing or committing anything. This also applies to seemingly
 unrelated cleanup and generated documentation. If an edit cannot wait, stop
 and restart the whole cohort under a new clean commit rather than mixing source
 states.
+
+### A resource-sampler thread can fail after useful samples exist
+
+During the no-review characterization, WSL `nvidia-smi` timed out once after
+five seconds. The uncaught timeout stopped the sampler thread, leaving the last
+two matrix cells with zero cell-local resource samples even though 327 earlier
+samples supported the aggregate 22,409 MiB peak. The characterization remained
+measurement-eligible and had no skipped inference cells, but those two cells'
+individual resource peaks are not evidence.
+
+Inspect both aggregate and per-cell sample counts rather than relying on the
+top-level eligibility flag alone. The sampler now records error counts and
+sources while continuing subsequent host/GPU/process/container observations.
+Older characterizations without those fields still require traceback review
+and qualification of any affected cell-local resource claim.
 
 ### Synchronous stdin and long native awaits
 

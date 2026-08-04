@@ -126,6 +126,11 @@ but was much less operationally stable: MAF Harness succeeded on 0/15 runs and
 Deep Agents on 4/15, with 15 retained failures across the lanes. Prompt wording
 is therefore a material treatment variable for this local operating point; see
 the [paraphrase record](docs/research/qwen35-27b-harness-paraphrase-a-diagnostic.md).
+The no-review topology diagnostic then produced one task success in each lane,
+but radically different completion behavior: MAF retained 2/15 operational
+failures while Deep retained 13/15. Equal success totals therefore do not imply
+operational equivalence; see the
+[no-review record](docs/research/qwen35-27b-harness-no-review-diagnostic.md).
 A subsequent balanced 16-launch tracing ablation measured a consistent fixed
 control-path cost: median paired increases of 134 ms for MAF and 423 ms for
 LangGraph, including only 6--7 ms of explicit trace flush. Native tracing stays

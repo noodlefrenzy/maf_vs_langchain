@@ -1,4 +1,5 @@
 import json
+import subprocess
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,7 @@ import pytest
 
 from agent_lab.contracts import ModelProfile
 from agent_lab.local_inference_benchmark import (
+    ResourceSampler,
     _post_json,
     _write_json_exclusive,
     calibrate_prompt,
@@ -369,3 +371,32 @@ def test_characterization_report_write_is_private_and_refuses_overwrite(tmp_path
     assert json.loads(output.read_text()) == {"measurement_eligible": False}
     with pytest.raises(FileExistsError):
         _write_json_exclusive(output, {"measurement_eligible": True})
+
+
+def test_resource_sampler_records_timeout_and_continues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def gpu_sample() -> dict[str, float]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise subprocess.TimeoutExpired("nvidia-smi", timeout=5)
+        return {"gpu_memory_used_mib": 42.0, "gpu_utilization_percent": 7.0}
+
+    monkeypatch.setattr(
+        "agent_lab.local_inference_benchmark._host_memory_sample",
+        lambda: {"host_memory_used_mib": 100.0},
+    )
+    monkeypatch.setattr("agent_lab.local_inference_benchmark._gpu_sample", gpu_sample)
+
+    sampler = ResourceSampler(root_pid=None)
+    sampler._sample()
+    sampler._sample()
+
+    assert len(sampler.samples) == 2
+    assert "gpu_memory_used_mib" not in sampler.samples[0]
+    assert sampler.samples[1]["gpu_memory_used_mib"] == 42.0
+    assert sampler.summary()["sampling_error_count"] == 1
+    assert sampler.summary()["sampling_error_sources"] == ["gpu"]

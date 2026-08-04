@@ -44,15 +44,17 @@ The earlier 15-pair replacement cohort had zero successes in both lanes and is
 failure-mode evidence from before the final ADR 0017 catalog correction, not a
 qualified pilot.
 
-Three preregistered sensitivity cohorts now show why no post-hoc harness profile
+Four preregistered sensitivity cohorts now show why no post-hoc harness profile
 should be promoted. Zero correction turns produced MAF 2/15 and Deep 3/15
 successes; two turns produced 4/15 and 7/15; paraphrase-A produced 0/15 and
-4/15 with 15 operational failures. Their Deep-minus-MAF seed-cluster risk
-differences were 0.066667, 0.2, and 0.266667 respectively, with exact sign-flip
-`p` values 1.0, 0.5, and 0.25. These are exploratory diagnostics at different
-clean source commits, not a matched causal dose-response or a framework
-ranking. The paraphrase result establishes a narrower point: prompt wording is
-a material treatment variable for this local model/harness operating point.
+4/15 with 15 operational failures; and no-review produced 1/15 in each lane
+despite operational failures of 2/15 for MAF and 13/15 for Deep. Their
+Deep-minus-MAF seed-cluster risk differences were 0.066667, 0.2, 0.266667, and
+0 respectively, with exact sign-flip `p` values 1.0, 0.5, 0.25, and 1.0. These
+are exploratory diagnostics at different clean source commits, not a matched
+causal dose-response or a framework ranking. The paraphrase result establishes
+that prompt wording is a material treatment variable; the no-review result
+shows that equal task-success totals can conceal major operational asymmetry.
 
 A particularly important instrumentation defect was found and fixed in the MAF
 Harness adapter. Metering the public `get_response()` call counted one entire
@@ -464,6 +466,10 @@ only the shared outer contracts and guards.
 12. **Prompt paraphrase changed failure behavior.** Under paraphrase-A, MAF had
     eight evidence-insufficient failures and one budget exhaustion in 15 runs.
     A matched semantic rewrite is still a new operating point.
+13. **Removing a reviewer did not simply shorten the loop.** MAF normally
+    completed 13/15 no-review runs, but one run still exhausted the 32-call
+    outer budget. Topology changes alter model routing rather than monotonically
+    reducing work.
 
 ## LangChain, LangGraph, and Deep Agents deep dive
 
@@ -537,6 +543,10 @@ that would violate the matched contract.
 12. **Prompt paraphrase increased loop and output pressure.** Paraphrase-A still
     produced three native specialist-limit failures and reached 14,133 output
     tokens in one run. Wording is part of the pinned runtime contract.
+13. **No-review amplified native specialist-limit failures.** Twelve of 15 Deep
+    no-review runs exhausted a specialist's six-call limit, and another failed
+    evidence validation. Fewer active specialists did not imply fewer native
+    loop failures.
 
 ## Observability findings
 
@@ -623,9 +633,16 @@ auxiliary: a local, content-free span ledger survives collector loss.
 - **Prompt wording is a treatment variable.** A symmetric paraphrase can change
   delegation, output length, evidence sufficiency, and limit pressure without
   changing tools, topology, validators, or model settings.
+- **Topology and task success are separate outcomes.** The no-review cohort tied
+  at one task success per lane while operational failures were 2/15 versus
+  13/15. Aggregate success equality does not establish runtime equivalence.
 - **Clean source is a cohort-wide property.** Even documentation edits between
   repetitions can alter source-tree attestations. Finish the launcher before
   modifying the worktree.
+- **Resource gaps are scoped evidence gaps.** One WSL `nvidia-smi` timeout
+  killed the old sampler thread after 327 useful samples. The sampler now
+  records error counts/sources and continues; affected legacy cells retain no
+  resource claim even when task inference remains eligible.
 - **A collector outage is not an agent failure.** Native-trace degradation is
   recorded while normalized execution continues; ledger or correlation
   tampering still fails validation.
@@ -703,6 +720,9 @@ Additional methodology constraints are explicit before the pilot:
   wording is not representative harness behavior at this operating point; a
   same-source canonical cohort would still be required for a causal prompt-
   effect estimate;
+- the completed no-review perturbation exposes topology sensitivity, but a
+  same-source reviewer-enabled cohort would still be required for a causal
+  reviewer-effect estimate;
 - retrospective developer-effort data are descriptive only because MAF lanes
   were implemented and debugged first; a future effort study must balance
   implementation order.
@@ -825,6 +845,19 @@ canonical-versus-paraphrase estimate is available because the canonical gate
 blocked a same-source canonical cohort; see
 [qwen35-27b-harness-paraphrase-a-diagnostic.md](research/qwen35-27b-harness-paraphrase-a-diagnostic.md).
 
+The preregistered no-review diagnostic at `da77548` also retained all 30 valid
+bundles and 15 inference-eligible pairs. MAF Harness and Deep Agents each
+succeeded on 1/15 runs, in seed 303 and seed 505 respectively. The seed-cluster
+Deep-minus-MAF risk difference is therefore 0 with interval [-0.2, 0.2] and
+exact sign-flip `p = 1.0`; the descriptive run-level pairing has one success in
+each direction. Operational behavior was not equal: MAF normally completed
+13/15 runs and retained one evidence-insufficient failure plus one 32-call
+budget exhaustion, while Deep normally completed only 2/15 and retained twelve
+native specialist-limit failures plus one evidence/provenance failure. Equal
+task-success totals thus concealed a large stability difference. This is
+exploratory topology sensitivity, not a causal reviewer-effect estimate; see
+[qwen35-27b-harness-no-review-diagnostic.md](research/qwen35-27b-harness-no-review-diagnostic.md).
+
 The neutral paired observer is now operational independently of that model
 gate. It discovers both preallocated lane bundles, replays or tails public
 normalized events with sequence-addressable SSE, exposes Phoenix and attested
@@ -844,10 +877,10 @@ pair ID; see
    an incorrect diagnosis/ineffective mitigation and MAF marked the evidence
    insufficient. Treat those as task-quality outcomes; do not tune the frozen
    contract against the observed gate seed.
-2. Retain the completed zero-turn, two-turn, and paraphrase-A cohorts as
-   diagnostic sensitivity evidence. The no-review and no-compaction profiles
-   remain available for matched diagnostics; do not substitute any condition
-   post hoc for the canonical confirmatory profile.
+2. Retain the completed zero-turn, two-turn, paraphrase-A, and no-review cohorts
+   as diagnostic sensitivity evidence. The no-compaction profile remains
+   available for a matched diagnostic; do not substitute any condition post
+   hoc for the canonical confirmatory profile.
 3. Rebuild the combined report and rerun fail-closed study sizing only after a
    replacement canonical harness pilot supplies nonzero seed-level variance
    and scored component evidence.
@@ -870,7 +903,8 @@ Primary implementation and evidence references:
 - harness correction and prompt diagnostics:
   [zero turn](research/qwen35-27b-harness-correction-zero-diagnostic.md),
   [two turns](research/qwen35-27b-harness-correction-two-diagnostic.md), and
-  [paraphrase A](research/qwen35-27b-harness-paraphrase-a-diagnostic.md)
+  [paraphrase A](research/qwen35-27b-harness-paraphrase-a-diagnostic.md), plus
+  the [no-review topology diagnostic](research/qwen35-27b-harness-no-review-diagnostic.md)
 - framework/source research:
   [research/framework-landscape.md](research/framework-landscape.md)
 - tracing ablation: [research/native-tracing-overhead.md](research/native-tracing-overhead.md)

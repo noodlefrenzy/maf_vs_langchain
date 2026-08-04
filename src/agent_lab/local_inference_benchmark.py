@@ -411,6 +411,7 @@ class ResourceSampler:
     container_name: str | None = None
     interval_seconds: float = 0.1
     samples: list[dict[str, Any]] = field(default_factory=list)
+    sampling_errors: list[dict[str, Any]] = field(default_factory=list)
     _stop: threading.Event = field(default_factory=threading.Event)
     _thread: threading.Thread | None = None
 
@@ -432,14 +433,45 @@ class ResourceSampler:
             self._sample()
 
     def _sample(self) -> None:
-        sample: dict[str, Any] = {"monotonic_ns": time.perf_counter_ns()}
-        sample.update(_host_memory_sample())
-        sample.update(_gpu_sample())
+        monotonic_ns = time.perf_counter_ns()
+        sample: dict[str, Any] = {"monotonic_ns": monotonic_ns}
+        self._extend_sample(sample, monotonic_ns, "host", _host_memory_sample)
+        self._extend_sample(sample, monotonic_ns, "gpu", _gpu_sample)
         if self.root_pid is not None:
-            sample["server_process_tree_rss_mib"] = _process_tree_rss_mib(self.root_pid)
+            try:
+                sample["server_process_tree_rss_mib"] = _process_tree_rss_mib(self.root_pid)
+            except Exception as exc:
+                self._record_sampling_error(monotonic_ns, "process_tree", exc)
         if self.container_name is not None:
-            sample.update(_container_memory_sample(self.container_name))
+            container_name = self.container_name
+            self._extend_sample(
+                sample,
+                monotonic_ns,
+                "container",
+                lambda: _container_memory_sample(container_name),
+            )
         self.samples.append(sample)
+
+    def _extend_sample(
+        self,
+        sample: dict[str, Any],
+        monotonic_ns: int,
+        source: str,
+        reader: Callable[[], dict[str, float]],
+    ) -> None:
+        try:
+            sample.update(reader())
+        except Exception as exc:
+            self._record_sampling_error(monotonic_ns, source, exc)
+
+    def _record_sampling_error(self, monotonic_ns: int, source: str, exc: Exception) -> None:
+        self.sampling_errors.append(
+            {
+                "monotonic_ns": monotonic_ns,
+                "source": source,
+                "error_type": type(exc).__name__,
+            }
+        )
 
     def summary(self, start_ns: int | None = None, end_ns: int | None = None) -> dict[str, Any]:
         selected = [
@@ -448,8 +480,18 @@ class ResourceSampler:
             if (start_ns is None or sample["monotonic_ns"] >= start_ns)
             and (end_ns is None or sample["monotonic_ns"] <= end_ns)
         ]
+        selected_errors = [
+            error
+            for error in self.sampling_errors
+            if (start_ns is None or error["monotonic_ns"] >= start_ns)
+            and (end_ns is None or error["monotonic_ns"] <= end_ns)
+        ]
+        error_summary = {
+            "sampling_error_count": len(selected_errors),
+            "sampling_error_sources": sorted({error["source"] for error in selected_errors}),
+        }
         if not selected:
-            return {"sample_count": 0}
+            return {"sample_count": 0, **error_summary}
         keys = (
             "gpu_memory_used_mib",
             "gpu_utilization_percent",
@@ -457,7 +499,7 @@ class ResourceSampler:
             "server_process_tree_rss_mib",
             "server_container_memory_used_mib",
         )
-        result: dict[str, Any] = {"sample_count": len(selected)}
+        result: dict[str, Any] = {"sample_count": len(selected), **error_summary}
         for key in keys:
             values = [
                 sample[key] for sample in selected if isinstance(sample.get(key), int | float)
