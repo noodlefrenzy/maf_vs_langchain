@@ -1,8 +1,9 @@
 # Microsoft Agent Framework vs the LangChain stack: findings
 
-Status: engineering findings from smoke, stabilization, tracing-ablation, and
-instrumentation-verification runs through 2026-08-02. This is not a measured
-benchmark or a framework ranking.
+Status: engineering findings from smoke, stabilization, accepted-model pilots,
+matched sensitivity diagnostics, tracing ablation, instrumentation
+verification, and adapter-contract hardening through 2026-08-04. This is not a
+measured benchmark or a framework ranking.
 
 ## Executive summary
 
@@ -17,25 +18,45 @@ layers:
 | Opinionated multi-agent harness | Agent Framework Harness | Deep Agents |
 | Native telemetry | MAF OpenTelemetry spans | LangGraph/LangChain events plus OpenInference spans |
 
-Within the explicit-workflow track, equivalent topology produced equivalent
-task outcomes in the current smoke scenario. Three traced pair executions
-completed in both lanes with the same deterministic score (`0.60`), the same
-four model calls and ten MCP calls, and provenance-valid run bundles. In the
-latest traced pair, end-to-end times were 28.55 seconds for LangGraph and 29.85
-seconds for MAF Workflow. With one seed and one repetition per execution, these
-numbers verify the implementation; they do not establish a performance
-advantage.
+The accepted Qwen3.5-27B explicit-workflow pilot retained all 30 bundles and 15
+pairs. MAF Workflow succeeded on 3/15 runs and LangGraph on 5/15. Earlier
+single-seed traced pairs had matched scores, calls, and evidence and remain
+implementation verification; the five-seed pilot supersedes them for current
+descriptive task outcomes. Neither cohort is a powered performance or quality
+comparison.
 
-The opinionated-harness track was more revealing. MAF Harness and Deep Agents
-offer similar high-level facilities—delegation, planning, context management,
-filesystem support, and a coordinator/specialist model—but their defaults and
-internal loops materially affected model-call patterns and completion behavior.
-Both needed two-phase execution to prevent structured output from short-
-circuiting delegation. Both needed external, fail-closed evidence and budget
-guards. Deep Agents needed an explicit structured-output strategy, a native
-coordinator call limiter, and removal of an unmatched default subagent. MAF
-needed exact evidence-ID allowlists, one bounded correction turn, and model-call
-metering below its function-invocation layer.
+The two accepted-model single-agent cohorts also retained every pair. Both the
+compute-matched and nominally unrestricted profiles produced the same aggregate
+result: MAF Agent 3/15 successes and LangChain `create_agent` 11/15. The
+LangChain-minus-MAF risk difference was 0.533333 with seed-cluster bootstrap
+interval [0.133333, 0.933333] and exact sign-flip `p = 0.25`. Unrestricted
+maxima exactly matched the lower cohort's maxima and stayed below its ceilings,
+so the larger nominal budget did not create an effective compute contrast or
+rescue failures.
+
+The opinionated-harness track remains blocked at its canonical operating point.
+MAF Harness and Deep Agents needed a hashed shared contract for delegation
+repair, exact role-scoped provenance, correction, phase limits, specialist
+settlement, and evidence-only catalogs. The final clean canonical gate then
+failed on task quality: Deep completed with an incorrect diagnosis and
+ineffective mitigation, while MAF explicitly marked its evidence insufficient.
+The earlier 15-pair replacement cohort had zero successes in both lanes and is
+failure-mode evidence from before the final ADR 0017 catalog correction, not a
+qualified pilot.
+
+Five preregistered sensitivity cohorts now show why no post-hoc harness profile
+should be promoted. Zero correction turns produced MAF 2/15 and Deep 3/15
+successes; two turns produced 4/15 and 7/15; paraphrase-A produced 0/15 and
+4/15 with 15 operational failures; no-review produced 1/15 in each lane despite
+operational failures of 2/15 for MAF and 13/15 for Deep; and no-compaction
+produced 0/15 and 4/15 with operational failures of 3/15 and 1/15. Their
+Deep-minus-MAF seed-cluster risk differences were 0.066667, 0.2, 0.266667, 0,
+and 0.266667 respectively, with exact sign-flip `p` values 1.0, 0.5, 0.25,
+1.0, and 0.5. These are exploratory diagnostics at different clean source
+commits, not a matched causal dose-response or a framework ranking. Prompt
+wording, active topology, and context policy are material treatment variables;
+identical aggregate success totals under paraphrase-A and no-compaction also
+concealed different seed patterns and sharply different failure rates.
 
 A particularly important instrumentation defect was found and fixed in the MAF
 Harness adapter. Metering the public `get_response()` call counted one entire
@@ -72,10 +93,28 @@ The practical conclusion is to choose at the layer and operating-model level:
 
 ## What was compared
 
-### Two tracks, kept separate
+### Three tracks, kept separate
 
-The experiment deliberately does not combine the two tracks into a single
+The experiment deliberately does not combine the tracks into a single
 “MAF score” or “LangChain score.”
+
+The third matched track compares one MAF primitive `Agent` with one LangChain
+`create_agent`, each with the same union discovery catalog, source-endpoint
+provenance validation, outer approval path, and either compute-matched or
+unrestricted preregistered ceilings. Source roles in its findings are evidence
+origins, not delegated agents. Both adapters use unstructured discovery
+followed by tool-disabled structured synthesis so a schema-valid response
+cannot bypass real MCP use. Its compute-matched and unrestricted five-seed
+pilots are complete and retained separately from the multi-agent tracks.
+
+A non-measurement live compatibility pair completed both baseline lanes against
+the local Qwen endpoint under the current capped contract. MAF made five model
+calls, 21 attempted MCP calls, and emitted 1,765 output tokens; LangChain made
+nine model calls, 26 attempted MCP calls, and emitted 1,896 output tokens. Each
+lane's role summary exactly matched normalized protocol usage, both individual
+bundles and their pair validated, and both twin seeded worlds recovered under
+the fixture-truth approval edit. These greedy-sampling values verify the
+adapters and accounting only, not comparative quality or efficiency.
 
 The explicit-workflow track expresses the same logical graph in MAF Workflows
 and LangGraph:
@@ -141,8 +180,9 @@ exporter 1.44.0. Behavior must be rechecked when either runner lock changes.
 
 ## Scenario and controls
 
-The smoke task was a seeded SEV-1 incident-response exercise. Checkout success
-had fallen from approximately 99.4% to 71% in two regions. The agents had to:
+The initial smoke task was a seeded SEV-1 incident-response exercise. Checkout
+success had fallen from approximately 99.4% to 71% in two regions. The agents
+had to:
 
 1. identify the initiating fault;
 2. support the diagnosis with independent, chronological evidence;
@@ -170,6 +210,15 @@ top-p `0.9`, a 65,536-token context, and thinking disabled.
 Explicit workflows had limits of 600 seconds, 24 model calls, 48 tool calls,
 24,000 output tokens, and one approval. Harness runs had limits of 900 seconds,
 36 model calls, 72 tool calls, 32,000 output tokens, and one approval.
+
+Those seed-42, 80B, and 24/36-call values describe the early stabilization
+smokes. The current accepted-model pilots and harness sensitivities use the
+pinned Qwen3.5-27B Q4_K_M llama.cpp profile with a 16,384-token context, the
+versioned `pilot-v1` case manifest, seeds 101/202/303/400/505, three
+repetitions, randomized lane order, and shared 900-second, 32-model-call,
+64-tool-call, 32,000-output-token, one-approval ceilings. Only the separately
+preregistered unrestricted single-agent condition doubles the call and token
+ceilings; its observed usage never exceeded the lower limits.
 
 The deterministic score weights were:
 
@@ -338,6 +387,26 @@ or when a required role never made a real evidence call. The adapter correctly
 preferred a visible failure over laundering unsupported claims into a polished
 incident report.
 
+At the accepted 27B operating point, correction count and prompt wording did
+not yield a stable replacement profile. The zero- and two-turn diagnostics
+produced some successes in both lanes, but also retained evidence-gate and
+native-loop failures. Paraphrase-A was the clearest robustness warning: MAF had
+0/15 successes and nine operational failures, while Deep had 4/15 successes
+and six failures. Eight MAF failures were explicit evidence-insufficient
+decisions; three Deep failures hit the native specialist six-call limit. This
+is evidence of operating-point sensitivity, not permission to choose whichever
+post-hoc profile yields the preferred lane or aggregate.
+
+The final no-compaction diagnostic did not supply a replacement either. With
+the canonical prompt, reviewer, one correction turn, and all other shared
+controls retained, MAF had 0/15 successes and three evidence-insufficient
+failures; Deep had 4/15 successes and one role-coverage failure. Twelve MAF and
+ten Deep runs completed normally but still failed the task. Disabling each
+framework's native context-reduction hook therefore did not eliminate task-
+quality failure or make effective context handling equivalent. A same-source,
+compaction-enabled cohort would be required to estimate a causal compaction
+effect.
+
 ## Microsoft Agent Framework deep dive
 
 ### Architectural shape
@@ -399,6 +468,25 @@ only the shared outer contracts and guards.
 9. **Instrumentation enablement is process state.** MAF instrumentation defaults
    on, disabling is sticky, and reenabling needs `force=True`. Sensitive capture
    is a coarse switch and should be passed explicitly.
+10. **Background completion must settle before validation.** Native task handles
+    are drained before the evidence gate, with a separately bounded commander
+    retrieval turn; otherwise late calls and missing findings can cross the
+    terminal boundary.
+11. **A bounded evidence phase needs evidence-bearing tools.** Public brief and
+    status tools consumed scarce specialist turns without producing role IDs.
+    ADR 0017 removed that dead end from both harness lanes.
+12. **Prompt paraphrase changed failure behavior.** Under paraphrase-A, MAF had
+    eight evidence-insufficient failures and one budget exhaustion in 15 runs.
+    A matched semantic rewrite is still a new operating point.
+13. **Removing a reviewer did not simply shorten the loop.** MAF normally
+    completed 13/15 no-review runs, but one run still exhausted the 32-call
+    outer budget. Topology changes alter model routing rather than monotonically
+    reducing work.
+14. **Disabling compaction did not qualify the harness.** MAF normally completed
+    12/15 runs but achieved no task successes; Deep normally completed 14/15
+    and achieved four. A public `disable_compaction` flag controls one native
+    behavior, not the entire effective message, workspace, or delegation
+    history.
 
 ## LangChain, LangGraph, and Deep Agents deep dive
 
@@ -463,6 +551,24 @@ that would violate the matched contract.
 9. **Async callback exceptions are not fail-closed.** LangChain logs and
    suppresses callback-hook errors. The hard budget wraps `_agenerate` before
    dispatch; callbacks remain observational.
+10. **Limits must live inside native specialists.** A coordinator-only limiter
+    does not bound subagent loops. Each declarative specialist owns the native
+    six-call middleware limit, and exceptional exits cancel and drain tasks.
+11. **The last specialist response must be mechanically tool-disabled.** Merely
+    telling the local model to stop after four tool-calling responses did not
+    prevent a dispatch-seven failure. Response five now exposes no tools.
+12. **Prompt paraphrase increased loop and output pressure.** Paraphrase-A still
+    produced three native specialist-limit failures and reached 14,133 output
+    tokens in one run. Wording is part of the pinned runtime contract.
+13. **No-review amplified native specialist-limit failures.** Twelve of 15 Deep
+    no-review runs exhausted a specialist's six-call limit, and another failed
+    evidence validation. Fewer active specialists did not imply fewer native
+    loop failures.
+14. **No summarization is not shared context semantics.** Excluding
+    `SummarizationMiddleware` for the coordinator and subagents left native
+    workspace state, graph messages, and delegation histories intact. The
+    no-compaction diagnostic was comparatively stable at 14/15 normal Deep
+    terminals, but ten of those normal terminals still failed the task.
 
 ## Observability findings
 
@@ -503,6 +609,20 @@ LangChain callback manager, but that explanation is an implementation-based
 inference, not a component timing result. No percentage or per-span conclusion
 is warranted.
 
+A clean-source representative-workflow follow-up then ran four matched blocks
+per condition, balanced across condition and lane order, for 16 model-driven
+launches. Tracing increased total non-task control overhead in all eight
+lane-level comparisons: the median paired delta was +134 ms for MAF (range
++94 to +225 ms) and +423 ms for LangGraph (range +395 to +545 ms). The explicit
+terminal flush accounted for only 6.1 ms and 7.3 ms of the respective medians.
+All enabled runs exported 57 MAF or 64 LangGraph spans at 0.952381 completeness;
+all disabled runs retained zero spans. Raw task latency varied by tens of
+seconds with stochastic output length and provider queue/generation time, so it
+does not isolate tracing cost. Peak GPU memory, power, token-normalized provider
+generation time, and resource-sampling cost showed no material shift in this
+small cohort. See [native-tracing-overhead.md](research/native-tracing-overhead.md)
+for matched deltas, raw aggregate data, and interpretation limits.
+
 Privacy and resilience also required explicit handling. The OpenTelemetry
 provider is effectively one-shot global process state, reinforcing runner
 isolation. OpenInference requires every content-hiding option to be configured,
@@ -532,6 +652,25 @@ auxiliary: a local, content-free span ledger survives collector loss.
   which remains last.
 - **Schema validity is not evidence validity.** Every cited opaque ID and role
   claim must be checked against actual role-scoped MCP results.
+- **Prompt wording is a treatment variable.** A symmetric paraphrase can change
+  delegation, output length, evidence sufficiency, and limit pressure without
+  changing tools, topology, validators, or model settings.
+- **Topology and task success are separate outcomes.** The no-review cohort tied
+  at one task success per lane while operational failures were 2/15 versus
+  13/15. Aggregate success equality does not establish runtime equivalence.
+- **Context policy is a treatment variable.** Framework-specific public hooks
+  can disable native reduction symmetrically at the contract level without
+  making the resulting context construction identical. The no-compaction
+  cohort remains an operating-point diagnostic, not a causal effect estimate.
+- **Clean source is a cohort-wide property.** Even documentation edits between
+  repetitions can alter source-tree attestations. Finish the launcher before
+  modifying the worktree.
+- **Resource gaps are scoped evidence gaps.** One WSL `nvidia-smi` timeout
+  killed the old sampler thread after 327 useful samples. The hardened sampler
+  then survived two GPU-source errors during the no-compaction characterization
+  and retained 1,038 aggregate samples plus nonzero samples in all four cells.
+  Affected legacy cells still retain no resource claim even when task inference
+  remains eligible.
 - **A collector outage is not an agent failure.** Native-trace degradation is
   recorded while normalized execution continues; ledger or correlation
   tampering still fails validation.
@@ -573,7 +712,11 @@ They establish that:
   trace export work in both explicit lanes;
 - opinionated harness defaults materially change call/delegation behavior;
 - strict external controls surface unsupported evidence instead of hiding it;
-- the corrected MAF middleware counts every observed provider dispatch.
+- the corrected MAF middleware counts every observed provider dispatch;
+- both single-agent pilot profiles completed with the same aggregate outcome
+  and no effective budget contrast; and
+- a symmetric prompt paraphrase materially changed harness completion, failure,
+  and task-success behavior at the accepted local-model operating point.
 
 They do **not** establish that:
 
@@ -582,36 +725,215 @@ They do **not** establish that:
 - multi-agent execution outperforms a single-agent baseline;
 - the harness score difference is stable across seeds, models, incident
   families, or fault profiles;
-- the startup-only tracing ablation predicts full-run tracing overhead;
+- tracing has a known per-span cost, concurrent collector capacity, or
+  quality-tier-model overhead;
 - one customer architecture should standardize on one brand for every layer.
 
-Limitations are substantial: one incident seed, one model profile, no injected
-faults in the smoke cohort, repeated stochastic executions rather than a
-powered sample, evolving source during early stabilization, no single-agent
-baselines, no paired Qwen3.5-9B pilot, no preregistered primary outcome, and no
-completed measured-study report. The model seed is requested but does not make
-GPU generation bitwise deterministic.
+Limitations are substantial: the accepted-model pilots contain only five seed
+clusters, repeated stochastic executions are not a powered sample, source
+evolved during early stabilization, the harness operating point failed its
+replacement gate, and no measured study is approved. The unrestricted
+single-agent sensitivity condition completed but did not supply a larger
+effective compute contrast because every run stayed within the lower ceiling.
+The model seed is requested but does not make GPU generation bitwise
+deterministic.
+
+Additional methodology constraints are explicit before the pilot:
+
+- the pre-parity harness cohorts are confounded by unequal adapter guards and
+  are excluded from comparative inference;
+- component-level score distributions must be reported to show whether each
+  scorer component actually discriminates among pilot outcomes;
+- the completed matched prompt-paraphrase perturbation shows that one frozen
+  wording is not representative harness behavior at this operating point; a
+  same-source canonical cohort would still be required for a causal prompt-
+  effect estimate;
+- the completed no-review perturbation exposes topology sensitivity, but a
+  same-source reviewer-enabled cohort would still be required for a causal
+  reviewer-effect estimate;
+- the completed no-compaction perturbation exposes context-policy sensitivity,
+  but a same-source compaction-enabled cohort would still be required for a
+  causal compaction-effect estimate;
+- retrospective developer-effort data are descriptive only because MAF lanes
+  were implemented and debugged first; a future effort study must balance
+  implementation order.
+
+## 2026-08-03 clean-source continuation
+
+The post-review continuation produced three small, auditable cohorts rather
+than a promoted pilot:
+
+- At source `2b1a7e9`, the post-parity harness pair retained a MAF provenance
+  failure and a completed Deep Agents score of 0.35.
+- At the same source, the compute-matched single-agent smoke retained a
+  LangChain evidence-gate failure and a successful MAF score of 0.916667.
+- The first Qwen3.5-9B gate exposed a MAF checkpoint-selection race. After the
+  request-bound resume fix, the clean `bb61e34` rerun produced LangGraph task
+  success at 0.916667 and a valid MAF failure because the commander cited only
+  one specialist role. The pair stayed inference-eligible and the failure
+  remains in the denominator.
+- The clean `6bc7815` repeat reversed that split: MAF completed successfully at
+  0.916667 and LangGraph completed at 0.6 without effective containment or
+  recovery. Both bundles and their pair remained inference-eligible. The same
+  execution validated exact per-request timing/usage reconciliation, complete
+  host/GPU ledgers, and control-phase timing; see
+  [run-observability-validation.md](research/run-observability-validation.md).
+- The clean `1e85861` tracing follow-up retained four matched blocks per
+  condition. Total control overhead increased consistently by median 134 ms for
+  MAF and 423 ms for LangGraph, while all enabled runs exported complete-enough
+  native trace contracts. The result closes the representative-workflow
+  instrumentation fit check without claiming a per-span or concurrency cost.
+
+Qwen3.5-9B therefore remains the fit-check model; it did not clear the paired
+task-quality operating point, so it did not authorize the five-seed pilots or
+their ablations. The later accepted 27B profile supplied that authorization for
+the explicit and single-agent tracks, while the harness track remained blocked
+by its own final task-quality gate. The offline report builder revalidated the
+available clean-source indices and emitted ignored local HTML/JSON audit
+reports. The harness ablation surface is mechanical: `harness_ablation` freezes
+either canonical or paraphrase-A prompts, zero/one/two provenance-correction
+turns, the shared three-role or no-review topology, and native or disabled
+context compaction into each run request and pair preflight; their effective
+hashes are retained in both manifests. Separate matched profiles vary each
+control alone. All three non-measurement lifecycle probes passed.
+
+The pinned Qwen3.5-35B-A3B GPTQ-Int4 follow-up loaded all weights at both the
+16K/8 GiB-offload gate and an 8K/2 GiB-offload diagnostic, but vLLM engine
+initialization failed when Triton kernels encountered CPU-offloaded tensors.
+The latter configuration used eager mode, one sequence, and 4,096 batched
+tokens and still required 18.02 GiB of GPU model memory after 2.13 GiB was
+offloaded. A no-offload run cannot leave useful KV-cache headroom on this host,
+so this candidate was rejected before client compatibility or task-quality
+measurement.
+
+The pinned Qwen3.5-27B Q4_K_M follow-up changed to a fully GPU-resident
+llama.cpp topology and cleared the gate at source `6989bb0`. Both corrected
+restart launches completed every characterization cell with no skips, the full
+MAF/LangChain client matrix passed, and the retry-storm seed-42 pair produced
+two validated task successes: LangGraph scored 0.916667 and MAF Workflow 1.0.
+The profile is therefore promoted to the five-seed pilots. Its 23,229 MiB
+observed whole-device peak leaves only about 1.3 GiB of margin, so this is an
+accepted but deliberately exclusive GPU operating point rather than evidence
+of spare capacity.
+
+The clean compute-matched single-agent pilot at `567f28e` subsequently
+completed all 30 runs and 15 inference-eligible pairs. MAF succeeded on 3/15
+runs, completed nine normally, and retained six model/provenance failures;
+LangChain completed all 15 and succeeded on 11. At the five-seed cluster unit,
+the LangChain-minus-MAF task-success risk difference is 0.533333 with
+paired-bootstrap interval [0.133333, 0.933333] and exact sign-flip `p = 0.25`.
+This is descriptive pilot evidence, not a powered conclusion; see
+[qwen35-27b-single-agent-pilots.md](research/qwen35-27b-single-agent-pilots.md).
+
+The separately preregistered unrestricted single-agent pilot at `f600117`
+also completed all 30 runs and 15 inference-eligible pairs. It reproduced the
+same aggregate task result and seed-cluster statistics: MAF 3/15, LangChain
+11/15, risk difference 0.533333, interval [0.133333, 0.933333], and exact
+sign-flip `p = 0.25`. MAF repeated its six compute-matched failure families;
+LangChain retained one additional seed-202 evidence-gate failure. Two
+LangChain seed-202 repetitions changed outcome in opposite directions, so the
+aggregate remained unchanged. Most importantly, the unrestricted maxima of 10
+model calls, 22 tool calls, and 3,981 output tokens were below the lower
+32/64/32,000 ceilings and exactly matched the compute-matched maxima. Doubling
+the call/token ceilings therefore did not create an effective budget contrast
+or rescue failures at this operating point.
+
+The preregistered two-turn harness-correction diagnostic at `c7e0f55` then
+completed all 30 runs and 15 inference-eligible pairs under the final ADR 0017
+contract. MAF Harness succeeded on 4/15 runs with three operational failures;
+Deep Agents succeeded on 7/15 with one. The seed-cluster Deep-minus-MAF risk
+difference is 0.2 with interval [0, 0.466667] and exact sign-flip `p = 0.5`.
+The extra turn exposed viable scored paths in both lanes but also drove one MAF
+run to the outer 32-call ceiling and one Deep specialist to its native six-call
+limit. Because the final canonical gate did not authorize a matched canonical
+cohort at the same source, this is exploratory sensitivity evidence rather
+than a causal correction-turn comparison; see
+[qwen35-27b-harness-correction-two-diagnostic.md](research/qwen35-27b-harness-correction-two-diagnostic.md).
+
+The preregistered zero-turn diagnostic at `1f9e634` likewise retained all 30
+valid bundles and 15 inference-eligible pairs. MAF Harness succeeded on 2/15
+runs and Deep Agents on 3/15; each lane had three operational failures. The
+seed-cluster Deep-minus-MAF risk difference is 0.066667 with interval [0, 0.2]
+and exact sign-flip `p = 1.0`. MAF's three failures all reported insufficient
+evidence. Deep retained two provenance/role-coverage failures and one native
+specialist six-call exhaustion. Removing correction therefore did not remove
+the underlying evidence-quality or loop-completion problems. This remains
+exploratory sensitivity evidence, not a causal correction-turn comparison;
+see [qwen35-27b-harness-correction-zero-diagnostic.md](research/qwen35-27b-harness-correction-zero-diagnostic.md).
+
+The preregistered paraphrase-A diagnostic at `5002a80` completed the planned
+prompt-robustness check with all 30 bundles and 15 pairs valid and inference-
+eligible. MAF Harness succeeded on 0/15 runs, completed six normally, and
+retained nine operational failures. Deep Agents succeeded on 4/15, completed
+nine normally, and retained six failures. The seed-cluster Deep-minus-MAF risk
+difference is 0.266667 with interval [0.066667, 0.466667] and exact sign-flip
+`p = 0.25`. Eight MAF failures reported insufficient evidence and one exhausted
+the outer 32-call budget. Deep retained three native specialist-limit failures,
+an evidence-insufficient decision, a role-coverage failure, and a structured-
+proposal validation failure. Its maximum output reached 14,133 tokens. The
+matched wording change was therefore operationally material, but no causal
+canonical-versus-paraphrase estimate is available because the canonical gate
+blocked a same-source canonical cohort; see
+[qwen35-27b-harness-paraphrase-a-diagnostic.md](research/qwen35-27b-harness-paraphrase-a-diagnostic.md).
+
+The preregistered no-review diagnostic at `da77548` also retained all 30 valid
+bundles and 15 inference-eligible pairs. MAF Harness and Deep Agents each
+succeeded on 1/15 runs, in seed 303 and seed 505 respectively. The seed-cluster
+Deep-minus-MAF risk difference is therefore 0 with interval [-0.2, 0.2] and
+exact sign-flip `p = 1.0`; the descriptive run-level pairing has one success in
+each direction. Operational behavior was not equal: MAF normally completed
+13/15 runs and retained one evidence-insufficient failure plus one 32-call
+budget exhaustion, while Deep normally completed only 2/15 and retained twelve
+native specialist-limit failures plus one evidence/provenance failure. Equal
+task-success totals thus concealed a large stability difference. This is
+exploratory topology sensitivity, not a causal reviewer-effect estimate; see
+[qwen35-27b-harness-no-review-diagnostic.md](research/qwen35-27b-harness-no-review-diagnostic.md).
+
+The final preregistered no-compaction diagnostic at `06cc265` retained all 30
+valid bundles and 15 inference-eligible pairs. MAF Harness succeeded on 0/15
+runs, completed 12 normally, and retained three evidence-insufficient failures.
+Deep Agents succeeded on 4/15, completed 14 normally, and retained one role-
+coverage failure. The seed-cluster Deep-minus-MAF risk difference is 0.266667
+with interval [0, 0.666667] and exact sign-flip `p = 0.5`; Deep's successes
+were one repetition at seed 101 and all three repetitions at seed 303. MAF's
+observed maxima were 21 model calls, 18 tool calls, and 4,413 output tokens;
+Deep's were 21, 31, and 9,064. The characterization also supplied a live check
+of the hardened resource sampler: it recorded two GPU-source errors, continued,
+and retained 1,038 aggregate samples with nonzero coverage in every matrix
+cell. This is exploratory context-policy sensitivity, not a causal compaction-
+effect estimate; see
+[qwen35-27b-harness-no-compaction-diagnostic.md](research/qwen35-27b-harness-no-compaction-diagnostic.md).
+
+The neutral paired observer is now operational independently of that model
+gate. It discovers both preallocated lane bundles, replays or tails public
+normalized events with sequence-addressable SSE, exposes Phoenix and attested
+artifact links, and drives both its browser and Rich views from the same
+content-redacted API. Optional interactive approvals use an owner-only,
+loopback-authenticated inbox and remain separate from scripted measured runs.
+A clean interactive pair exercised one approval on each lane, completed both
+bundles, and replayed each terminal tail from an exact cursor under the same
+pair ID; see
+[neutral-observer-validation.md](research/neutral-observer-validation.md).
 
 ## Recommended next work
 
-1. Freeze the corrected adapters, contracts, model/server flags, and scorer at
-   one clean source tree.
-2. Run the compute-matched and unrestricted single-agent baselines before
-   making any multi-agent-value claim.
-3. Execute the five-seed, three-repetition paired pilot with the standard
-   transient-fault profile and balanced lane order.
-4. Repeat the full-workflow tracing on/off ablation; report absolute deltas,
-   span volume, and model/tool latency separately.
-5. Add an explicit harness policy experiment for provenance correction (for
-   example zero versus one versus two correction turns) and apply it symmetrically
-   where the semantics are comparable.
-6. Validate restart/resume using production-intended checkpoint backends; do
-   not generalize from the compatibility file savers.
-7. Characterize the planned Qwen3.5-9B fit/pilot profile and record exact model
-   revision, server build, parsers, and GPU memory behavior.
-8. Build the offline paired report with raw paired points, operational failures
-   retained in denominators, paired effect sizes, uncertainty intervals, and
-   audit samples for derived metrics.
+1. Keep the five-seed harness replacement pilot blocked for the accepted
+   Qwen3.5-27B operating point. ADR 0017's clean gate confirmed that bounded
+   specialists now gather exact role evidence in both lanes, but Deep produced
+   an incorrect diagnosis/ineffective mitigation and MAF marked the evidence
+   insufficient. Treat those as task-quality outcomes; do not tune the frozen
+   contract against the observed gate seed.
+2. Retain the completed zero-turn, two-turn, paraphrase-A, no-review, and no-
+   compaction cohorts as diagnostic sensitivity evidence. All five planned
+   sensitivity profiles are now measured; do not substitute any condition post
+   hoc for the canonical confirmatory profile.
+3. Rebuild the combined report and rerun fail-closed study sizing only after a
+   replacement canonical harness pilot supplies nonzero seed-level variance
+   and scored component evidence.
+4. Repeat the validated Cosmos restart/resume gate against the intended Azure
+   account and managed identity before enabling a production runner profile;
+   the pinned emulator closes provider compatibility, not deployment
+   acceptance. See [production-checkpoints.md](production-checkpoints.md).
 
 ## Reproducibility map
 
@@ -622,12 +944,22 @@ Primary implementation and evidence references:
 - fairness and interpretation protocol:
   [comparison-protocol.md](comparison-protocol.md)
 - version-specific implementation behavior: [gotchas.md](gotchas.md)
+- accepted-model single-agent pilots:
+  [qwen35-27b-single-agent-pilots.md](research/qwen35-27b-single-agent-pilots.md)
+- harness correction and prompt diagnostics:
+  [zero turn](research/qwen35-27b-harness-correction-zero-diagnostic.md),
+  [two turns](research/qwen35-27b-harness-correction-two-diagnostic.md), and
+  [paraphrase A](research/qwen35-27b-harness-paraphrase-a-diagnostic.md), plus
+  the [no-review topology diagnostic](research/qwen35-27b-harness-no-review-diagnostic.md)
+  and [no-compaction context diagnostic](research/qwen35-27b-harness-no-compaction-diagnostic.md)
 - framework/source research:
   [research/framework-landscape.md](research/framework-landscape.md)
 - tracing ablation: [research/native-tracing-overhead.md](research/native-tracing-overhead.md)
 - experiment profiles:
   [`explicit-smoke.toml`](../configs/experiments/explicit-smoke.toml) and
-  [`harness-smoke.toml`](../configs/experiments/harness-smoke.toml)
+  [`harness-smoke.toml`](../configs/experiments/harness-smoke.toml), plus the
+  [compute-matched single-agent smoke](../configs/experiments/single-agent-compute-matched-smoke.toml)
+  and separately executable Qwen3.5-9B pilot profiles under `configs/experiments/`
 - normalized runner protocol: [runner-protocol.md](runner-protocol.md)
 - immutable artifact contract: [run-bundle.md](run-bundle.md)
 

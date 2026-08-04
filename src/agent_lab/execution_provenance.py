@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import re
@@ -38,15 +40,25 @@ _VULKAN_FIELDS = {
 _SERVE_FLAGS_WITH_VALUES = {
     "-hf",
     "-ngl",
+    "--alias",
+    "--batch-size",
+    "--cache-ram",
     "--cache-reuse",
+    "--cache-type-k",
+    "--cache-type-v",
+    "--chat-template-kwargs",
     "--chat-template",
     "--ctx-size",
+    "--cpu-offload-gb",
     "--host",
+    "--flash-attn",
+    "--fit",
     "--model",
     "--n-gpu-layers",
     "--parallel",
     "--port",
     "--reasoning-format",
+    "--reasoning",
     "--reasoning-parser",
     "--revision",
     "--served-model-name",
@@ -65,6 +77,9 @@ _SERVE_FLAGS_WITH_VALUES = {
     "--max-num-batched-tokens",
     "--load-format",
     "--seed",
+    "--threads",
+    "--threads-batch",
+    "--ubatch-size",
 }
 _SERVE_BOOLEAN_FLAGS = {
     "--enable-auto-tool-choice",
@@ -77,7 +92,9 @@ _SERVE_BOOLEAN_FLAGS = {
     "--jinja",
     "--language-model-only",
     "--metrics",
+    "--cont-batching",
     "--no-context-shift",
+    "--no-ui",
     "--slots",
 }
 _SENSITIVE_SERVE_FLAGS = {
@@ -85,6 +102,7 @@ _SENSITIVE_SERVE_FLAGS = {
     "--api-key-file",
     "--ssl-key-file",
 }
+_QWEN35_27B_GGUF_MODEL = "bartowski/Qwen_Qwen3.5-27B-GGUF:Q4_K_M"
 
 
 def build_execution_provenance(
@@ -253,6 +271,14 @@ def _attest_llama_cpp_runtime(
 
     runner = command_runner or _run_host_command(runtime_profile.host)
     host_runtime = _attest_compute_runtime(runtime_profile, runner)
+    serve_process = host_runtime.pop("serve_process")
+    _require_llama_cpp_serve_contract(
+        serve_process["flags"],
+        model,
+        model_path=model_path,
+        n_ctx=n_ctx,
+        props=props,
+    )
     tokenizer = {
         "vocab_type": _required_int(meta, "vocab_type"),
         "vocab_size": _required_int(meta, "n_vocab"),
@@ -267,7 +293,7 @@ def _attest_llama_cpp_runtime(
         "artifact_name": Path(model_path).name,
         "revision": revision_match.group(1),
         "format": (served.get("details") or {}).get("format", "gguf"),
-        "quantization": _required_string(props, "model_ftype"),
+        "quantization": _declared_quantization(model, props),
         "size_bytes": _required_int(meta, "size"),
         "parameter_count": _required_int(meta, "n_params"),
     }
@@ -296,7 +322,7 @@ def _attest_llama_cpp_runtime(
             "build": _required_string(props, "build_info"),
             "parser": parser,
             "endpoint_flags": endpoint_flags,
-            "serve_process": host_runtime.pop("serve_process"),
+            "serve_process": serve_process,
         },
         "compute_runtime": host_runtime,
         "endpoint_identity_sha256": {
@@ -428,9 +454,12 @@ def _attest_compute_runtime(
                 f"expected exactly one {runtime_profile.process_name} serving process; "
                 f"found {len(process_lines)}"
             )
-        process_tokens = shlex.split(process_lines[0], posix=True)
-        if process_tokens and process_tokens[0].isdigit():
-            process_tokens.pop(0)
+        pid_text = process_lines[0].split(maxsplit=1)[0]
+        if not pid_text.isdigit():
+            raise ValueError("serving process listing did not include a numeric PID")
+        process_tokens = _read_process_tokens(runner, int(pid_text), timeout)
+        if not process_tokens or Path(process_tokens[0]).name != runtime_profile.process_name:
+            raise ValueError("serving process changed while its exact command was collected")
         redacted_process_tokens = _redact_process_tokens(process_tokens)
         serve_process = {
             "executable": process_tokens[0] if process_tokens else runtime_profile.process_name,
@@ -689,6 +718,76 @@ def _required_revision_flag(flags: dict[str, Any], key: str) -> str:
     return value
 
 
+def _require_llama_cpp_serve_contract(
+    flags: dict[str, Any],
+    model: ModelProfile,
+    *,
+    model_path: str,
+    n_ctx: int,
+    props: dict[str, Any],
+) -> None:
+    """Reject drift from the preregistered local 27B operating point."""
+
+    if model.name != _QWEN35_27B_GGUF_MODEL:
+        return
+    endpoint = urlsplit(model.base_url)
+    if endpoint.hostname != "127.0.0.1" or endpoint.port is None:
+        raise ValueError("Qwen3.5-27B llama.cpp endpoint must bind to explicit loopback")
+    required_values = {
+        "--model": model_path,
+        "--alias": model.name,
+        "--host": "127.0.0.1",
+        "--port": str(endpoint.port),
+        "--ctx-size": str(n_ctx * 2),
+        "--parallel": "2",
+        "--n-gpu-layers": "99",
+        "--fit": "off",
+        "--flash-attn": "on",
+        "--cache-type-k": "q8_0",
+        "--cache-type-v": "q8_0",
+        "--batch-size": "2048",
+        "--ubatch-size": "512",
+        "--threads": "16",
+        "--threads-batch": "16",
+        "--cache-ram": "8192",
+        "--seed": str(model.seed),
+        "--reasoning": "on",
+        "--reasoning-format": "deepseek",
+    }
+    for key, expected in required_values.items():
+        if flags.get(key) != expected:
+            raise ValueError(f"Qwen3.5-27B llama.cpp serve flag {key} must be {expected!r}")
+    if n_ctx != model.context_window_tokens:
+        raise ValueError("Qwen3.5-27B llama.cpp must expose exactly 16K per server slot")
+    for key in (
+        "--jinja",
+        "--cont-batching",
+        "--metrics",
+        "--slots",
+        "--no-context-shift",
+        "--no-ui",
+    ):
+        if flags.get(key) is not True:
+            raise ValueError(f"Qwen3.5-27B llama.cpp serve contract requires {key}")
+    try:
+        template_kwargs = json.loads(flags.get("--chat-template-kwargs", ""))
+    except json.JSONDecodeError as error:
+        raise ValueError("llama.cpp chat-template kwargs must be valid JSON") from error
+    if template_kwargs != {"enable_thinking": True}:
+        raise ValueError("Qwen3.5-27B llama.cpp must enable thinking in its chat template")
+    endpoint_contract = {
+        "total_slots": 2,
+        "endpoint_metrics": True,
+        "endpoint_props": False,
+        "endpoint_slots": True,
+        "cors_proxy_enabled": False,
+        "ui": False,
+    }
+    for key, expected in endpoint_contract.items():
+        if props.get(key) != expected:
+            raise ValueError(f"Qwen3.5-27B llama.cpp endpoint field {key} must be {expected!r}")
+
+
 def _require_vllm_serve_contract(
     flags: dict[str, Any],
     model: ModelProfile,
@@ -721,6 +820,17 @@ def _require_vllm_serve_contract(
                 "--max-num-batched-tokens": str(min(max_model_len, 8192)),
             }
         )
+    elif model.name == "Qwen/Qwen3.5-35B-A3B-GPTQ-Int4":
+        required_values.update(
+            {
+                "--reasoning-parser": "qwen3",
+                "--tool-call-parser": "qwen3_coder",
+                "--load-format": "safetensors",
+                "--quantization": "moe_wna16",
+                "--max-num-batched-tokens": str(min(max_model_len, 8192)),
+                "--cpu-offload-gb": "8",
+            }
+        )
     else:
         required_values.update(
             {
@@ -746,6 +856,8 @@ def _require_vllm_serve_contract(
         raise ValueError("vLLM --gpu-memory-utilization must be in (0, 1]")
     if model.name == "Qwen/Qwen3.5-9B" and gpu_memory_utilization != 0.75:
         raise ValueError("Qwen3.5-9B vLLM --gpu-memory-utilization must be 0.75")
+    if model.name == "Qwen/Qwen3.5-35B-A3B-GPTQ-Int4" and gpu_memory_utilization != 0.75:
+        raise ValueError("Qwen3.5-35B-A3B vLLM --gpu-memory-utilization must be 0.75")
     for key in (
         "--enable-auto-tool-choice",
         "--enable-chunked-prefill",
@@ -781,12 +893,18 @@ def _stable_props_identity(props: dict[str, Any]) -> dict[str, Any]:
 
 
 def _stable_models_identity(models: dict[str, Any]) -> dict[str, Any]:
-    """Exclude llama.cpp response timestamps generated at request time."""
+    """Exclude response-local metadata that is not an inference input."""
 
     normalized = json.loads(json.dumps(models))
     for item in normalized.get("data", []):
         if isinstance(item, dict):
             item.pop("created", None)
+            permissions = item.get("permission", [])
+            if isinstance(permissions, list):
+                for permission in permissions:
+                    if isinstance(permission, dict):
+                        permission.pop("id", None)
+                        permission.pop("created", None)
     return normalized
 
 
@@ -803,6 +921,22 @@ def _process_matches(line: str, process_name: str) -> bool:
     if tokens and tokens[0].isdigit():
         tokens = tokens[1:]
     return bool(tokens) and Path(tokens[0]).name == process_name
+
+
+def _read_process_tokens(runner: CommandRunner, pid: int, timeout: float) -> list[str]:
+    """Read the NUL-delimited argv without lossy shell-style reconstruction."""
+
+    encoded = runner(["base64", "-w0", f"/proc/{pid}/cmdline"], timeout).strip()
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("serving process command was not valid base64") from error
+    if not payload or not payload.endswith(b"\0"):
+        raise ValueError("serving process command was not a complete NUL-delimited argv")
+    try:
+        return [item.decode("utf-8") for item in payload[:-1].split(b"\0")]
+    except UnicodeDecodeError as error:
+        raise ValueError("serving process argv was not UTF-8") from error
 
 
 def _selected_serve_flags(arguments: list[str]) -> dict[str, Any]:
@@ -840,6 +974,16 @@ def _required_string(payload: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"runtime attestation field {key} is missing")
     return value
+
+
+def _declared_quantization(model: ModelProfile, props: dict[str, Any]) -> str:
+    endpoint_value = props.get("model_ftype")
+    if isinstance(endpoint_value, str) and endpoint_value:
+        return endpoint_value
+    _, separator, alias_suffix = model.name.rpartition(":")
+    if separator and re.fullmatch(r"(?:IQ|Q)\d[A-Z0-9_]*", alias_suffix, re.IGNORECASE):
+        return alias_suffix
+    raise ValueError("runtime attestation could not determine the declared quantization")
 
 
 def _required_int(payload: dict[str, Any], key: str) -> int:

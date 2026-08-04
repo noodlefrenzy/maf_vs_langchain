@@ -1,6 +1,6 @@
 # ADR 0005: Add normalized events without replacing native telemetry
 
-Status: Proposed
+Status: Accepted
 
 Date: 2026-07-31
 

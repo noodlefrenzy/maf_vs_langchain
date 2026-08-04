@@ -24,7 +24,8 @@ class FrameworkLane(StrEnum):
     MAF_HARNESS = "maf_harness"
     LANGGRAPH = "langgraph"
     DEEP_AGENTS = "deep_agents"
-    SINGLE_AGENT_BASELINE = "single_agent_baseline"
+    MAF_SINGLE_AGENT = "maf_single_agent"
+    LANGCHAIN_SINGLE_AGENT = "langchain_single_agent"
     SCRIPTED_ORACLE = "scripted_oracle"
 
 
@@ -225,6 +226,34 @@ class InferenceRuntimeProfile(BaseModel):
         return self
 
 
+class HarnessAblationProfile(BaseModel):
+    """Matched prompt, role, correction, and compaction policy for harness runs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    prompt_variant: Literal["canonical", "paraphrase_a"] = "canonical"
+    provenance_correction_turns: int = Field(default=1, ge=0, le=2)
+    reviewer_enabled: bool = True
+    context_compaction: Literal["native", "disabled"] = "native"
+
+
+class ResourceMetricsProfile(BaseModel):
+    """Held-constant host/GPU sampling policy for measured runs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    interval_seconds: float = Field(default=0.5, ge=0.1, le=5.0)
+    server_state: Literal["cold", "warm", "unknown"] = "unknown"
+    prefix_cache_state: Literal[
+        "disabled",
+        "enabled_cold",
+        "enabled_warm",
+        "enabled_uncontrolled",
+        "unknown",
+    ] = "unknown"
+
+
 class ExperimentSpec(BaseModel):
     """Validated experiment configuration loaded from TOML."""
 
@@ -237,13 +266,29 @@ class ExperimentSpec(BaseModel):
     seeds: list[int] = Field(min_length=1)
     repetitions: int = Field(gt=0)
     order: Literal["randomized", "alternating", "fixed"]
+    execution_mode: Literal["protocol_probe", "native_workflow"] = "native_workflow"
+    case_manifest: str | None = None
     model_profile: str
     fault_profile: Literal["none", "standard", "adversarial"]
+    approval_policy: Literal["scripted", "observer"] = "scripted"
     budget: Budget
     tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
     inference_runtime: InferenceRuntimeProfile = Field(default_factory=InferenceRuntimeProfile)
+    harness_ablation: HarnessAblationProfile = Field(default_factory=HarnessAblationProfile)
+    resource_metrics: ResourceMetricsProfile = Field(default_factory=ResourceMetricsProfile)
     capture_sensitive: bool = False
     capture_reasoning: Literal[False] = False
+
+    @model_validator(mode="after")
+    def require_harness_lane_for_ablation(self) -> ExperimentSpec:
+        if len(set(self.seeds)) != len(self.seeds):
+            raise ValueError("experiment seeds must be unique")
+        harness_lanes = {FrameworkLane.MAF_HARNESS, FrameworkLane.DEEP_AGENTS}
+        if self.harness_ablation != HarnessAblationProfile() and not (
+            set(self.lanes) & harness_lanes
+        ):
+            raise ValueError("non-default harness ablation requires a harness lane pair")
+        return self
 
 
 class RunManifest(BaseModel):

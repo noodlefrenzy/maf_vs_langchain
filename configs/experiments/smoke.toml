@@ -5,8 +5,10 @@ lanes = ["maf_workflow", "maf_harness", "langgraph", "deep_agents"]
 seeds = [42]
 repetitions = 1
 order = "alternating"
+execution_mode = "protocol_probe"
 model_profile = "configs/models/qwen3_next_80b_lonestar_llamacpp.toml"
 fault_profile = "none"
+approval_policy = "scripted"
 capture_sensitive = false
 capture_reasoning = false
 
@@ -22,6 +24,12 @@ enabled = true
 collector_endpoint = "http://127.0.0.1:6006/v1/traces"
 phoenix_base_url = "http://127.0.0.1:6006"
 exporter_timeout_seconds = 1.0
+
+[resource_metrics]
+enabled = false
+interval_seconds = 0.5
+server_state = "unknown"
+prefix_cache_state = "unknown"
 
 [budget]
 wall_clock_seconds = 600

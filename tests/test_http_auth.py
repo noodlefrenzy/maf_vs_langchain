@@ -5,6 +5,7 @@ from incident_lab_mcp.http_auth import (
     CredentialError,
     RunCredentialSigner,
     RunWorldRegistry,
+    _decode,
 )
 
 from agent_lab.contracts import FrameworkLane
@@ -94,3 +95,24 @@ def test_registry_rejects_duplicate_active_pair_and_expires_runs() -> None:
     with pytest.raises(CredentialError, match="expired"):
         registry.get(receipt.left.run_id, now=1300)
     assert {run.run_id for run in registry.active_runs(now=1300)} == set()
+
+
+def test_registry_allows_pair_id_reuse_after_expiry_without_prior_lookup() -> None:
+    registry, _receipt = _registry()
+
+    replacement = registry.create_pair(
+        pair_id="pair-test",
+        seed=43,
+        left_lane=FrameworkLane.MAF_HARNESS,
+        right_lane=FrameworkLane.DEEP_AGENTS,
+        now=1300,
+    )
+
+    assert replacement.pair_id == "pair-test"
+    assert replacement.seed == 43
+
+
+@pytest.mark.parametrize("encoded", ["a+b", "a/b", "YQ==", "YR"])
+def test_base64url_decoder_rejects_non_urlsafe_or_noncanonical_text(encoded: str) -> None:
+    with pytest.raises(ValueError, match="base64url"):
+        _decode(encoded)

@@ -20,8 +20,10 @@ from agent_lab.contracts import (
     AgentRole,
     ApprovalDecision,
     FrameworkLane,
+    HarnessAblationProfile,
     NativeTracingProfile,
     NormalizedEvent,
+    ResourceMetricsProfile,
     RunManifest,
     TerminalStatus,
 )
@@ -87,6 +89,8 @@ class RunRequest(ProtocolModel):
     public_ticket: str
     order_seed: int
     tracing: NativeTracingProfile = Field(default_factory=NativeTracingProfile)
+    harness_ablation: HarnessAblationProfile = Field(default_factory=HarnessAblationProfile)
+    resource_metrics: ResourceMetricsProfile = Field(default_factory=ResourceMetricsProfile)
     capture_sensitive: bool = False
     capture_reasoning: Literal[False] = False
 
@@ -98,6 +102,12 @@ class RunRequest(ProtocolModel):
         for role, endpoint in self.role_endpoints.items():
             if endpoint.role != role:
                 raise ValueError("role endpoint key and role claim differ")
+        harness_lanes = {FrameworkLane.MAF_HARNESS, FrameworkLane.DEEP_AGENTS}
+        if (
+            self.harness_ablation != HarnessAblationProfile()
+            and self.manifest.lane not in harness_lanes
+        ):
+            raise ValueError("non-default harness ablation requires a harness lane")
         return self
 
 
@@ -105,6 +115,13 @@ class CheckpointCapability(ProtocolModel):
     resumable: bool
     restart_safe: bool
     format: str
+    production_ready: bool = False
+
+    @model_validator(mode="after")
+    def validate_production_readiness(self) -> CheckpointCapability:
+        if self.production_ready and not (self.resumable and self.restart_safe):
+            raise ValueError("production-ready checkpoints must be resumable and restart-safe")
+        return self
 
 
 class PreparedRun(ProtocolModel):
@@ -120,7 +137,7 @@ class PreparedRun(ProtocolModel):
 
 
 class RunnerUsage(ProtocolModel):
-    """Cumulative counters emitted before the corresponding dispatch."""
+    """Cumulative counters; calls are reserved pre-dispatch, tokens post-response."""
 
     model_calls: int = Field(default=0, ge=0)
     tool_calls: int = Field(default=0, ge=0)

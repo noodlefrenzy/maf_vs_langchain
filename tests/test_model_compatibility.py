@@ -1,11 +1,17 @@
 import json
 
+import pytest
+
 from agent_lab.model_compat_contracts import (
     MODEL_ACTOR_PROBES,
     ModelFixture,
     normalize_fixture_text,
 )
-from agent_lab.model_compat_suite import _advertised_model_ids, run_suite
+from agent_lab.model_compat_suite import (
+    _advertised_model_ids,
+    _validate_loopback_base_url,
+    run_suite,
+)
 
 
 def test_native_clients_pass_protocol_stub_compatibility_suite() -> None:
@@ -62,3 +68,23 @@ def test_live_inventory_extracts_openai_model_ids() -> None:
 def test_fixture_text_normalization_only_removes_boundary_whitespace() -> None:
     assert normalize_fixture_text("\n\nmulti-turn complete \t") == "multi-turn complete"
     assert normalize_fixture_text("multi turn complete") == "multi turn complete"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://127.0.0.1:8000/v1",
+        "http://example.com/v1",
+        "http://user:secret@127.0.0.1:8000/v1",
+        "http://127.0.0.1:8000/not-v1",
+        "http://127.0.0.1:8000/v1?redirect=http://example.com",
+    ],
+)
+def test_live_compatibility_endpoint_must_be_loopback_v1(base_url: str) -> None:
+    with pytest.raises(ValueError, match="endpoint"):
+        _validate_loopback_base_url(base_url)
+
+
+def test_live_compatibility_endpoint_accepts_loopback_v1() -> None:
+    _validate_loopback_base_url("http://127.0.0.1:8000/v1")
+    _validate_loopback_base_url("http://[::1]:8000/v1/")

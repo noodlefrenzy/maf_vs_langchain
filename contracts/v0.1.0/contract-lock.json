@@ -1,9 +1,11 @@
 {
-  "artifact_schemas_sha256": "44240de5e1bfaca89d64fff34fa8824fd69a25def82b92c31d1ec1c7b9d664fa",
-  "contract_bundle_sha256": "8df18903f7c13f3172fb0c76245a2a7cf6378c6b9b6b577643d0762f7dbd7e3c",
+  "artifact_schemas_sha256": "19ce51c862902f8e31f8f1abb60904fa3f9b57f05992444a927ff9d9d25332a2",
+  "baseline_contract_sha256": "260e32a1b671aefbfac59ca86cfd08665ee9e725d9ca1cfba0897640c77ab27d",
+  "contract_bundle_sha256": "db8a188847436f28df1fb128c031aa5c956523e7d144bdb71c4aa5d9b15ef524",
   "error_taxonomy_sha256": "745145a68ca360b4854ee30beb6e0a27cc17f94cf583b254123073aac76b7c51",
+  "harness_contract_sha256": "ba584a68e790474673b275de407436725f945ff3381d8b41669395c364ecc6b0",
   "prompt_bundle_sha256": "864ed9ac2d825ff73b46747ed29039bc6da2b4505bca7a91b1bce34ac97ada9d",
   "schema_version": "0.1.0",
   "tool_catalog_sha256": "62adb0edbbe48bc58ee9644ce444d36b9ab03172ba93ba3d97161cde978ba898",
-  "workflow_contract_sha256": "840167b8f7f592a69c49bd81b67495cdaf3e9acf7223314bfc3a57727b5ead9e"
+  "workflow_contract_sha256": "f3502f442bb48bca0dd2fcb116ee36ebd03d9b5aafe091b6c8963e1e3c969819"
 }

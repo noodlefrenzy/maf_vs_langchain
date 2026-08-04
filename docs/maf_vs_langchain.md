@@ -92,15 +92,17 @@ the limitations slides intact.
 # The short version
 
 1. **Compare layers, not brands.** MAF Workflows maps to LangGraph; MAF Harness
-   maps to Deep Agents.
+   maps to Deep Agents; primitive MAF `Agent` maps to LangChain `create_agent`
+   for the single-agent baseline.
 2. **Explicit graph parity was strong.** Same topology produced the same task
    outcome and almost the same call pattern in the current smoke.
 3. **Harness defaults matter.** Delegation, structured output, context, and
    retry behavior changed operational outcomes.
 4. **Neither stack removes the need for external controls.** Budgets,
    provenance, approvals, and evaluation must fail closed.
-5. **No winner claim yet.** One seed, one model, tiny cohorts, no single-agent
-   baseline, and no powered measured study.
+5. **No winner claim yet.** The single-agent cohorts have only five seed
+   clusters, the unrestricted ceiling was nonbinding, the harness gate is
+   blocked, and there is no powered measured study.
 
 ---
 
@@ -111,6 +113,7 @@ the limitations slides intact.
 | Model/tool primitive | `Agent` + chat clients | `create_agent` + chat models |
 | Explicit orchestration | **MAF Workflows** | **LangGraph** |
 | Opinionated harness | **MAF Harness** | **Deep Agents** |
+| Single-agent baseline | **MAF Agent** | **LangChain create_agent** |
 | Native visibility | MAF OpenTelemetry | LangGraph events + OpenInference |
 
 > “MAF vs LangChain” is too coarse to be a fair architecture or product
@@ -576,11 +579,14 @@ Choose the **orchestration mode and operating model first**, then the framework.
 # What these runs do not prove
 
 - No overall speed, quality, cost, safety, or reliability winner
-- No evidence yet that multi-agent beats a compute-matched single agent
-- No powered sample, confidence intervals, or preregistered primary result
-- One incident seed, one model profile, no injected-fault smoke cohort
+- No defensible evidence that multi-agent beats the completed compute-matched
+  single-agent baseline
+- No powered sample or approved preregistered primary result
+- Only five pilot seed clusters on one accepted model profile
 - Early harness runs used evolving source trees
-- No production checkpoint-backend evaluation
+- Existing harness smoke predates the symmetric hashed adapter contract
+- Cosmos provider restart semantics are validated on a pinned emulator, but no
+  production Azure RBAC, availability, scale, backup, or cost evaluation
 - Startup-only tracing probe does not predict full-run overhead
 - Model sampling is not bitwise deterministic even with a requested seed
 
@@ -591,14 +597,14 @@ engineering risks—not to select a universal winner.
 
 # Recommended next phase
 
-1. Freeze corrected adapters and contracts at one clean source tree.
-2. Run compute-matched and unrestricted single-agent baselines.
-3. Execute the five-seed × three-repetition paired pilot with transient faults.
-4. Repeat tracing on/off on completed model-driven workflows.
-5. Evaluate provenance-correction policy symmetrically.
-6. Test intended production checkpoint/resume backends.
-7. Characterize the planned Qwen3.5-9B profile and server parsers.
-8. Publish paired raw points, operational failures, effect sizes, uncertainty,
+1. Keep the harness replacement pilot blocked and retain the completed
+   explicit, compute-matched single-agent, and unrestricted sensitivity pilots.
+2. Retain all five completed harness sensitivity diagnostics: zero turn, two
+   turns, prompt paraphrase, no reviewer, and no compaction. None replaces the
+   failed canonical gate.
+3. Repeat the Cosmos restart gate against the intended Azure account and
+   managed identity before enabling a production runner profile.
+4. Publish paired raw points, operational failures, effect sizes, uncertainty,
    and metric audit samples.
 
 ---

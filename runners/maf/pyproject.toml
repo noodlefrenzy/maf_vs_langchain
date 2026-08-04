@@ -11,11 +11,27 @@ dependencies = [
   "agent-framework-core>=1.12,<2",
   "agent-framework-openai>=1.11,<2",
   "agent-framework-orchestrations>=1.0,<2",
+  # Exact beta pin: the tools package has date-coded prereleases and no stable
+  # API-compatible range for the accepted MAF runner cohort.
   "agent-framework-tools==1.0.0b260721",
   "mcp>=1.24,<2",
   "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
   "opentelemetry-sdk>=1.39,<2",
 ]
+
+[dependency-groups]
+checkpoint-production = [
+  # Keep the provider on the same dated release train as the pinned tools
+  # package; newer provider builds require a framework-core cohort upgrade.
+  "agent-framework-azure-cosmos==1.0.0b260721",
+  # agent-framework-azure-cosmos uses the async Azure SDK transport but does
+  # not declare its aiohttp transport extra.
+  "aiohttp==3.14.3",
+  "azure-identity==1.25.3",
+]
+
+[tool.uv]
+exclude-newer = "72 hours"
 
 [tool.uv.sources]
 agent-framework-field-lab = { path = "../..", editable = true }

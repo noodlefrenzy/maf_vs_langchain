@@ -1,6 +1,6 @@
 # ADR 0004: Use one local vLLM Chat Completions endpoint
 
-Status: Proposed
+Status: Superseded by ADR 0008
 
 Date: 2026-07-31
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
 from typing import Any
 
 from deepagents import (
@@ -13,128 +13,57 @@ from deepagents import (
     register_harness_profile,
 )
 from deepagents.backends.filesystem import FilesystemBackend
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
 from langchain.agents.structured_output import ProviderStrategy
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_openai import ChatOpenAI
-from pydantic import PrivateAttr
 
 from agent_lab.contracts import AgentRole, ApprovalDecision, ModelProfile
 from agent_lab.harness_contracts import (
-    SPECIALIST_ROLES,
+    HARNESS_DELEGATION_RECURSION_LIMIT,
+    HARNESS_DELEGATION_REPAIR_TURNS,
+    HARNESS_PHASE_MODEL_CALL_LIMIT,
+    HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT,
+    HARNESS_SYNTHESIS_RECURSION_LIMIT,
     HarnessApprovalResponse,
     HarnessExecutionResult,
     HarnessProposal,
+    HarnessRoleObservation,
+    active_harness_roles,
     evaluate_harness_proposal,
+    harness_delegation_repair_prompt,
+    harness_provenance_allowlist,
+    harness_provenance_correction_prompt,
     harness_specialist_prompt,
+    harness_specialist_roles,
+    harness_specialist_tool_definitions,
+    harness_synthesis_prompt,
     harness_task_prompt,
+    require_harness_delegation,
+    validate_harness_role_provenance,
 )
-from agent_lab.model_request_policy import langchain_model_kwargs, model_request_headers
 from agent_lab.prompt_bundle import get_role_definition, render_role_prompt
 from agent_lab.runner_host import ApprovalProvider
 from agent_lab.runner_protocol import RoleEndpoint, RunRequest
 from agent_lab.tool_catalog import tool_definitions_for_role
 from agent_lab.workflow_contracts import evidence_ids_from_text, render_tool_result
 from agent_lab.workflow_telemetry import WorkflowTelemetry
+from langgraph_runner.chat_telemetry import InstrumentedChatOpenAI
 from langgraph_runner.workflow_lane import LangGraphCommanderAgent
-
-_HARNESS_SPECIALIST_TOOLS = {
-    "edit_file",
-    "glob",
-    "grep",
-    "ls",
-    "read_file",
-    "write_file",
-}
-
-
-@dataclass
-class _ModelStats:
-    model_calls: int = 0
-    input_tokens: int = 0
-    output_tokens: int = 0
-
-
-class _InstrumentedChatOpenAI(ChatOpenAI):
-    _actor: str = PrivateAttr()
-    _lab_profile: ModelProfile = PrivateAttr()
-    _telemetry: WorkflowTelemetry = PrivateAttr()
-    _stats: _ModelStats = PrivateAttr(default_factory=_ModelStats)
-
-    def __init__(
-        self,
-        *,
-        actor: str,
-        profile: ModelProfile,
-        telemetry: WorkflowTelemetry,
-    ) -> None:
-        super().__init__(
-            api_key="agent-lab-local",
-            default_headers=model_request_headers("deep-agents", actor),
-            **langchain_model_kwargs(profile),
-        )
-        self._actor = actor
-        self._lab_profile = profile
-        self._telemetry = telemetry
-
-    @property
-    def lab_stats(self) -> _ModelStats:
-        return self._stats
-
-    async def _agenerate(
-        self,
-        messages: list[Any],
-        stop: list[str] | None = None,
-        run_manager: Any = None,
-        **kwargs: Any,
-    ) -> Any:
-        await self._telemetry.model_started(
-            actor=self._actor,
-            model=self._lab_profile.name,
-        )
-        self._stats.model_calls += 1
-        response = await super()._agenerate(
-            messages,
-            stop=stop,
-            run_manager=run_manager,
-            **kwargs,
-        )
-        input_tokens = 0
-        output_tokens = 0
-        for generations in response.generations:
-            for generation in generations:
-                message = getattr(generation, "message", None)
-                usage = getattr(message, "usage_metadata", None) or {}
-                input_tokens += int(usage.get("input_tokens", 0))
-                output_tokens += int(usage.get("output_tokens", 0))
-        if input_tokens == 0 and output_tokens == 0:
-            token_usage = (response.llm_output or {}).get("token_usage", {})
-            input_tokens = int(token_usage.get("prompt_tokens", token_usage.get("input_tokens", 0)))
-            output_tokens = int(
-                token_usage.get("completion_tokens", token_usage.get("output_tokens", 0))
-            )
-        await self._telemetry.model_finished(
-            actor=self._actor,
-            model=self._lab_profile.name,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
-        self._stats.input_tokens += input_tokens
-        self._stats.output_tokens += output_tokens
-        return response
 
 
 class _ToolTracker:
     def __init__(self, actor: str, telemetry: WorkflowTelemetry) -> None:
         self.actor = actor
         self.telemetry = telemetry
+        self.tool_calls = 0
         self.called_tools: list[str] = []
         self.observed_evidence_ids: set[str] = set()
         self.delegation_observed = False
 
     def wrap(self, tool: BaseTool) -> BaseTool:
         async def invoke(**arguments: Any) -> Any:
+            self.tool_calls += 1
             if not self.delegation_observed:
                 await self.telemetry.handoff(
                     source_actor=AgentRole.INCIDENT_COMMANDER.value,
@@ -169,16 +98,71 @@ class _ToolTracker:
         )
 
 
+class _SubagentTaskTracker(AgentMiddleware):
+    """Retain native task-tool executions until exceptional exits are reaped."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._active_tasks: set[asyncio.Task[Any]] = set()
+
+    async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
+        if request.tool_call["name"] != "task":
+            return await handler(request)
+        task = asyncio.current_task()
+        if task is None:
+            return await handler(request)
+        self._active_tasks.add(task)
+        try:
+            return await handler(request)
+        finally:
+            self._active_tasks.discard(task)
+
+    async def cancel_and_drain(self) -> None:
+        """Cancel and reap task-tool executions left by parallel failure."""
+
+        await asyncio.sleep(0)
+        while self._active_tasks:
+            tasks = tuple(self._active_tasks)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
+class _SpecialistCompletionMiddleware(AgentMiddleware):
+    """Mechanically remove specialist tools after the frozen evidence phase."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._dispatched_responses = 0
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        tools_enabled = self._dispatched_responses < HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT
+        self._dispatched_responses += 1
+        if not tools_enabled:
+            request = request.override(tools=[], tool_choice="none")
+        return await handler(request)
+
+
 def _chat_model(
     profile: ModelProfile,
     *,
     actor: str,
     telemetry: WorkflowTelemetry,
-) -> _InstrumentedChatOpenAI:
-    return _InstrumentedChatOpenAI(
+) -> InstrumentedChatOpenAI:
+    return InstrumentedChatOpenAI(
         actor=actor,
         profile=profile,
         telemetry=telemetry,
+        framework="deep-agents",
+    )
+
+
+def _phase_model_call_limit_middleware() -> ModelCallLimitMiddleware:
+    """Return a fresh native limiter for one harness actor phase."""
+
+    return ModelCallLimitMiddleware(
+        run_limit=HARNESS_PHASE_MODEL_CALL_LIMIT,
+        exit_behavior="error",
     )
 
 
@@ -204,30 +188,20 @@ async def _role_tools(
             f"{role.value} MCP catalog mismatch: "
             f"expected={sorted(expected)}, observed={sorted(observed)}"
         )
-    return [tracker.wrap(tool) for tool in tools]
+    exposed = {tool.name for tool in harness_specialist_tool_definitions(role)}
+    return [tracker.wrap(tool) for tool in tools if tool.name in exposed]
 
 
-def _validate_role_provenance(
-    proposal: HarnessProposal,
+def _role_observations(
     trackers: dict[AgentRole, _ToolTracker],
-) -> None:
-    for finding in proposal.findings:
-        tracker = trackers[finding.role]
-        observed_tools = set(tracker.called_tools)
-        if not observed_tools:
-            raise ValueError(f"{finding.role.value} made no native MCP calls")
-        unknown_tools = set(finding.tools_used) - observed_tools - _HARNESS_SPECIALIST_TOOLS
-        if unknown_tools:
-            raise ValueError(
-                f"{finding.role.value} cited tools outside its native MCP calls: "
-                f"unknown={sorted(unknown_tools)}, observed={sorted(observed_tools)}"
-            )
-        if not set(finding.evidence_ids).issubset(tracker.observed_evidence_ids):
-            raise ValueError(
-                f"{finding.role.value} cited evidence outside its native MCP results: "
-                f"cited={finding.evidence_ids}, "
-                f"observed={sorted(tracker.observed_evidence_ids)}"
-            )
+) -> dict[AgentRole, HarnessRoleObservation]:
+    return {
+        role: HarnessRoleObservation(
+            called_tools=frozenset(tracker.called_tools),
+            evidence_ids=frozenset(tracker.observed_evidence_ids),
+        )
+        for role, tracker in trackers.items()
+    }
 
 
 async def run_live_approved(
@@ -237,7 +211,11 @@ async def run_live_approved(
 ) -> dict[str, Any]:
     """Run native Deep Agents delegation, then shared approval and recovery."""
 
-    required_roles = (*SPECIALIST_ROLES, AgentRole.INCIDENT_COMMANDER)
+    configured_roles = harness_specialist_roles(request.harness_ablation)
+    required_roles = (
+        *sorted(configured_roles, key=lambda item: item.value),
+        AgentRole.INCIDENT_COMMANDER,
+    )
     missing = [role.value for role in required_roles if role not in request.role_endpoints]
     if missing:
         raise ValueError(f"run request is missing harness endpoints: {missing}")
@@ -249,13 +227,18 @@ async def run_live_approved(
         "openai",
         HarnessProfile(
             excluded_tools=frozenset({"execute"}),
+            excluded_middleware=(
+                frozenset({"SummarizationMiddleware"})
+                if request.harness_ablation.context_compaction == "disabled"
+                else frozenset()
+            ),
             general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
         ),
     )
     trackers: dict[AgentRole, _ToolTracker] = {}
-    models: dict[AgentRole, _InstrumentedChatOpenAI] = {}
+    models: dict[AgentRole, InstrumentedChatOpenAI] = {}
     subagents: list[SubAgent] = []
-    for role in sorted(SPECIALIST_ROLES, key=lambda item: item.value):
+    for role in sorted(configured_roles, key=lambda item: item.value):
         tracker = _ToolTracker(role.value, telemetry)
         model = _chat_model(
             request.manifest.model,
@@ -268,9 +251,16 @@ async def run_live_approved(
             SubAgent(
                 name=role.value,
                 description=get_role_definition(role).responsibility,
-                system_prompt=harness_specialist_prompt(role),
+                system_prompt=harness_specialist_prompt(
+                    role,
+                    request.harness_ablation.prompt_variant,
+                ),
                 tools=await _role_tools(request.role_endpoints[role], role, tracker),
                 model=model,
+                middleware=[
+                    _phase_model_call_limit_middleware(),
+                    _SpecialistCompletionMiddleware(),
+                ],
             )
         )
 
@@ -280,59 +270,59 @@ async def run_live_approved(
         telemetry=telemetry,
     )
     backend = FilesystemBackend(root_dir=workspace, virtual_mode=True)
+    subagent_task_tracker = _SubagentTaskTracker()
     delegation_graph = create_deep_agent(
         model=commander_model,
         system_prompt=render_role_prompt(AgentRole.INCIDENT_COMMANDER),
-        middleware=[ModelCallLimitMiddleware(run_limit=6, exit_behavior="end")],
+        middleware=[_phase_model_call_limit_middleware(), subagent_task_tracker],
         subagents=subagents,
         backend=backend,
         name=AgentRole.INCIDENT_COMMANDER.value,
     )
-    state = await delegation_graph.ainvoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": harness_task_prompt(request.public_ticket),
-                }
-            ]
-        },
-        config={"recursion_limit": 64},
-    )
-    for _attempt in range(2):
-        active_roles = {role for role, tracker in trackers.items() if tracker.called_tools}
-        if len(active_roles) >= 2:
-            break
-        missing_roles = sorted(role.value for role in SPECIALIST_ROLES - active_roles)
+    try:
         state = await delegation_graph.ainvoke(
             {
                 "messages": [
-                    *state["messages"],
                     {
                         "role": "user",
-                        "content": (
-                            "The deterministic evidence gate is not yet satisfied: fewer than "
-                            "two specialist roles have made real MCP calls. Delegate now to at "
-                            "least one of these remaining specialists and retrieve its completed "
-                            f"result: {missing_roles}. Do not invent the result yourself."
+                        "content": harness_task_prompt(
+                            request.public_ticket,
+                            request.harness_ablation.prompt_variant,
+                            request.harness_ablation.reviewer_enabled,
                         ),
-                    },
+                    }
                 ]
             },
-            config={"recursion_limit": 64},
+            config={"recursion_limit": HARNESS_DELEGATION_RECURSION_LIMIT},
         )
-    active_roles = {role for role, tracker in trackers.items() if tracker.called_tools}
-    if len(active_roles) < 2:
-        raise ValueError("Deep Agents delegation did not satisfy the two-specialist MCP gate")
+        for _attempt in range(HARNESS_DELEGATION_REPAIR_TURNS):
+            observations = _role_observations(trackers)
+            observed_roles = active_harness_roles(observations)
+            if len(observed_roles) >= 2:
+                break
+            missing_roles = sorted(role.value for role in configured_roles - observed_roles)
+            state = await delegation_graph.ainvoke(
+                {
+                    "messages": [
+                        *state["messages"],
+                        {
+                            "role": "user",
+                            "content": harness_delegation_repair_prompt(missing_roles),
+                        },
+                    ]
+                },
+                config={"recursion_limit": HARNESS_DELEGATION_RECURSION_LIMIT},
+            )
+    finally:
+        await subagent_task_tracker.cancel_and_drain()
+    observations = _role_observations(trackers)
+    require_harness_delegation(observations)
 
-    evidence_allowlist = "\n".join(
-        f"- {role.value}: {sorted(tracker.observed_evidence_ids)}"
-        for role, tracker in sorted(trackers.items(), key=lambda item: item[0].value)
-        if tracker.called_tools
-    )
+    evidence_allowlist = harness_provenance_allowlist(observations)
     synthesis_graph = create_deep_agent(
         model=commander_model,
         system_prompt=render_role_prompt(AgentRole.INCIDENT_COMMANDER),
+        middleware=[_phase_model_call_limit_middleware()],
         backend=backend,
         response_format=ProviderStrategy(HarnessProposal),
         name=AgentRole.INCIDENT_COMMANDER.value,
@@ -343,30 +333,45 @@ async def run_live_approved(
                 *state["messages"],
                 {
                     "role": "user",
-                    "content": (
-                        "Using only the completed specialist task results already in this "
-                        "conversation, return the HarnessProposal now. Include no finding that "
-                        "was not returned by a specialist. Opaque evidence IDs must be copied "
-                        "byte-for-byte; do not replace them with dates, descriptions, or "
-                        "invented aliases. The control plane observed this role-specific "
-                        f"evidence-ID allowlist:\n{evidence_allowlist}\nEvery finding must cite "
-                        "one or more exact IDs from its own role's list, and the commander "
-                        "synthesis must cite exact IDs from at least two included roles."
-                    ),
+                    "content": harness_synthesis_prompt(evidence_allowlist),
                 },
             ]
         },
-        config={"recursion_limit": 16},
+        config={"recursion_limit": HARNESS_SYNTHESIS_RECURSION_LIMIT},
     )
     proposal = HarnessProposal.model_validate(synthesis_state.get("structured_response"))
-    _validate_role_provenance(proposal, trackers)
+    correction_attempt = 0
+    while True:
+        try:
+            validate_harness_role_provenance(proposal, observations)
+            break
+        except ValueError as exc:
+            if correction_attempt >= request.harness_ablation.provenance_correction_turns:
+                raise
+            correction_attempt += 1
+            synthesis_state = await synthesis_graph.ainvoke(
+                {
+                    "messages": [
+                        *synthesis_state["messages"],
+                        {
+                            "role": "user",
+                            "content": harness_provenance_correction_prompt(
+                                exc,
+                                evidence_allowlist,
+                            ),
+                        },
+                    ]
+                },
+                config={"recursion_limit": HARNESS_SYNTHESIS_RECURSION_LIMIT},
+            )
+            proposal = HarnessProposal.model_validate(synthesis_state.get("structured_response"))
     for finding in proposal.findings:
         await telemetry.handoff(
             source_actor=finding.role.value,
             target_actor=AgentRole.INCIDENT_COMMANDER.value,
             phase="specialist_finding_returned",
         )
-    evidence = evaluate_harness_proposal(proposal)
+    evidence = evaluate_harness_proposal(proposal, attempt=correction_attempt)
     if not evidence.passed:
         raise ValueError(f"harness evidence gate failed: {evidence.gate_reasons}")
 
@@ -416,11 +421,11 @@ async def run_live_approved(
             **{
                 role.value: {
                     "model_calls": models[role].lab_stats.model_calls,
-                    "tool_calls": len(trackers[role].called_tools),
+                    "tool_calls": trackers[role].tool_calls,
                     "input_tokens": models[role].lab_stats.input_tokens,
                     "output_tokens": models[role].lab_stats.output_tokens,
                 }
-                for role in sorted(SPECIALIST_ROLES, key=lambda item: item.value)
+                for role in sorted(configured_roles, key=lambda item: item.value)
             },
             AgentRole.INCIDENT_COMMANDER.value: {
                 "model_calls": commander_model.lab_stats.model_calls,

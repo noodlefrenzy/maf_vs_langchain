@@ -5,12 +5,48 @@ from pydantic import ValidationError
 
 from agent_lab.contracts import (
     ApprovalDecision,
+    Budget,
     EventKind,
     EvidenceItem,
+    ExperimentSpec,
     FrameworkLane,
+    HarnessAblationProfile,
     IncidentReport,
     NormalizedEvent,
 )
+from agent_lab.runner_protocol import CheckpointCapability
+
+
+def test_checkpoint_production_claim_requires_restart_capability() -> None:
+    with pytest.raises(ValidationError, match="resumable and restart-safe"):
+        CheckpointCapability(
+            resumable=False,
+            restart_safe=True,
+            format="invalid-production-backend",
+            production_ready=True,
+        )
+
+
+def test_non_default_harness_ablation_requires_harness_lanes() -> None:
+    with pytest.raises(ValidationError, match="requires a harness lane pair"):
+        ExperimentSpec(
+            experiment_id="invalid_ablation",
+            scenario="incident_response",
+            lanes=[FrameworkLane.MAF_WORKFLOW, FrameworkLane.LANGGRAPH],
+            seeds=[42],
+            repetitions=1,
+            order="alternating",
+            model_profile="model.toml",
+            fault_profile="none",
+            budget=Budget(
+                wall_clock_seconds=10,
+                model_calls=2,
+                tool_calls=4,
+                output_tokens=100,
+                approval_requests=1,
+            ),
+            harness_ablation=HarnessAblationProfile(prompt_variant="paraphrase_a"),
+        )
 
 
 def test_normalized_event_rejects_unknown_fields() -> None:

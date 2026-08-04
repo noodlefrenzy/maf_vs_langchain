@@ -2,18 +2,22 @@
 .idea/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .venv/
 **/.venv/
 **/__pycache__/
 *.egg-info/
 *.py[cod]
 .coverage
+.coverage.*
 coverage.xml
+htmlcov/
 dist/
 build/
 
 # Runtime state and downloaded/private data.
 runs/
+reports/
 data/private/
 infra/phoenix/data/
 .cache/

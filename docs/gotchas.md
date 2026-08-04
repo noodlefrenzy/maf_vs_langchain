@@ -45,8 +45,9 @@ node. Use a domain-specific handler name such as `mitigate`.
 ### File checkpoint permissions need explicit hardening
 
 `FileCheckpointStorage` persists approval state, but its default file mode is
-affected by the process umask. The MAF runner wraps the storage backend and
-changes every saved checkpoint to mode `0600`; the checkpoint directory is
+affected by the process umask. The MAF runner wraps the storage backend,
+pre-creates its atomic temporary file with exclusive mode `0600`, and verifies
+the final checkpoint mode; the checkpoint directory is
 mode `0700`.
 
 ## LangGraph and LangChain
@@ -110,6 +111,32 @@ credit, but no containment or recovery credit. Both bundles and the pair were
 provenance-valid. An operational summary status of `ok` must not be confused
 with `task_success`.
 
+The optional neutral-observer path is deliberately a different development
+policy. A profile must set `approval_policy = "observer"`; the API then waits
+for a loopback bearer-authenticated decision file, while the outer deadline
+still ends an unanswered request as `approval_timeout`. Never silently use that
+profile for an unattended or measured run. Every comparison profile explicitly
+freezes `approval_policy = "scripted"`.
+
+### Single-agent structured output also needs a discovery phase
+
+Attaching the baseline proposal schema to the initial primitive-agent turn can
+produce a valid-looking answer before any MCP call occurs. Both single-agent
+adapters therefore run the same unstructured discovery phase first, require
+real calls through at least two capability-scoped endpoints, and only then run
+a tool-disabled structured synthesis turn with the exact observed evidence
+allowlist. A bounded repair prompt can request one of the still-unused sources;
+schema validity alone never satisfies the discovery or provenance gates. Each
+phase also has an eight-dispatch model-call ceiling; this keeps a tool-seeking
+primitive agent from reaching a framework-specific graph recursion failure
+before the shared outer budget can report a meaningful outcome.
+
+The `incident-lab-single-agent-compat` command exercises this path in twin
+worlds and uses the same fixture-truth approval edit as the explicit workflow
+compatibility probes. It uses greedy sampling to make the positive-path check
+repeatable, asserts per-role versus protocol usage equality, and is
+intentionally labeled non-measurement evidence.
+
 ## Approval protocol boundary
 
 The simulator, not the runner, creates approval tokens. A protocol message that
@@ -156,11 +183,30 @@ The MAF lane permits one tool-disabled correction turn containing the validator
 error and the same observed allowlist; a second mismatch remains a runner
 failure rather than being rewritten by adapter code.
 
+The accepted-model replacement pilot showed that an evidence-only allowlist
+was not enough: 11/15 MAF proposals cited blank, placeholder, management-plane,
+or otherwise unobserved tool/evidence provenance, even though the validator
+also enforced exact `tools_used`. The shared synthesis/correction prompt now
+renders both the per-role MCP tool names and evidence IDs and explicitly
+excludes planning, workspace, and background-agent control names. Specialists
+are also told that public brief/status calls are insufficient and must obtain a
+role-specific evidence ID. The validator remains unchanged and authoritative.
+
 Deep Agents 0.7.1 automatically adds a `general-purpose` subagent unless a
 matching `HarnessProfile` disables it. That would create a fifth, unmatched
 role, so the experiment registers an OpenAI-family profile that disables the
 extra subagent and the unavailable `execute` tool while retaining native todo,
 filesystem, summarization, and specialist dispatch behavior.
+
+The matched no-compaction profile disables context reduction through public
+but framework-specific hooks. MAF receives `disable_compaction=True` on every
+specialist and coordinator Harness agent. Deep Agents receives the documented
+`"SummarizationMiddleware"` exclusion through its `HarnessProfile`, which
+applies to the coordinator and declarative subagents. Native runners accept one
+request per process, so Deep Agents' additive global profile registry cannot
+leak the disabled mode into a later condition. Do not execute both compaction
+conditions through one reused runner process without adding an explicit
+profile-registry reset contract.
 
 Using `response_format` on each declarative Deep Agents subagent caused the
 local OpenAI-compatible model to remain in an inner model/tool loop instead of
@@ -195,6 +241,105 @@ commander calls while retaining its task-result messages. The framework-neutral
 36-call outer budget still counts commander and specialist calls and remains
 the authoritative run limit.
 
+The same accepted-model pilot reached the six-call limit inside a Deep Agents
+specialist in all 15 runs. The hard limit was working, but the natural
+completion prompt did not tell the model to reserve a final response; each
+specialist used its sixth response for more tools and failed before dispatch
+seven. Both harnesses now receive the same explicit six-response notice and a
+soft maximum of four tool-calling responses before final JSON. This does not
+raise or silently catch the hard limit; it makes the already-frozen boundary
+possible for the model to obey.
+
+The clean ADR 0015 gate showed that making the boundary visible was still not
+enough: one Deep specialist ignored it, while MAF spent its commander
+reservation polling native background tasks. ADR 0016 therefore makes response
+five tool-disabled in both specialist implementations. MAF also returns from
+the initial native delegation turn, drains the retained task handles without
+model calls, and then gives the commander one separately bounded native
+result-retrieval turn. This does not synthesize or inject specialist output;
+the model must still retrieve and use the framework-native results.
+
+The ADR 0016 clean gate verified both lifecycle changes. Deep's specialists
+completed and the lane reached a normal terminal state; its failed task was the
+scored consequence of applying an ineffective mitigation. MAF's background
+tasks also settled and were retrieved within the new bound, but one specialist
+used only the public brief/status calls. Those calls prove native activity but
+produce no role evidence ID, so strict provenance correctly failed. In a
+bounded evidence phase, exposing public-context tools to specialists is thus
+inconsistent with requiring a role-specific finding; the next contract revision
+must remove that dead end symmetrically rather than weaken validation.
+
+ADR 0017 makes that correction for both harness adapters: specialist phases see
+only their role-specific evidence tools, while the complete MCP role catalogs
+remain available to every other track and continue to define authorization.
+Its clean gate confirmed exact evidence-bearing calls and same-role provenance
+in both lanes. Deep still chose an ineffective mitigation after an incorrect
+diagnosis, and MAF's commander marked its evidence insufficient. Those are
+task-quality failures, not reasons to loosen the gate or retune the prompt
+after observing the held-out seed.
+
+### A matched paraphrase is still a different operating point
+
+The preregistered paraphrase-A diagnostic kept the model, sampling, budgets,
+topology, tools, one correction turn, reviewer role, compaction mode, and
+validators fixed, and changed the shared prompt family in both lanes. That was
+enough to materially change execution. Across 15 runs per lane, MAF Harness had
+zero task successes, six normal completions, eight evidence-insufficient
+failures, and one outer-budget exhaustion. Deep Agents had four successes, nine
+normal completions, three native specialist-limit failures, and three other
+synthesis/evidence failures. Deep also reached 14,133 output tokens in one run,
+well above the 9,344 maximum observed in the two-turn diagnostic.
+
+Treat prompt text as a versioned treatment variable, not interchangeable prose.
+Hash it into pair preflight, perturb it symmetrically, and retain every
+operational failure. The five-seed paraphrase result is exploratory and does
+not estimate a causal canonical-versus-paraphrase effect because a matched
+canonical cohort at the same source was blocked by the canonical gate. It does
+show that a single wording cannot be assumed representative for this local
+model and harness combination.
+
+### Fewer specialists do not guarantee shorter native loops
+
+The no-review profile removed the reliability reviewer symmetrically and kept
+the canonical prompts, one correction turn, native compaction, catalogs,
+budgets, and validators fixed. MAF normally completed 13/15 runs and Deep only
+2/15. Twelve Deep runs exhausted a native specialist's six-call middleware
+limit, while MAF had one evidence-insufficient failure and one outer 32-call
+budget exhaustion. Each lane nevertheless achieved exactly one task success,
+in a different seed cluster.
+
+Treat active topology as a versioned treatment variable and report operational
+failure separately from task success. Removing an actor changes delegation,
+context, and routing dynamics; it does not mechanically subtract that actor's
+calls from the original execution. A tied task-success total can conceal a
+large difference in whether the native workflow reaches a scored terminal.
+
+### Disabling compaction does not equalize effective context
+
+The no-compaction profile disabled each framework's public native reduction
+hook while keeping canonical prompts, all three specialists, one correction
+turn, budgets, tools, and validators fixed. MAF passed
+`disable_compaction=True` to every Harness agent; the Deep Agents profile
+excluded `SummarizationMiddleware` for the coordinator and declarative
+subagents. These are symmetric contract intentions implemented through
+framework-specific controls, not evidence that the frameworks then construct
+the same messages or retain the same workspace and delegation state.
+
+The completed diagnostic made that distinction concrete. MAF normally
+completed 12/15 runs but achieved zero task successes and retained three
+evidence-insufficient failures. Deep normally completed 14/15, achieved four
+task successes, and retained one role-coverage failure. Ten normal Deep
+terminals and all twelve normal MAF terminals still failed the task. Removing
+context reduction therefore did not mechanically cure evidence or task quality,
+and normal completion remained distinct from success.
+
+Treat context policy as a versioned treatment variable and hash the effective
+framework-specific configuration into pair preflight. Do not call this a
+causal compaction effect: a matched compaction-enabled cohort at the same clean
+source was not authorized after the canonical gate failed. Also do not infer
+equivalence from the aggregate `0/15` versus `4/15` success counts matching the
+paraphrase-A totals; the prompt, seed pattern, and operational failures differ.
+
 With those guards frozen, the order-seed-1737 paired smoke completed both
 lanes and produced inference-eligible bundles. Deep Agents scored `0.35` and
 MAF Harness scored `0.275`; both had `task_success = false` because their chosen
@@ -204,12 +349,11 @@ runaway coordinator turns. Treat those terminal states as experiment outcomes,
 not as reasons to relax provenance or silently raise a lane-specific outer
 budget.
 
-Deep Agents may truthfully include built-in workspace operations such as
-`grep` in a specialist's `tools_used`. These are native harness operations, not
-MCP evidence sources. Provenance validation therefore permits the known
-workspace-tool names but still requires at least one real role-scoped MCP call
-and requires every cited evidence ID to have appeared in that role's MCP
-result.
+Deep Agents may truthfully mention built-in workspace operations such as
+`grep`, but `HarnessSpecialistFinding.tools_used` is deliberately narrower: it
+may list only role-scoped MCP tools actually observed by the adapter. Workspace
+operations remain native trace evidence and are not accepted as provenance for
+an incident claim. MAF uses the same rule.
 
 LangChain's asynchronous callback manager logs and suppresses exceptions raised
 by callback hooks. A budget exception raised from `on_chat_model_start` was
@@ -217,6 +361,39 @@ therefore printed to stderr while generation continued, producing a usage/event
 mismatch. Hard pre-dispatch budget enforcement now wraps the model's
 `_agenerate` call itself; callbacks remain unsuitable as a fail-closed control
 boundary.
+
+### Do not edit a clean-source cohort while it is running
+
+Characterization, compatibility, plans, and run manifests attest the source
+commit, tree digest, and worktree status. A documentation-only edit is still a
+source-tree change. Starting edits between repetitions can therefore split a
+cohort across source states or make later runs ineligible even though no runner
+code changed.
+
+Finish the launcher, verify all expected terminals, and let it stop the model
+server before editing or committing anything. This also applies to seemingly
+unrelated cleanup and generated documentation. If an edit cannot wait, stop
+and restart the whole cohort under a new clean commit rather than mixing source
+states.
+
+### A resource-sampler thread can fail after useful samples exist
+
+During the no-review characterization, WSL `nvidia-smi` timed out once after
+five seconds. The uncaught timeout stopped the sampler thread, leaving the last
+two matrix cells with zero cell-local resource samples even though 327 earlier
+samples supported the aggregate 22,409 MiB peak. The characterization remained
+measurement-eligible and had no skipped inference cells, but those two cells'
+individual resource peaks are not evidence.
+
+Inspect both aggregate and per-cell sample counts rather than relying on the
+top-level eligibility flag alone. The sampler now records error counts and
+sources while continuing subsequent host/GPU/process/container observations.
+The next no-compaction characterization exercised that repair live: it recorded
+two GPU-source errors, continued to 1,038 aggregate samples, and retained 70,
+91, 284, and 336 samples across the four matrix cells. The final cell kept 336
+samples despite one recorded GPU error. Older characterizations without those
+fields still require traceback review and qualification of any affected cell-
+local resource claim.
 
 ### Synchronous stdin and long native awaits
 
@@ -331,7 +508,7 @@ executing tools, then return one response whose usage is aggregated across the
 whole loop. Instrumenting that public method therefore counts agent invocations,
 not model dispatches. In the seed-42 stabilization smoke this produced only four
 to six normalized model calls for MAF Harness runs whose native ledgers contained
-25 to 34 LLM spans.
+22 to 34 LLM spans (34, 25, 29, and 22 at order seeds 1738–1741).
 
 The harness adapter installs a MAF `ChatMiddleware` instead. That layer executes
 below `FunctionInvocationLayer`, immediately around each provider request. It
@@ -394,6 +571,9 @@ safe, stable nested namespace attribute in the observed projected spans, so the
 adapter does not fabricate deeper graph paths from span names.
 
 Model messages remain content-free structural request/response events. A
-completed call also records input/output token counts as `metric.recorded`, but
-non-streaming calls do not generate synthetic text deltas. Raw prompts,
-messages, tool arguments/results, and reasoning remain excluded.
+completed call also records input/output and optional cached-input/reasoning
+token counts as `metric.recorded`; absence stays explicit rather than becoming
+zero. Non-streaming calls do not generate synthetic text deltas or timing
+estimates; exact queue/TTFT/generation fields are retained only when the
+provider response reports them. Raw prompts, messages, tool arguments/results,
+and reasoning content remain excluded.

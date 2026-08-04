@@ -1,7 +1,7 @@
 # Qwen3.5-9B RTX 4090 characterization runbook
 
-Status: pre-restart 8K/16K/32K characterization accepted; full WSL/Docker
-restart reproduction pending.
+Status: complete; pre/post-restart 8K/16K/32K characterization and the native
+framework compatibility gate are accepted.
 
 This runbook is the execution contract for issue 13. It deliberately uses port
 `8001`; port `8000` remains available for the `lonestar` SSH tunnel.
@@ -148,6 +148,90 @@ The corresponding server logs have SHA-256 values
 `850b5a348c1ae7a574ba1b098a68f2a3fa4a15dc40888e22f350fe2a384bfbb7`,
 and `f64acccd3b1c6c1b525991949dfca4b94a4f178276142ad4f85abd38626884ca`
 in the same table order.
+
+## Post-restart reproduction
+
+The full Windows, WSL, and Docker restart was completed before the three
+post-restart reports were collected on 2026-08-02. All three reports attest a
+clean source commit `01cf64e2483cc7d771aec920b7f03d34922ae74a`, complete
+execution provenance, and `measurement_eligible: true`. The model and tokenizer
+revision and hashes, chat-template hash, image manifest and content digests,
+runtime versions, parser selection, and per-context serve-command hashes match
+the accepted pre-restart identities exactly.
+
+One initial 8K server startup was interrupted before the endpoint became
+healthy after unrelated GPU activity began. It produced no benchmark report
+and is excluded from the accepted evidence. Its diagnostic server log is
+retained locally as
+`qwen35-9b-8192-after-contaminated-game-startup-server.log`, SHA-256
+`1b1c0066447f3db725cc1ede521ca19c4298a51f258954c55b98d546d2a632ac`.
+The accepted 8K run began only after the named container was gone, no compute
+process was reported, and whole-GPU allocation was stable across three
+baseline observations.
+
+Times are seconds and resource peaks retain the same whole-device/whole-host
+scope as the pre-restart table.
+
+| Served context | Cold TTFT | Warm TTFT | Prefix-cache TTFT | Peak GPU MiB | Peak GPU use | Peak host MiB | Peak container MiB |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8,192 | 1.173 | 0.736 | 0.132 | 22,517 | 100% | 9,436 | 4,071 |
+| 16,384 | 1.965 | 1.474 | 0.148 | 22,568 | 100% | 8,870 | 4,080 |
+| 32,768 | 3.348 | 3.027 | 0.178 | 22,566 | 100% | 8,903 | 4,105 |
+
+| Served context | Output cap | One in flight, tok/s | Two in flight, tok/s | Completion observation |
+| ---: | ---: | ---: | ---: | --- |
+| 8,192 | 512 | 91.25 | 168.49 | all reached cap |
+| 8,192 | 2,048 | 99.63 | 174.95 | all reached cap |
+| 16,384 | 512 | 80.53 | 168.14 | all reached cap |
+| 16,384 | 2,048 | 95.47 | 132.30 | single and one concurrent sample reached cap; the other concurrent sample stopped at 778 tokens |
+| 16,384 | 8,192 | 99.53 | 158.82 | single stopped at 2,267 tokens; concurrent samples stopped at 6,293 and reached cap |
+| 32,768 | 512 | 61.32 | 154.48 | all reached cap |
+| 32,768 | 2,048 | 86.08 | 157.12 | all reached cap |
+| 32,768 | 8,192 | 93.07 | 155.29 | single stopped at 5,380 tokens; both concurrent samples reached cap |
+
+For directly comparable cells where every pre- and post-restart sample reached
+its cap, aggregate throughput differed by at most 3.6%. Warm-model TTFT changed
+by at most 15 ms. Prefix-cache TTFT was 18--29 ms lower after restart. Cold
+TTFT was effectively unchanged at 8K, 42 ms higher at 16K, and 512 ms lower at
+32K. Peak whole-GPU allocation changed by +13, -205, and -358 MiB at 8K, 16K,
+and 32K respectively, no more than 1.6%. Peak container allocation changed by
+at most 20 MiB. Whole-host memory was approximately 4.0--4.7 GiB lower after
+the reboot; because that telemetry covers the entire host, it is environmental
+rather than a server-memory delta.
+
+Generation stop lengths varied even with the frozen seed. The pre-restart 16K
+2,048-token samples and 32K concurrent 8,192-token samples also contained early
+model stops, but in different samples and at different lengths. These are
+recorded model-output observations, not request failures: every matrix request
+completed, and the acceptance gates do not require generation to consume its
+maximum allowance.
+
+At every context, the post-restart disconnect probe again observed a client
+cancellation, a drained server, and a healthy follow-up endpoint. The abort
+counter still did not increment, so the reports preserve the same
+counter-evidence gap. Malformed-history recovery again produced exactly one corrected
+`lookup_incident(INC-42)` call. The exact-profile 32K compatibility report set
+`passed: true` and `errors: []`; every MAF and LangChain plain, streaming,
+strict structured-output, sequential-tool, parallel-tool, multi-turn,
+malformed-call, and actor-header probe passed.
+
+The post-restart model/runtime attestation SHA-256 values for 8K, 16K, and 32K
+are `5e5e15eb5209e45ce647330b1373ab8e44c67e3ad51418b3b6d473bcef2a6cb3`,
+`d361181d4365dfd8ea3aa16b2673dbe71faeebaf9a347774be241c3b70971f57`,
+and `31825c06b0918a8cb88dbc581f8e142ad37d61f40c7aec26dcc0cc629ab020c5`.
+Accepted local evidence remains ignored by Git and mode 0600:
+
+| Evidence | SHA-256 |
+| --- | --- |
+| `qwen35-9b-8192-after.json` | `b5e0d6b2f0278c0e08545527ab6b8e9b04e8226f80f0fff0505bfe677ef06a83` |
+| `qwen35-9b-16384-after.json` | `bd11352b5c3f21e29cfed0ca87a458ee0ac830d17e74d51d96feee9b04a4c31f` |
+| `qwen35-9b-32768-after.json` | `afde58110b9b98456ecf34d2e382a8797882b44a2709a1229ffd19a05dd54c04` |
+| `qwen35-9b-32768-after-compat.json` | `7cb22aaa55119856f22ef2a269c0aed408b42abce60b5ed0969a62181acc9ff6` |
+
+The corresponding 8K, 16K, and 32K server logs have SHA-256 values
+`12fb962d766d009b7652c755653e8f389cf2e1e0aeff88913b53450347e48ec5`,
+`d9a3640ed86f6ae01de05cf40b0944a982334ae1868fefba8a19c9efadd7f54b`,
+and `019db2873aec2192568aaf4932223c896a5410976e6791979e4a2216b6e0961b`.
 
 ## One-time artifact acquisition
 

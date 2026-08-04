@@ -4,12 +4,13 @@ This repository is a controlled field lab for comparing Microsoft Agent
 Framework with the LangChain ecosystem while holding the model, task, tools,
 budgets, and evaluation rules constant.
 
-The comparison has two matched lanes:
+The comparison has three matched tracks:
 
 | Question | Microsoft lane | LangChain lane |
 | --- | --- | --- |
 | How do explicit workflow runtimes compare? | Agent Framework Workflows | Custom LangGraph |
 | How do opinionated long-horizon harnesses compare? | Agent Framework Harness | Deep Agents |
+| Does role separation add value over one agent? | Agent Framework `Agent` | LangChain `create_agent` |
 
 The primary scenario is a seeded incident-response simulation. Specialized
 agents receive role-scoped MCP tools, investigate hidden state, tolerate
@@ -42,11 +43,16 @@ uv run agent-lab config validate configs/experiments/smoke.toml
 uv run pytest
 ```
 
+Dependency changes must use the rolling 72-hour release quarantine documented
+in [`docs/dependency-quarantine.md`](docs/dependency-quarantine.md). The
+project-owned lock command covers all four isolated uv projects and CI verifies
+the policy before installing repository dependencies.
+
 Framework runners and the MCP service intentionally use separate projects:
 
 ```text
-runners/maf/          Microsoft Workflows and Harness adapters
-runners/langgraph/    LangGraph and Deep Agents adapters
+runners/maf/          Microsoft Workflows, Harness, and Agent adapters
+runners/langgraph/    LangGraph, Deep Agents, and create_agent adapters
 services/incident_mcp Seeded incident world exposed through MCP
 ```
 
@@ -79,15 +85,93 @@ executable: MAF Harness background agents and declarative Deep Agents subagents
 perform native role-scoped delegation, pass a shared evidence gate, and enter
 the same approval, execution, finalization, scoring, and pair-validation path.
 Harness state is currently process-local and non-resumable. Both runner families
+also expose a matched single-agent lane with one model-driven commander, a
+duplicate-free union discovery catalog, strict source-endpoint evidence
+provenance, and the same outer approval/recovery boundary. Both runner families
 now retain correlated, redacted native span ledgers, export best-effort to a
 pinned loopback Phoenix deployment, and record validated operation-level trace
-completeness without making collector availability run-critical. These smoke
-runs exercise the system but do not constitute a benchmark result. The next
-milestones are baselines and broader repeated experiment runs.
+completeness without making collector availability run-critical. The smoke
+runs exercise the system but do not constitute benchmark results. Clean-source
+harness and compute-matched baseline smoke pairs have been retained, along
+with two corrected Qwen3.5-9B task-quality gates. The first contained one
+LangGraph task success and one valid MAF evidence-gate failure; the second
+reversed the split, with MAF succeeding while LangGraph completed without
+effective containment or recovery. Neither pair had two successful lanes, so
+Qwen3.5-9B remains a fit-check model. A pinned Qwen3.5-27B Q4_K_M GGUF on local
+llama.cpp subsequently cleared both restart characterizations, the full
+MAF/LangChain compatibility suite, and a paired task-quality gate with two
+successful lanes; that exact operating point is promoted to the five-seed
+pilots. The clean second 9B pair also validates the versioned per-call,
+host/GPU, and control-plane ledgers documented in the
+[native run-observability validation](docs/research/run-observability-validation.md).
+Later five-seed, three-repetition compute-matched and unrestricted single-agent
+pilots each retained all 30 valid bundles and 15 inference-eligible pairs. Both
+produced the same aggregate task result: MAF succeeded on 3/15 runs and
+LangChain on 11/15. The unrestricted cohort's observed maxima remained below
+the lower compute-matched ceilings, so it supplies no budget-rescue evidence.
+The five-seed cluster results are descriptive; see the
+[single-agent pilot record](docs/research/qwen35-27b-single-agent-pilots.md).
+A preregistered two-turn harness-correction diagnostic then retained 30 valid
+bundles and 15 inference-eligible pairs at the final ADR 0017 contract. MAF
+Harness succeeded on 4/15 runs and Deep Agents on 7/15, but the extra turn also
+triggered outer/native call limits and cannot replace the failed canonical
+gate; see the [diagnostic record](docs/research/qwen35-27b-harness-correction-two-diagnostic.md).
+A matched zero-turn diagnostic also retained all 30 valid bundles and 15 pairs,
+with MAF Harness at 2/15 successes and Deep Agents at 3/15. Its sparse outcomes
+and six retained operational failures show that simply removing correction
+does not resolve the model-quality problem; see the
+[zero-turn record](docs/research/qwen35-27b-harness-correction-zero-diagnostic.md).
+The matched paraphrase-A diagnostic retained the same complete evidence shape
+but was much less operationally stable: MAF Harness succeeded on 0/15 runs and
+Deep Agents on 4/15, with 15 retained failures across the lanes. Prompt wording
+is therefore a material treatment variable for this local operating point; see
+the [paraphrase record](docs/research/qwen35-27b-harness-paraphrase-a-diagnostic.md).
+The no-review topology diagnostic then produced one task success in each lane,
+but radically different completion behavior: MAF retained 2/15 operational
+failures while Deep retained 13/15. Equal success totals therefore do not imply
+operational equivalence; see the
+[no-review record](docs/research/qwen35-27b-harness-no-review-diagnostic.md).
+The final no-compaction diagnostic retained all 30 bundles and 15 pairs. MAF
+Harness produced 0/15 task successes with 3/15 operational failures; Deep
+Agents produced 4/15 with 1/15. Its characterization also confirmed that the
+hardened resource sampler continues after transient GPU telemetry errors. The
+result closes the planned harness sensitivity set without qualifying the
+canonical gate; see the
+[no-compaction record](docs/research/qwen35-27b-harness-no-compaction-diagnostic.md).
+A subsequent balanced 16-launch tracing ablation measured a consistent fixed
+control-path cost: median paired increases of 134 ms for MAF and 423 ms for
+LangGraph, including only 6--7 ms of explicit trace flush. Native tracing stays
+enabled for measured pilots; the full method and limits are in the
+[tracing study](docs/research/native-tracing-overhead.md).
+The accepted profile leaves only about 1.3 GiB of whole-device GPU margin, so
+measured execution prohibits concurrent non-study GPU workloads. See the
+[accepted gate](docs/research/qwen35-27b-llamacpp-gate.md). Cosmos DB is now
+the selected production-intended checkpoint
+substrate for both explicit lanes; both provider adapters passed a pinned
+emulator restart gate, while real Azure deployment acceptance remains separate.
+See [production-checkpoints.md](docs/production-checkpoints.md).
+The measured-study protocol is also machine-readable and CI-validated, but
+remains fail-closed pending an accepted-model pilot, computed sample size, and
+reviewer approval; see
+[measured-study-preregistration.md](docs/measured-study-preregistration.md).
 Run bundles can already be checked with `agent-lab bundle validate` and
 `agent-lab bundle validate-pair`.
 
-Exercise the full four-lane process boundary without loading a model:
+Watch paired bundles live or replay completed evidence through the neutral
+loopback observer:
+
+```bash
+uv run agent-lab observer serve --runs-dir runs
+```
+
+It provides a two-column browser timeline, sequence-addressable SSE, Phoenix
+and artifact links, an equivalent Rich renderer, and optional authenticated
+local approval controls without rendering raw model reasoning. See
+[neutral-observer.md](docs/neutral-observer.md). A clean interactive pair has
+also validated discovery, approval, completion, and exact-cursor replay; see
+the [observer acceptance record](docs/research/neutral-observer-validation.md).
+
+Exercise the four multi-agent lanes' process boundary without loading a model:
 
 ```bash
 uv run agent-lab experiment probe \
@@ -133,5 +217,114 @@ subagents. The adapter verifies every accepted specialist against its actual
 role-scoped MCP calls and exact evidence IDs; see
 [`docs/gotchas.md`](docs/gotchas.md) for framework-specific stopping and
 structured-output behavior observed with the local model.
+
+Run the matched compute-budget single-agent smoke with:
+
+```bash
+uv run agent-lab experiment run \
+  --experiment configs/experiments/single-agent-compute-matched-smoke.toml \
+  --runs-dir runs \
+  --order-seed 1741
+```
+
+This compares primitive MAF `Agent` with LangChain `create_agent`. Each lane
+has exactly one model-driven incident commander and the same duplicate-free
+union of capability-scoped discovery tools. Source-role labels preserve MCP
+evidence provenance and do not represent delegated agents. Both adapters use
+the same two phases: unstructured MCP discovery must satisfy a two-source gate,
+then a tool-disabled structured turn synthesizes only from the observed
+source-specific evidence allowlist. Each phase has the same eight-dispatch
+local model-call ceiling in both adapters, beneath the shared outer run budget.
+
+To exercise both adapters against a live loopback model without creating
+benchmark evidence, run:
+
+```bash
+uv run --project services/incident_mcp --no-sync \
+  incident-lab-single-agent-compat \
+  --model '<model-id-advertised-by-the-endpoint>'
+```
+
+The probe uses twin seeded worlds, deliberately edits approval to the known
+recovery action, requires both lanes to recover, and validates both bundles and
+their pair. It uses greedy compatibility sampling, verifies that per-role and
+protocol model/tool/output accounting agree, and marks its output
+`measurement_eligible: false`.
+
+The clean-source Qwen3.5-9B sequence is preregistered as a one-seed task-quality
+gate followed by separately executable explicit, harness, compute-matched
+baseline, and unrestricted-baseline pilot profiles:
+
+- `configs/experiments/qwen35-9b-task-quality-pilot.toml`
+- `configs/experiments/explicit-pilot.toml`
+- `configs/experiments/harness-pilot.toml`
+- `configs/experiments/single-agent-compute-matched-pilot.toml`
+- `configs/experiments/single-agent-unrestricted-pilot.toml`
+
+The larger profiles are not promoted when either task-quality-gate lane fails
+to complete successfully. Harness sensitivity profiles freeze the same seeds,
+repetitions, budgets, and fault schedule while changing exactly one shared
+prompt, correction, role-topology, or native-compaction control:
+
+- `configs/experiments/harness-correction-zero-ablation.toml`
+- `configs/experiments/harness-correction-two-ablation.toml`
+- `configs/experiments/harness-paraphrase-a-ablation.toml`
+- `configs/experiments/harness-no-review-ablation.toml`
+- `configs/experiments/harness-no-compaction-ablation.toml`
+
+All pilot and ablation profiles share the equal-weight, five-family case
+manifest in `configs/cases/pilot-v1.json`. Resolve their runner support,
+contract preflights, cases, and balanced per-block lane order without starting
+services via `agent-lab experiment plan`; the frozen selection and command are
+documented in `docs/pilot-case-plan.md`.
+
+Qwen3.5-9B did not clear that gate. The separately pinned 35B-A3B GPTQ-Int4
+candidate was then tested at 16K/8 GiB offload and at a minimal 8K/2 GiB
+offload operating point. Both configurations loaded all weights but failed
+during vLLM engine initialization because Triton kernels received CPU-offloaded
+tensors. A no-offload configuration cannot leave useful KV-cache headroom on
+this host, so the candidate is rejected for the current single-4090 stack. The
+failed gate and immutable evidence identities remain documented in
+`docs/research/qwen35-35b-a3b-gate.md`; no larger profile was promoted.
+
+The effective prompt/policy payload is hashed into both paired manifests and
+the pair preflight. Both native adapters consume the same validated
+`harness_ablation` request object; supported provenance-correction counts are
+zero, one, and two turns. The same object can remove the reliability reviewer
+from both lanes or disable both frameworks' native context compaction; active
+roles and compaction mode are frozen into the effective normalized topology.
+
+Measured execution refuses a dirty Git worktree. Commit the reviewed source
+freeze before running those profiles; protocol probes remain explicitly
+non-measurement evidence.
+
+After one or more native profiles finish, build a fail-closed offline report
+from their immutable summary indices:
+
+```bash
+uv run agent-lab report build \
+  --index runs/native-workflow-explicit_workflow_pilot_v1-order-1729.json \
+  --index runs/native-workflow-opinionated_harness_pilot_v1-order-1729.json \
+  --output-dir reports/pilot-v1
+```
+
+The command revalidates every individual bundle and pair, preserves the frozen
+left/right lane order, retains operational failures in denominators, and emits
+portable `paired-report/v3` JSON plus self-contained HTML. The primary binary
+effect averages repetitions within each scenario seed, bootstraps seed
+clusters, applies a paired sign-flip randomization test, and reports Holm
+adjustment when both confirmatory tracks are present. Run-level McNemar counts
+remain explicitly descriptive. Paired effects also cover
+scores, task/control latency, calls, all reported token dimensions, provider
+queue/TTFT/generation time, client concurrency, GPU/host samples, and native
+trace coverage. Continuous effects include deterministic paired-bootstrap
+intervals over seed clusters; scorer components report their observed
+discrimination per lane.
+
+The new owner-only output directory also contains redacted source/run evidence,
+fresh individual and pair validations, a complete private copy of each source
+bundle, and a SHA-256 inventory. It is independent of the ignored `runs/` tree
+after transfer to access-controlled durable storage. Do not publish the
+`private-runs/` subtree; follow [the retention procedure](docs/evidence-retention.md).
 
 No license is granted by this private repository unless one is added later.

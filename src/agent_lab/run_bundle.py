@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,7 @@ class RunBundle:
             kind=kind,
             actor=actor,
             visibility=visibility,
+            monotonic_ns=time.perf_counter_ns(),
             payload=payload or {},
             **event_fields,
         )

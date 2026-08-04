@@ -22,12 +22,14 @@ MAX_CLAIMS_PER_ROLE = 6
 MAX_EVIDENCE_IDS_PER_ROLE = 8
 MIN_INDEPENDENT_ROLES = 2
 MIN_EVIDENCE_IDS = 2
+MAX_RETRYABLE_TOOL_RETRIES = 1
 SPECIALIST_OBSERVATION_INSTRUCTIONS = (
-    "The adapter requested each role-scoped MCP observation once. A native MCP client may "
-    "reconnect or retry at its transport boundary; the recorded audit stream is authoritative. "
-    "Use only the returned observations below. Ground every claim in their evidence IDs and "
-    "return the requested finding for the assigned role. The tools_used field must list exactly "
-    "the observation tool names."
+    "The adapter requested each role-scoped MCP observation with at most one shared "
+    "application retry after an explicit retryable structured error. A native MCP client may "
+    "also reconnect or retry at its transport boundary; the recorded audit stream is "
+    "authoritative. Use only the returned observations below. Ground every claim in their "
+    "evidence IDs and return the requested finding for the assigned role. The tools_used field "
+    "must list exactly the observation tool names."
 )
 COMMANDER_SYNTHESIS_INSTRUCTIONS = (
     "Use only specialist claims and evidence identifiers; cite at least two specialist roles; "
@@ -50,7 +52,7 @@ class WorkflowModel(BaseModel):
 
 
 class InvestigationTask(WorkflowModel):
-    """One bounded investigation request; the v0.1 workflow has no retry loop."""
+    """One bounded investigation request; the v0.1 workflow has no model correction loop."""
 
     public_ticket: str
 
@@ -279,7 +281,8 @@ def workflow_contract_payload() -> dict[str, Any]:
             "commander": COMMANDER_SYNTHESIS_INSTRUCTIONS,
         },
         "tool_error_policy": {
-            "application_retries": 0,
+            "retryable_structured_error_retries": MAX_RETRYABLE_TOOL_RETRIES,
+            "non_retryable_error_retries": 0,
             "structured_errors": "normalize_to_workflow_tool_failure",
             "connection_replay": "framework_native_behavior_under_test",
         },
@@ -335,10 +338,12 @@ def structured_tool_payload(result: Any, required_keys: set[str]) -> dict[str, A
 
 
 async def invoke_tool_once(call: Callable[[], Awaitable[Any]]) -> Any:
-    """Normalize native MCP error surfaces without adding an adapter retry."""
+    """Normalize one native MCP attempt without changing an existing failure."""
 
     try:
         result = await call()
+    except WorkflowToolFailure:
+        raise
     except Exception as exc:
         error = _tool_error_from_value(str(exc))
         if error is None:
@@ -360,6 +365,32 @@ async def invoke_tool_once(call: Callable[[], Awaitable[Any]]) -> Any:
             detail=error.message,
         )
     return result
+
+
+async def invoke_tool_with_policy(
+    call: Callable[[], Awaitable[Any]],
+    *,
+    attempt_started: Callable[[], Awaitable[None]],
+    attempt_finished: Callable[[bool], Awaitable[None]],
+) -> Any:
+    """Apply the shared bounded retry policy while metering every dispatch."""
+
+    for attempt in range(MAX_RETRYABLE_TOOL_RETRIES + 1):
+        await attempt_started()
+        try:
+            result = await invoke_tool_once(call)
+        except BaseException as exc:
+            await attempt_finished(False)
+            if (
+                isinstance(exc, WorkflowToolFailure)
+                and exc.retryable
+                and attempt < MAX_RETRYABLE_TOOL_RETRIES
+            ):
+                continue
+            raise
+        await attempt_finished(True)
+        return result
+    raise AssertionError("bounded tool retry loop exhausted without returning or raising")
 
 
 def evidence_ids_from_text(text: str) -> set[str]:

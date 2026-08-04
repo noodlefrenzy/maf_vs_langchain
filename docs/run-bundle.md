@@ -19,6 +19,7 @@ Each execution writes an immutable directory under `runs/<run-id>/`.
 │   └── index.json
 ├── native/
 │   ├── trace-link.json
+│   ├── observer-pair.json
 │   ├── tracing-profile.json
 │   ├── tracing-profile.sha256
 │   ├── traces/
@@ -26,18 +27,31 @@ Each execution writes an immutable directory under `runs/<run-id>/`.
 │   └── framework-topology.json
 └── metrics/
     ├── model.jsonl
-    └── host.jsonl
+    ├── host.jsonl
+    └── control.jsonl
 ```
 
+Interactive development runs may also contain owner-only
+`control/approval-<request-digest>.json` and
+`control/approval-api-audit.jsonl`. A timed-out handler also closes the inbox
+with owner-only `control/approval-closed.json` before terminal teardown, so a
+late decision cannot be accepted. The credential itself is never written to a
+bundle.
+
 The core writer creates this full directory shape and writes immutable
-manifests, events, JSON artifacts, scores, and terminal records. The explicit
+manifests, events, JSON artifacts, scores, terminal records, and three
+versioned metric ledgers. The explicit
 MAF and LangGraph workflow slices populate native approval checkpoints and
 finalize their terminal workflow state into the five scorer artifacts before
 the normalized `run.finished` event. Native MAF and OpenInference/LangChain
 spans are also projected into a redacted local ledger and exported to a
 loopback Phoenix collector when it is reachable. Each completed model call
-emits a content-free `metric.recorded` event with input/output token counts;
-host and GPU metric-file producers remain a future integration layer.
+emits a content-free `metric.recorded` event and `metrics/model.jsonl` preserves
+input/output plus provider-reported cached-input/reasoning token counts without
+turning absent detail into zero. `metrics/host.jsonl` samples host CPU/RAM and
+GPU utilization/memory/power/temperature on the profile's held-constant
+cadence. `metrics/control.jsonl` separates launch, preparation, task,
+finalization, tracing flush, and teardown. See [metrics.md](metrics.md).
 
 ## `manifest.json`
 
@@ -54,11 +68,18 @@ Written before execution and never updated. It contains:
 The separately hashed `native/tracing-profile.json` records the tracing
 endpoint, timeout, and capture/redaction policy before runner launch.
 
+`native/observer-pair.json` is a non-evidentiary live-discovery sidecar. Both
+paired bundles receive the same opaque pair ID and run IDs before the first
+ordered lane starts; the final experiment index remains authoritative for
+replay and inference.
+
 Mutable terminal status belongs in `terminal.json`, not the manifest.
 
 ## `events.jsonl`
 
-Append-only normalized events in observation order. The schema is implemented
+Append-only normalized events in observation order. Every control-plane runner
+event carries both UTC observation time and a system-monotonic timestamp. The
+schema is implemented
 by `agent_lab.contracts.NormalizedEvent`.
 
 Core event families:
@@ -167,7 +188,25 @@ event are retained as unattested partial artifacts and excluded from scoring.
 - the status-specific start/finish and bounded partial-stream contract;
 - event run/lane IDs match the manifest;
 - terminal budgets reconcile with events;
+- metric identities, schemas, monotonic clocks, sampling counts/overhead, phase
+  intervals, and token aggregates reconcile with the terminal/event stream;
 - artifact and native-evidence digests;
+
+`agent-lab report build --index <native-index> ...` is read-only over source
+evidence. It re-runs individual and pair validation, refuses protocol-probe or
+reused bundles, reconstructs left/right order from the frozen pair preflight,
+and writes a new owner-only output directory exclusively. Operational failures
+remain in task-success and reliability denominators; score effects use only
+pairs with two valid scorer outputs and report that analyzed-pair count
+explicitly. Other paired effects cover task/control latency, model/tool calls,
+reported token dimensions, provider timing, client concurrency, host/GPU
+metrics, and native trace coverage, retaining explicit missingness.
+
+The report output contains portable relative links, redacted experiment/run
+evidence, fresh validation results, and a full `private-runs/` copy. A versioned
+`evidence-index.json` records every retained and private file's SHA-256, and its
+sidecar authenticates the index. See [evidence-retention.md](evidence-retention.md)
+for the publication boundary and durable-storage procedure.
 - strict lexical artifact paths (one JSON filename directly under
   `artifacts/`, with no traversal or nested path segments);
 - trace-link identity, local span-ledger digest, event correlation, and

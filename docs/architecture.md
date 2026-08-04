@@ -81,6 +81,12 @@ Framework-native objects do not cross the process boundary. A prepared run
 returns a framework-neutral topology description, effective prompt hashes,
 tool catalog hashes, and checkpoint capability metadata.
 
+The selected production-intended persistence service is Cosmos DB for both
+explicit lanes, using separate framework-native containers. Optional provider
+validation crosses a real process boundary without changing the default local
+bundle backend or its `production_ready = false` claim. See
+[production-checkpoints.md](production-checkpoints.md).
+
 The implemented v0.1 process boundary is the typed JSON-lines protocol
 documented in [runner-protocol.md](runner-protocol.md). Requests pass
 credentials over stdin, persist only a redacted request view, and expose
@@ -120,16 +126,19 @@ untouched and are part of the comparison.
 Both harnesses get:
 
 - the same commander domain prompt;
-- the same three named specialist descriptions;
+- the same configured specialist set and descriptions (three normally, or the
+  same telemetry/change pair in the no-review ablation);
 - the same per-role MCP tools;
 - the same writable artifact directory shape;
 - the same context and output budgets;
 - the same structured completion contract;
 - an outer watchdog enforcing shared limits.
 
-Built-in harness instructions, planning mechanics, compaction, subagent
-protocol, and filesystem abstractions remain native. Their effective prompts
-and tool catalogs are captured for later interpretation.
+Built-in harness instructions, planning mechanics, subagent protocol, and
+filesystem abstractions remain native. Compaction is native in the primary
+profile and can be disabled through one matched ablation control. Effective
+roles, compaction mode, prompts, and tool catalogs are captured for later
+interpretation.
 
 ## MCP world isolation
 
@@ -182,20 +191,24 @@ Native telemetry and normalized events are complementary:
 
 ## Live observer
 
-The recommended implementation is a local FastAPI service plus a small web
-client:
+The implemented observer is a local FastAPI service plus a small web client:
 
 - Server-Sent Events for append-only event delivery;
-- WebSocket or POST only for approval/control messages;
+- bearer-authenticated loopback POST for approval/control messages;
 - two synchronized lane columns;
 - topology, evidence, tool, budget, and state projections;
 - deep links into Phoenix and local artifacts;
 - replay mode over completed `events.jsonl`;
-- no direct connection to model or MCP services.
+- no direct connection to model or MCP services;
+- event-kind payload allowlisting that drops raw text, arbitrary extensions,
+  and every non-public event.
 
-A terminal renderer should consume the same event API for SSH/headless use, but
-the browser view is the primary design because side-by-side temporal
-comparison and drilldown benefit from screen space.
+A Rich renderer consumes the same sanitized pair API for SSH/headless use, but
+the browser view is primary because side-by-side temporal comparison and
+drilldown benefit from screen space. Both lane bundles and their shared live
+discovery context are allocated before ordered execution begins. Interactive
+decisions cross an owner-only file inbox into the existing control-plane
+approval handler and remain bounded by the run deadline.
 
 ## Post-hoc pipeline
 

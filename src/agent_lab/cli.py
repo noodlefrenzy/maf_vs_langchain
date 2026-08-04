@@ -6,6 +6,7 @@ import json
 import platform
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Annotated
 
@@ -20,7 +21,14 @@ from agent_lab.bundle_validation import (
     validate_pair,
 )
 from agent_lab.config import load_experiment, load_model_profile
+from agent_lab.report_builder import build_paired_report, write_paired_report
 from agent_lab.scenario import generate_incident
+from agent_lab.study_design import (
+    estimate_study_sample_size,
+    load_paired_report,
+    load_study_protocol,
+    validate_study_references,
+)
 
 _DEFAULT_REPOSITORY_ROOT = Path.cwd()
 
@@ -32,11 +40,151 @@ experiment_app = typer.Typer(
     no_args_is_help=True,
     help="Launch framework-neutral experiment control-plane operations.",
 )
+report_app = typer.Typer(no_args_is_help=True, help="Build offline paired reports.")
+observer_app = typer.Typer(no_args_is_help=True, help="Observe paired runs live or by replay.")
+study_app = typer.Typer(no_args_is_help=True, help="Validate and size measured-study protocols.")
 app.add_typer(scenario_app, name="scenario")
 app.add_typer(config_app, name="config")
 app.add_typer(bundle_app, name="bundle")
 app.add_typer(experiment_app, name="experiment")
+app.add_typer(report_app, name="report")
+app.add_typer(observer_app, name="observer")
+app.add_typer(study_app, name="study")
 console = Console()
+
+
+@study_app.command("validate")
+def validate_study_protocol(
+    protocol_path: Annotated[Path, typer.Argument(help="Study protocol TOML profile.")],
+    repository_root: Annotated[
+        Path,
+        typer.Option(help="Repository root used to resolve frozen profile references."),
+    ] = _DEFAULT_REPOSITORY_ROOT,
+) -> None:
+    """Validate the preregistration gate without approving a blocked study."""
+
+    try:
+        protocol = load_study_protocol(protocol_path)
+        validate_study_references(protocol, repository_root.resolve())
+    except (OSError, ValidationError, ValueError) as exc:
+        console.print(f"[red]Invalid study protocol:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print_json(protocol.model_dump_json(exclude_none=True))
+
+
+@study_app.command("size")
+def size_study(
+    protocol_path: Annotated[Path, typer.Argument(help="Blocked study protocol TOML profile.")],
+    pilot_report: Annotated[
+        Path,
+        typer.Option("--pilot-report", help="Accepted-model paired-report JSON."),
+    ],
+    repository_root: Annotated[
+        Path,
+        typer.Option(help="Repository root used to resolve frozen profile references."),
+    ] = _DEFAULT_REPOSITORY_ROOT,
+) -> None:
+    """Estimate seed clusters and GPU time from a complete paired pilot."""
+
+    try:
+        protocol = load_study_protocol(protocol_path)
+        validate_study_references(protocol, repository_root.resolve())
+        report = load_paired_report(pilot_report)
+        estimate = estimate_study_sample_size(protocol, report, pilot_report)
+    except (OSError, ValidationError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Could not size study:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print_json(estimate.model_dump_json())
+
+
+@observer_app.command("serve")
+def serve_observer(
+    runs_dir: Annotated[
+        Path,
+        typer.Option(help="Run-bundle and native-workflow index directory."),
+    ] = Path("runs"),
+    host: Annotated[
+        str,
+        typer.Option(help="Loopback interface; non-loopback binds are rejected."),
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option(min=1, max=65535)] = 8787,
+    credential_file: Annotated[
+        Path | None,
+        typer.Option(help="Owner-only approval credential file."),
+    ] = None,
+    operator_id: Annotated[
+        str,
+        typer.Option(help="Audited local identity attached to approval decisions."),
+    ] = "local-observer-operator",
+    read_only: Annotated[
+        bool,
+        typer.Option(help="Disable approval controls and serve only replay/live reads."),
+    ] = False,
+) -> None:
+    """Serve the framework-neutral browser and SSE API on loopback."""
+
+    from agent_lab.observer import build_observer_app, load_or_create_observer_token
+
+    if host != "127.0.0.1":
+        console.print("[red]Observer host must be 127.0.0.1.[/red]")
+        raise typer.Exit(code=1)
+    resolved_runs = runs_dir.resolve()
+    token = None
+    token_path = None
+    if not read_only:
+        token_path = (
+            credential_file.resolve()
+            if credential_file is not None
+            else resolved_runs / ".observer-token"
+        )
+        try:
+            token = load_or_create_observer_token(token_path)
+        except (OSError, ValueError) as exc:
+            console.print(f"[red]Cannot load observer credential:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+    app_instance = build_observer_app(
+        resolved_runs,
+        approval_token=token,
+        operator_id=operator_id,
+    )
+    if token_path is not None:
+        console.print(f"Approval credential: {token_path}")
+    console.print(f"Observer: http://{host}:{port}")
+    import uvicorn
+
+    uvicorn.run(app_instance, host=host, port=port, log_level="info")
+
+
+@observer_app.command("render")
+def render_observer_pair(
+    pair_id: Annotated[str, typer.Argument(help="Opaque pair ID returned by /api/pairs.")],
+    base_url: Annotated[
+        str,
+        typer.Option(help="Loopback observer URL."),
+    ] = "http://127.0.0.1:8787",
+    watch: Annotated[
+        bool,
+        typer.Option(help="Refresh the headless rendering until both lanes are terminal."),
+    ] = False,
+    interval_seconds: Annotated[
+        float,
+        typer.Option(min=0.1, max=60),
+    ] = 1.0,
+) -> None:
+    """Render the same sanitized pair API consumed by the browser UI."""
+
+    from agent_lab.observer import fetch_pair_snapshot, render_pair_snapshot
+
+    while True:
+        try:
+            snapshot = fetch_pair_snapshot(base_url, pair_id)
+            render_pair_snapshot(snapshot, console=console)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            console.print(f"[red]Observer read failed:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+        if not watch or snapshot.get("complete") is True:
+            return
+        time.sleep(interval_seconds)
 
 
 @scenario_app.command("generate")
@@ -119,7 +267,7 @@ def validate_run_pair(
         typer.Option(help="Do not write pair validation sidecars."),
     ] = False,
 ) -> None:
-    """Validate a matched explicit-workflow or harness pair."""
+    """Validate a matched explicit-workflow, harness, or single-agent pair."""
 
     result = validate_pair(left, right, mark=not no_mark)
     if json_output:
@@ -201,6 +349,73 @@ def run_experiment_probe(
     console.print_json(data=payload)
 
 
+@experiment_app.command("plan")
+def plan_experiment(
+    experiment: Annotated[
+        Path,
+        typer.Option(
+            "--experiment",
+            "-e",
+            help="Experiment profile to resolve without starting services.",
+        ),
+    ] = Path("configs/experiments/smoke.toml"),
+    order_seed: Annotated[
+        int,
+        typer.Option(help="Recorded seed for deterministic lane ordering."),
+    ] = 1729,
+    repository_root: Annotated[
+        Path,
+        typer.Option(help="Repository root containing runner/service projects."),
+    ] = _DEFAULT_REPOSITORY_ROOT,
+) -> None:
+    """Validate one profile through the execution planner without running it."""
+
+    uv = shutil.which("uv")
+    if uv is None:
+        console.print("[red]Cannot plan experiment: uv is not on PATH.[/red]")
+        raise typer.Exit(code=1)
+    root = repository_root.resolve()
+    command = [
+        uv,
+        "run",
+        "--project",
+        str(root / "services/incident_mcp"),
+        "--no-sync",
+        "python",
+        "-m",
+        "incident_lab_mcp.experiment_control",
+        "--repository-root",
+        str(root),
+        "--experiment",
+        str(experiment),
+        "--order-seed",
+        str(order_seed),
+        "--mode",
+        "plan",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        if result.stderr:
+            console.print(result.stderr.rstrip())
+        if result.stdout:
+            console.print(result.stdout.rstrip())
+        raise typer.Exit(code=result.returncode)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        console.print("[red]Experiment planner returned invalid JSON.[/red]")
+        if result.stderr:
+            console.print(result.stderr.rstrip())
+        raise typer.Exit(code=1) from exc
+    console.print_json(data=payload)
+
+
 @experiment_app.command("run")
 def run_native_workflow_experiment(
     experiment: Annotated[
@@ -272,6 +487,45 @@ def run_native_workflow_experiment(
             console.print(result.stderr.rstrip())
         raise typer.Exit(code=1) from exc
     console.print_json(data=payload)
+
+
+@report_app.command("build")
+def build_report(
+    indices: Annotated[
+        list[Path],
+        typer.Option(
+            "--index",
+            "-i",
+            help="Native-workflow experiment index; repeat for multiple tracks.",
+        ),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", "-o", help="New report output directory."),
+    ] = Path("reports/latest"),
+    bootstrap_seed: Annotated[
+        int,
+        typer.Option(help="Deterministic paired-bootstrap seed."),
+    ] = 1729,
+    bootstrap_resamples: Annotated[
+        int,
+        typer.Option(help="Number of paired-bootstrap resamples."),
+    ] = 10_000,
+) -> None:
+    """Revalidate immutable pairs and produce JSON plus self-contained HTML."""
+
+    try:
+        report = build_paired_report(
+            indices,
+            bootstrap_seed=bootstrap_seed,
+            bootstrap_resamples=bootstrap_resamples,
+        )
+        json_path, html_path = write_paired_report(report, output_dir)
+    except (OSError, ValidationError, ValueError) as exc:
+        console.print(f"[red]Could not build report:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(f"Wrote {json_path}")
+    console.print(f"Wrote {html_path}")
 
 
 @app.command()

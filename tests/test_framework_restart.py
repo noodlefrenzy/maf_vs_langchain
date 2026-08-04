@@ -135,4 +135,8 @@ def test_native_framework_and_world_resume_across_process_restart(
         assert stat.S_IMODE(native_checkpoint.stat().st_mode) == 0o600
         assert stat.S_IMODE(native_checkpoint.parent.stat().st_mode) == 0o700
         native_payload = native_checkpoint.read_text()
+        checkpoint_envelope = json.loads(native_payload)
+        assert checkpoint_envelope["schema_version"] == "agent-lab-langgraph-checkpoint/v2"
+        assert checkpoint_envelope["operations"]
+        assert not ({"storage", "writes", "blobs"} & checkpoint_envelope.keys())
     assert "approval_token" not in native_payload

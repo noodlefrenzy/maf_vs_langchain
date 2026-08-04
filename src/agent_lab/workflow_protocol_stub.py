@@ -31,6 +31,7 @@ def _descriptor() -> NativeRunnerDescriptor:
                 resumable=True,
                 restart_safe=True,
                 format="stub-json",
+                production_ready=False,
             )
         },
     )
@@ -171,6 +172,31 @@ async def _execute_invalid_arguments(
     )
 
 
+async def _execute_interleaved_tool_timeout(
+    request: RunRequest,
+    _approval_provider: ApprovalProvider,
+    telemetry: WorkflowTelemetry,
+) -> dict[str, object]:
+    await telemetry.tool_started(
+        actor="change_investigator",
+        tool_name="list_recent_changes",
+    )
+    await telemetry.tool_finished(
+        actor="change_investigator",
+        tool_name="list_recent_changes",
+        succeeded=False,
+    )
+    await telemetry.model_started(
+        actor="telemetry_investigator",
+        model=request.manifest.model.name,
+    )
+    raise WorkflowToolFailure(
+        code="transient_timeout",
+        retryable=True,
+        detail="hermetic interleaved tool error",
+    )
+
+
 async def _execute_gate_failure(
     _request: RunRequest,
     _approval_provider: ApprovalProvider,
@@ -221,6 +247,7 @@ def main() -> None:
             "model_timeout",
             "tool_service",
             "tool_timeout",
+            "interleaved_tool_timeout",
             "invalid_arguments",
             "gate_failure",
             "parallel_interleave",
@@ -233,6 +260,7 @@ def main() -> None:
         "model_timeout": _execute_model_timeout,
         "tool_service": _execute_tool_failure,
         "tool_timeout": _execute_tool_timeout,
+        "interleaved_tool_timeout": _execute_interleaved_tool_timeout,
         "invalid_arguments": _execute_invalid_arguments,
         "gate_failure": _execute_gate_failure,
         "parallel_interleave": _execute_parallel_interleave,

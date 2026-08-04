@@ -50,6 +50,7 @@ async def run_live_maf_workflow(base_url: str, model: str) -> dict[str, object]:
         ttl_seconds=600,
         fault_profile="none",
     )
+    # Fixed non-production key: this hermetic probe needs reproducibility, not secrecy.
     signer = RunCredentialSigner(secret=b"m" * 32)
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

@@ -1,4 +1,6 @@
+import base64
 import json
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -31,7 +33,6 @@ def _endpoint_payloads() -> tuple[dict[str, Any], dict[str, Any]]:
     props = {
         "model_path": f"/models/snapshots/{revision}/model-q4.gguf",
         "model_alias": "org/model:Q4",
-        "model_ftype": "Q4_K - Medium",
         "chat_template": "{{ messages }}",
         "chat_template_caps": {"supports_tools": True},
         "build_info": "b100-test",
@@ -72,6 +73,32 @@ def _endpoint_payloads() -> tuple[dict[str, Any], dict[str, Any]]:
     return props, models
 
 
+def _encoded_cmdline(*arguments: str) -> str:
+    return base64.b64encode(b"\0".join(item.encode() for item in arguments) + b"\0").decode()
+
+
+def _encoded_ps_cmdline(process_line: str) -> str:
+    tokens = shlex.split(process_line)
+    assert tokens[0].isdigit()
+    return _encoded_cmdline(*tokens[1:])
+
+
+def _replace_runner_arguments(
+    output: str,
+    command: list[str] | tuple[str, ...],
+    old: tuple[str, ...],
+    new: tuple[str, ...],
+) -> str:
+    if command[:2] == ["base64", "-w0"]:
+        payload = base64.b64decode(output)
+        old_bytes = b"\0".join(item.encode() for item in old) + b"\0"
+        new_bytes = b"\0".join(item.encode() for item in new)
+        if new:
+            new_bytes += b"\0"
+        return base64.b64encode(payload.replace(old_bytes, new_bytes)).decode()
+    return output.replace(f"{' '.join(old)} ", f"{' '.join(new)} ")
+
+
 def _command_runner(command: list[str] | tuple[str, ...], _timeout: float) -> str:
     if command[:2] == ["uname", "-a"]:
         return "Linux inference-host 7.0 x86_64\n"
@@ -80,6 +107,8 @@ def _command_runner(command: list[str] | tuple[str, ...], _timeout: float) -> st
             "123 /opt/llama-server -hf org/model:Q4 --ctx-size 8192 --jinja "
             "-ngl 99 --host 127.0.0.1\n"
         )
+    if command == ["base64", "-w0", "/proc/123/cmdline"]:
+        return _encoded_ps_cmdline(_command_runner(["ps", "-eo", "pid=,args="], _timeout))
     if command[:2] == ["vulkaninfo", "--summary"]:
         return """Vulkan Instance Version: 1.4.341
 GPU0:
@@ -124,6 +153,63 @@ def _vllm_command_runner(command: list[str] | tuple[str, ...], _timeout: float) 
             "--enable-prompt-tokens-details "
             "--language-model-only\n"
         )
+    if command == ["base64", "-w0", "/proc/456/cmdline"]:
+        return _encoded_ps_cmdline(_vllm_command_runner(["ps", "-eo", "pid=,args="], _timeout))
+    if command[:2] == ["nvidia-smi", "--query-gpu=name,uuid,driver_version,memory.total"]:
+        return "NVIDIA GeForce RTX 4090, GPU-test, 610.74, 24564\n"
+    if command == ["nvidia-smi"]:
+        return "NVIDIA-SMI 610.53 Driver Version: 610.74 CUDA Version: 13.3\n"
+    raise AssertionError(f"unexpected command: {command}")
+
+
+def _qwen27b_command_runner(command: list[str] | tuple[str, ...], _timeout: float) -> str:
+    if command[:2] == ["uname", "-a"]:
+        return "Linux tower 7.0 x86_64\n"
+    if command[:3] == ["ps", "-eo", "pid=,args="]:
+        return (
+            "987 /opt/llama-server "
+            "--model /models/snapshots/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/model-q4.gguf "
+            "--alias bartowski/Qwen_Qwen3.5-27B-GGUF:Q4_K_M "
+            "--host 127.0.0.1 --port 8002 --ctx-size 32768 --parallel 2 "
+            "--n-gpu-layers 99 --fit off --flash-attn on "
+            "--cache-type-k q8_0 --cache-type-v q8_0 --cache-ram 8192 "
+            "--batch-size 2048 --ubatch-size 512 --threads 16 --threads-batch 16 "
+            "--seed 1729 --jinja --chat-template-kwargs '{\"enable_thinking\":true}' "
+            "--reasoning on --reasoning-format deepseek --cont-batching --metrics --slots "
+            "--no-context-shift --no-ui\n"
+        )
+    if command == ["base64", "-w0", "/proc/987/cmdline"]:
+        return _encoded_ps_cmdline(_qwen27b_command_runner(["ps", "-eo", "pid=,args="], _timeout))
+    if command[:2] == ["nvidia-smi", "--query-gpu=name,uuid,driver_version,memory.total"]:
+        return "NVIDIA GeForce RTX 4090, GPU-test, 610.74, 24564\n"
+    if command == ["nvidia-smi"]:
+        return "NVIDIA-SMI 610.53 Driver Version: 610.74 CUDA Version: 13.3\n"
+    raise AssertionError(f"unexpected command: {command}")
+
+
+def _vllm_35b_command_runner(command: list[str] | tuple[str, ...], _timeout: float) -> str:
+    revision = "e" * 40
+    if command[:2] == ["uname", "-a"]:
+        return "Linux tower 7.0 x86_64\n"
+    if command[:3] == ["ps", "-eo", "pid=,args="]:
+        return (
+            "789 /opt/vllm/bin/vllm serve Qwen/Qwen3.5-35B-A3B-GPTQ-Int4 "
+            "--served-model-name Qwen/Qwen3.5-35B-A3B-GPTQ-Int4 "
+            f"--revision {revision} --tokenizer-revision {revision} "
+            "--tokenizer Qwen/Qwen3.5-35B-A3B-GPTQ-Int4 --max-model-len 16384 "
+            "--max-num-batched-tokens 8192 --max-num-seqs 2 "
+            "--host 127.0.0.1 --port 8002 --dtype bfloat16 "
+            "--load-format safetensors --quantization moe_wna16 "
+            "--tensor-parallel-size 1 --gpu-memory-utilization 0.75 "
+            "--cpu-offload-gb 8 --seed 1729 --generation-config vllm "
+            "--reasoning-parser qwen3 --tool-call-parser qwen3_coder "
+            "--enable-auto-tool-choice --enable-chunked-prefill "
+            "--enable-prefix-caching --enable-tokenizer-info-endpoint "
+            "--enable-force-include-usage --enable-per-request-metrics "
+            "--enable-prompt-tokens-details --language-model-only\n"
+        )
+    if command == ["base64", "-w0", "/proc/789/cmdline"]:
+        return _encoded_ps_cmdline(_vllm_35b_command_runner(["ps", "-eo", "pid=,args="], _timeout))
     if command[:2] == ["nvidia-smi", "--query-gpu=name,uuid,driver_version,memory.total"]:
         return "NVIDIA GeForce RTX 4090, GPU-test, 610.74, 24564\n"
     if command == ["nvidia-smi"]:
@@ -285,6 +371,104 @@ def test_model_runtime_attestation_excludes_volatile_endpoint_state(
     assert first["endpoint_identity_sha256"] == second["endpoint_identity_sha256"]
 
 
+def test_qwen27b_runtime_attestation_enforces_preregistered_serve_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    props, models = _endpoint_payloads()
+    model_name = "bartowski/Qwen_Qwen3.5-27B-GGUF:Q4_K_M"
+    props.update(
+        {
+            "model_alias": model_name,
+            "total_slots": 2,
+            "endpoint_metrics": True,
+            "endpoint_slots": True,
+            "ui": False,
+        }
+    )
+    props["default_generation_settings"]["params"].update(
+        {"reasoning_format": "deepseek", "reasoning_in_content": False}
+    )
+    models["data"][0].update({"id": model_name, "aliases": [model_name]})
+    models["data"][0]["meta"]["n_ctx"] = 16384
+
+    def fetch(url: str, _timeout: float) -> dict[str, Any]:
+        return props if url.endswith("/props") else models
+
+    monkeypatch.setattr("agent_lab.execution_provenance._fetch_json", fetch)
+    profile = _profile().model_copy(
+        update={
+            "name": model_name,
+            "base_url": "http://127.0.0.1:8002/v1",
+            "context_window_tokens": 16384,
+            "seed": 1729,
+            "thinking": True,
+        }
+    )
+
+    result = attest_model_runtime(
+        profile,
+        InferenceRuntimeProfile(
+            server_kind="llama_cpp",
+            compute_backend="nvidia",
+            process_name="llama-server",
+        ),
+        command_runner=_qwen27b_command_runner,
+    )
+
+    assert result["collection_status"] == "complete"
+    assert result["server"]["serve_process"]["flags"]["--n-gpu-layers"] == "99"
+
+
+def test_qwen27b_runtime_attestation_rejects_operating_point_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    props, models = _endpoint_payloads()
+    model_name = "bartowski/Qwen_Qwen3.5-27B-GGUF:Q4_K_M"
+    props.update(
+        {
+            "model_alias": model_name,
+            "total_slots": 2,
+            "endpoint_metrics": True,
+            "endpoint_slots": True,
+            "ui": False,
+        }
+    )
+    models["data"][0].update({"id": model_name, "aliases": [model_name]})
+    models["data"][0]["meta"]["n_ctx"] = 16384
+    monkeypatch.setattr(
+        "agent_lab.execution_provenance._fetch_json",
+        lambda url, _timeout: props if url.endswith("/props") else models,
+    )
+
+    def drifted(command: list[str] | tuple[str, ...], timeout: float) -> str:
+        return _replace_runner_arguments(
+            _qwen27b_command_runner(command, timeout),
+            command,
+            ("--n-gpu-layers", "99"),
+            ("--n-gpu-layers", "80"),
+        )
+
+    profile = _profile().model_copy(
+        update={
+            "name": model_name,
+            "base_url": "http://127.0.0.1:8002/v1",
+            "context_window_tokens": 16384,
+            "seed": 1729,
+            "thinking": True,
+        }
+    )
+    with pytest.raises(ValueError, match="--n-gpu-layers"):
+        attest_model_runtime(
+            profile,
+            InferenceRuntimeProfile(
+                server_kind="llama_cpp",
+                compute_backend="nvidia",
+                process_name="llama-server",
+            ),
+            command_runner=drifted,
+        )
+
+
 def test_vllm_runtime_attestation_hashes_pinned_model_tokenizer_and_serve_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -346,6 +530,105 @@ def test_vllm_runtime_attestation_hashes_pinned_model_tokenizer_and_serve_contra
     assert len(result["attestation_sha256"]) == 64
 
 
+def test_vllm_runtime_attestation_accepts_pinned_35b_offload_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_name = "Qwen/Qwen3.5-35B-A3B-GPTQ-Int4"
+
+    def fetch(url: str, _timeout: float) -> dict[str, Any]:
+        if url.endswith("/models"):
+            return {"data": [{"id": model_name}]}
+        if url.endswith("/version"):
+            return {"version": "0.26.0.dev"}
+        if url.endswith("/tokenizer_info"):
+            return {"tokenizer_class": "Qwen2TokenizerFast", "chat_template": "template"}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr("agent_lab.execution_provenance._fetch_json", fetch)
+    monkeypatch.setattr(
+        "agent_lab.execution_provenance._post_json",
+        lambda _url, _payload, _timeout: {"count": 4, "max_model_len": 16384},
+    )
+    profile = _profile().model_copy(
+        update={
+            "name": model_name,
+            "base_url": "http://127.0.0.1:8002/v1",
+            "context_window_tokens": 16384,
+            "seed": 1729,
+        }
+    )
+
+    result = attest_model_runtime(
+        profile,
+        InferenceRuntimeProfile(
+            server_kind="vllm",
+            compute_backend="nvidia",
+            process_name="vllm",
+        ),
+        command_runner=_vllm_35b_command_runner,
+    )
+
+    assert result["artifact"]["revision"] == "e" * 40
+    assert result["artifact"]["load_format"] == "safetensors"
+    assert result["artifact"]["quantization"] == "moe_wna16"
+    assert result["server"]["serve_process"]["flags"]["--cpu-offload-gb"] == "8"
+
+
+def test_vllm_runtime_attestation_excludes_response_local_model_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request_count = 0
+
+    def fetch(url: str, _timeout: float) -> dict[str, Any]:
+        nonlocal request_count
+        if url.endswith("/models"):
+            request_count += 1
+            return {
+                "data": [
+                    {
+                        "id": "Qwen/Qwen3.5-9B",
+                        "created": request_count,
+                        "permission": [
+                            {
+                                "id": f"modelperm-{request_count}",
+                                "created": request_count,
+                                "allow_sampling": True,
+                            }
+                        ],
+                    }
+                ]
+            }
+        if url.endswith("/version"):
+            return {"version": "0.24.0+test"}
+        if url.endswith("/tokenizer_info"):
+            return {"tokenizer_class": "Qwen2TokenizerFast", "chat_template": "template"}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr("agent_lab.execution_provenance._fetch_json", fetch)
+    monkeypatch.setattr(
+        "agent_lab.execution_provenance._post_json",
+        lambda _url, _payload, _timeout: {"count": 4, "max_model_len": 32768},
+    )
+    profile = _profile().model_copy(
+        update={
+            "name": "Qwen/Qwen3.5-9B",
+            "base_url": "http://127.0.0.1:8001/v1",
+            "context_window_tokens": 32768,
+        }
+    )
+    runtime = InferenceRuntimeProfile(
+        server_kind="vllm",
+        compute_backend="nvidia",
+        process_name="vllm",
+    )
+
+    first = attest_model_runtime(profile, runtime, command_runner=_vllm_command_runner)
+    second = attest_model_runtime(profile, runtime, command_runner=_vllm_command_runner)
+
+    assert first["attestation_sha256"] == second["attestation_sha256"]
+    assert first["endpoint_identity_sha256"] == second["endpoint_identity_sha256"]
+
+
 def test_vllm_runtime_attestation_rejects_missing_required_serve_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -365,7 +648,12 @@ def test_vllm_runtime_attestation_rejects_missing_required_serve_flag(
     )
 
     def missing_prefix_cache(command: list[str] | tuple[str, ...], timeout: float) -> str:
-        return _vllm_command_runner(command, timeout).replace("--enable-prefix-caching ", "")
+        return _replace_runner_arguments(
+            _vllm_command_runner(command, timeout),
+            command,
+            ("--enable-prefix-caching",),
+            (),
+        )
 
     profile = _profile().model_copy(
         update={
@@ -405,9 +693,11 @@ def test_vllm_runtime_attestation_rejects_unquantized_qwen_profile(
     )
 
     def unquantized(command: list[str] | tuple[str, ...], timeout: float) -> str:
-        return _vllm_command_runner(command, timeout).replace(
-            "--load-format bitsandbytes --quantization bitsandbytes ",
-            "--load-format safetensors ",
+        return _replace_runner_arguments(
+            _vllm_command_runner(command, timeout),
+            command,
+            ("--load-format", "bitsandbytes", "--quantization", "bitsandbytes"),
+            ("--load-format", "safetensors"),
         )
 
     profile = _profile().model_copy(

@@ -19,6 +19,14 @@ dependencies = [
   "opentelemetry-sdk>=1.39,<2",
 ]
 
+[dependency-groups]
+checkpoint-production = [
+  "langchain-azure-cosmosdb==1.0.0",
+]
+
+[tool.uv]
+exclude-newer = "72 hours"
+
 [tool.uv.sources]
 agent-framework-field-lab = { path = "../..", editable = true }
 

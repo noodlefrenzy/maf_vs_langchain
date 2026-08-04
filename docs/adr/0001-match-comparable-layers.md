@@ -1,6 +1,6 @@
 # ADR 0001: Match comparable framework layers
 
-Status: Proposed
+Status: Accepted
 
 Date: 2026-07-31
 
@@ -21,13 +21,16 @@ Run two primary tracks:
 2. Agent Framework Harness vs Deep Agents with matched domain roles,
    capabilities, budgets, and completion contract.
 
-Include an unrestricted and compute-matched single-agent baseline. Report
-results by track; do not collapse them into one ecosystem score.
+Include a third matched track for the unrestricted and compute-matched
+single-agent baselines: primitive Agent Framework `Agent` vs LangChain
+`create_agent`, each with one model-driven agent and the same union discovery
+catalog. Report results by track; do not collapse them into one ecosystem
+score.
 
 ## Consequences
 
 - The comparison answers narrower, more actionable questions.
-- Four implementations are required instead of two.
+- Six implementations are required instead of two.
 - Framework-native defaults remain visible in the harness track.
 - The explicit workflow provides a controlled topology baseline.
 - Cross-track differences are descriptive, not evidence of ecosystem

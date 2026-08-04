@@ -5,15 +5,15 @@ import asyncio
 import json
 import sys
 import tempfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 
 from agent_framework import (
     Agent,
+    CheckpointStorage,
     Executor,
-    FileCheckpointStorage,
     MCPStreamableHTTPTool,
     Workflow,
     WorkflowBuilder,
@@ -22,7 +22,6 @@ from agent_framework import (
     handler,
     response_handler,
 )
-from agent_framework.openai import OpenAIChatCompletionClient
 from httpx import AsyncClient, Timeout
 from openai import AsyncOpenAI
 
@@ -50,14 +49,19 @@ from agent_lab.workflow_contracts import (
     commander_synthesis_prompt,
     evaluate_evidence,
     evidence_ids_from_text,
-    invoke_tool_once,
+    invoke_tool_with_policy,
     observation_calls,
     render_tool_result,
     specialist_observation_prompt,
     structured_tool_payload,
 )
-from agent_lab.workflow_errors import EvidenceGateFailed
+from agent_lab.workflow_errors import EvidenceGateFailed, WorkflowToolFailure
 from agent_lab.workflow_telemetry import NOOP_WORKFLOW_TELEMETRY, WorkflowTelemetry
+from maf_runner.chat_telemetry import (
+    ProviderMetricsOpenAIChatCompletionClient,
+    provider_telemetry,
+)
+from maf_runner.checkpoint_storage import OwnerOnlyCheckpointStorage
 
 Investigator = Callable[["InvestigationTask"], Awaitable["SpecialistFinding"]]
 Commander = Callable[[list["SpecialistFinding"]], Awaitable["CommanderSynthesis"]]
@@ -93,11 +97,43 @@ class _TrackingMCPStreamableHTTPTool(MCPStreamableHTTPTool):
         return await super().call_tool(tool_name, **kwargs)
 
 
-class _OwnerOnlyCheckpointStorage(FileCheckpointStorage):
-    async def save(self, checkpoint: WorkflowCheckpoint) -> str:
-        checkpoint_id = await super().save(checkpoint)
-        (self.storage_path / f"{checkpoint_id}.json").chmod(0o600)
-        return checkpoint_id
+class _ActiveInvestigationTasks:
+    """Track MAF fan-out handlers so an escaped sibling failure can drain them."""
+
+    def __init__(self) -> None:
+        self._tasks: set[asyncio.Task[Any]] = set()
+
+    def wrap(self, investigator: Investigator) -> Investigator:
+        async def tracked(task: InvestigationTask) -> SpecialistFinding:
+            current = asyncio.current_task()
+            if current is None:
+                raise RuntimeError("MAF investigator is not running inside an asyncio task")
+            self._tasks.add(current)
+            try:
+                return await investigator(task)
+            finally:
+                self._tasks.discard(current)
+
+        return tracked
+
+    async def cancel_and_drain(self) -> None:
+        pending = list(self._tasks)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def _run_initial_workflow(
+    workflow: Workflow,
+    payload: dict[str, Any],
+    active_investigations: _ActiveInvestigationTasks,
+) -> Any:
+    try:
+        return await workflow.run(payload)
+    except BaseException:
+        await active_investigations.cancel_and_drain()
+        raise
 
 
 class _Dispatcher(Executor):
@@ -303,7 +339,7 @@ def build_approved_workflow(
     commander: Commander,
     preparer: MitigationPreparer,
     executor: MitigationExecutor,
-    checkpoint_storage: FileCheckpointStorage,
+    checkpoint_storage: CheckpointStorage,
 ) -> Workflow:
     """Build the full native workflow through approval, mitigation, and recovery."""
 
@@ -336,6 +372,29 @@ def build_approved_workflow(
     )
 
 
+def _select_approval_checkpoint(
+    checkpoints: Sequence[WorkflowCheckpoint], request_id: str
+) -> WorkflowCheckpoint:
+    """Select the checkpoint that actually owns the pending approval request."""
+
+    matches = [
+        checkpoint
+        for checkpoint in checkpoints
+        if request_id in checkpoint.pending_request_info_events
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            "MAF workflow did not persist exactly one checkpoint for pending approval "
+            f"{request_id!r}; found {len(matches)}"
+        )
+    return matches[0]
+
+
+async def _approval_checkpoint(storage: CheckpointStorage, request_id: str) -> WorkflowCheckpoint:
+    checkpoints = await storage.list_checkpoints(workflow_name="agent-lab-maf-explicit-approved-v1")
+    return _select_approval_checkpoint(checkpoints, request_id)
+
+
 class MafRoleAgent:
     """One MAF agent bound to exactly one role endpoint and shared model profile."""
 
@@ -361,7 +420,7 @@ class MafRoleAgent:
             max_retries=0,
             default_headers=model_request_headers("maf", role.value),
         )
-        client = OpenAIChatCompletionClient(
+        client = ProviderMetricsOpenAIChatCompletionClient(
             model=profile.name,
             async_client=sdk,
             function_invocation_configuration={
@@ -431,6 +490,14 @@ class MafRoleAgent:
             model=self.profile.name,
             input_tokens=int(usage.get("input_token_count", 0)),
             output_tokens=int(usage.get("output_token_count", 0)),
+            cached_input_tokens=_optional_usage(usage, "cache_read_input_token_count"),
+            reasoning_tokens=_optional_usage(usage, "reasoning_output_token_count"),
+            parser_outcome=(
+                "structured_parse_succeeded"
+                if isinstance(response.value, SpecialistFinding)
+                else "structured_parse_failed"
+            ),
+            **provider_telemetry(response),
         )
         if not isinstance(response.value, SpecialistFinding):
             raise TypeError(f"{self.role.value} did not return a SpecialistFinding")
@@ -464,23 +531,22 @@ class MafRoleAgent:
         return finding
 
     async def _call_tool(self, tool_name: str, **arguments: Any) -> Any:
-        self.stats = self.stats.tool_dispatched()
-        await self.telemetry.tool_started(actor=self.role.value, tool_name=tool_name)
-        try:
-            result = await invoke_tool_once(lambda: self._mcp.call_tool(tool_name, **arguments))
-        except Exception:
+        async def attempt_started() -> None:
+            self.stats = self.stats.tool_dispatched()
+            await self.telemetry.tool_started(actor=self.role.value, tool_name=tool_name)
+
+        async def attempt_finished(succeeded: bool) -> None:
             await self.telemetry.tool_finished(
                 actor=self.role.value,
                 tool_name=tool_name,
-                succeeded=False,
+                succeeded=succeeded,
             )
-            raise
-        await self.telemetry.tool_finished(
-            actor=self.role.value,
-            tool_name=tool_name,
-            succeeded=True,
+
+        return await invoke_tool_with_policy(
+            lambda: self._mcp.call_tool(tool_name, **arguments),
+            attempt_started=attempt_started,
+            attempt_finished=attempt_finished,
         )
-        return result
 
 
 class MafCommanderAgent:
@@ -508,7 +574,10 @@ class MafCommanderAgent:
                 AgentRole.INCIDENT_COMMANDER.value,
             ),
         )
-        client = OpenAIChatCompletionClient(model=profile.name, async_client=sdk)
+        client = ProviderMetricsOpenAIChatCompletionClient(
+            model=profile.name,
+            async_client=sdk,
+        )
         self.agent = Agent(
             client,
             name=AgentRole.INCIDENT_COMMANDER.value,
@@ -562,6 +631,14 @@ class MafCommanderAgent:
             model=self.profile.name,
             input_tokens=int(usage.get("input_token_count", 0)),
             output_tokens=int(usage.get("output_token_count", 0)),
+            cached_input_tokens=_optional_usage(usage, "cache_read_input_token_count"),
+            reasoning_tokens=_optional_usage(usage, "reasoning_output_token_count"),
+            parser_outcome=(
+                "structured_parse_succeeded"
+                if isinstance(response.value, CommanderSynthesis)
+                else "structured_parse_failed"
+            ),
+            **provider_telemetry(response),
         )
         if not isinstance(response.value, CommanderSynthesis):
             raise TypeError("incident commander did not return a CommanderSynthesis")
@@ -622,23 +699,28 @@ class MafCommanderAgent:
 
     async def _call_tool(self, tool_name: str, **arguments: Any) -> Any:
         actor = AgentRole.INCIDENT_COMMANDER.value
-        self.stats = self.stats.tool_dispatched()
-        await self.telemetry.tool_started(actor=actor, tool_name=tool_name)
-        try:
-            result = await invoke_tool_once(lambda: self._mcp.call_tool(tool_name, **arguments))
-        except Exception:
+
+        async def attempt_started() -> None:
+            self.stats = self.stats.tool_dispatched()
+            await self.telemetry.tool_started(actor=actor, tool_name=tool_name)
+
+        async def attempt_finished(succeeded: bool) -> None:
             await self.telemetry.tool_finished(
                 actor=actor,
                 tool_name=tool_name,
-                succeeded=False,
+                succeeded=succeeded,
             )
-            raise
-        await self.telemetry.tool_finished(
-            actor=actor,
-            tool_name=tool_name,
-            succeeded=True,
+
+        return await invoke_tool_with_policy(
+            lambda: self._mcp.call_tool(tool_name, **arguments),
+            attempt_started=attempt_started,
+            attempt_finished=attempt_finished,
         )
-        return result
+
+
+def _optional_usage(usage: dict[str, Any], key: str) -> int | None:
+    value = usage.get(key)
+    return int(value) if value is not None else None
 
 
 async def run_live_investigation(request: RunRequest) -> dict[str, Any]:
@@ -659,12 +741,15 @@ async def run_live_investigation(request: RunRequest) -> dict[str, Any]:
                 request.role_endpoints[AgentRole.INCIDENT_COMMANDER], request.manifest.model
             )
         )
+        active_investigations = _ActiveInvestigationTasks()
         workflow = build_investigation_workflow(
-            {role: agent.investigate for role, agent in agents.items()},
+            {role: active_investigations.wrap(agent.investigate) for role, agent in agents.items()},
             commander_agent.synthesize,
         )
-        result = await workflow.run(
-            InvestigationTask(public_ticket=request.public_ticket).model_dump(mode="json")
+        result = await _run_initial_workflow(
+            workflow,
+            InvestigationTask(public_ticket=request.public_ticket).model_dump(mode="json"),
+            active_investigations,
         )
         outputs = [EvidencePacket.model_validate(output) for output in result.get_outputs()]
         if len(outputs) != 1:
@@ -696,7 +781,7 @@ async def run_live_approved(
         raise ValueError(f"run request is missing workflow endpoints: {missing}")
     request.paths.checkpoints.mkdir(parents=True, exist_ok=True, mode=0o700)
     request.paths.checkpoints.chmod(0o700)
-    storage = _OwnerOnlyCheckpointStorage(request.paths.checkpoints)
+    storage = OwnerOnlyCheckpointStorage(request.paths.checkpoints)
     approval_tokens: dict[str, str] = {}
 
     async with AsyncExitStack() as stack:
@@ -724,19 +809,21 @@ async def run_live_approved(
                 raise RuntimeError("approved mitigation token was not available in process memory")
             return await commander_agent.apply_and_verify(request_id, token)
 
+        active_investigations = _ActiveInvestigationTasks()
         workflow = build_approved_workflow(
-            {role: agent.investigate for role, agent in agents.items()},
+            {role: active_investigations.wrap(agent.investigate) for role, agent in agents.items()},
             commander_agent.synthesize,
             commander_agent.prepare_mitigation,
             execute,
             storage,
         )
-        initial = await workflow.run(
-            InvestigationTask(public_ticket=request.public_ticket).model_dump(mode="json")
+        initial = await _run_initial_workflow(
+            workflow,
+            InvestigationTask(public_ticket=request.public_ticket).model_dump(mode="json"),
+            active_investigations,
         )
         requests = initial.get_request_info_events()
-        latest = await storage.get_latest(workflow_name="agent-lab-maf-explicit-approved-v1")
-        if len(requests) != 1 or latest is None:
+        if len(requests) != 1:
             packets = [
                 EvidencePacket.model_validate(output)
                 for output in initial.get_outputs()
@@ -747,6 +834,7 @@ async def run_live_approved(
             raise RuntimeError("MAF workflow did not persist exactly one approval request")
         approval_event = requests[0]
         envelope = ApprovalEnvelope.model_validate(approval_event.data)
+        approval_checkpoint = await _approval_checkpoint(storage, envelope.request.request_id)
         if approval_provider is None:
             _emit_json_line(
                 {
@@ -771,7 +859,7 @@ async def run_live_approved(
                 raise ValueError("approved response requires an action ID, description, and token")
             approval_tokens[response.request_id] = response.approval_token
         resumed = await workflow.run(
-            checkpoint_id=latest.checkpoint_id,
+            checkpoint_id=approval_checkpoint.checkpoint_id,
             checkpoint_storage=storage,
             responses={response.request_id: response.model_dump(mode="json")},
         )
@@ -926,7 +1014,7 @@ async def _deterministic_approval_probe(
         return mitigation, recovery
 
     with tempfile.TemporaryDirectory(prefix="agent-lab-maf-approved-probe-") as raw_path:
-        storage = _OwnerOnlyCheckpointStorage(Path(raw_path))
+        storage = OwnerOnlyCheckpointStorage(Path(raw_path))
         workflow = build_approved_workflow(
             investigators,
             synthesize,
@@ -938,10 +1026,10 @@ async def _deterministic_approval_probe(
             InvestigationTask(public_ticket="deterministic probe").model_dump(mode="json")
         )
         requests = initial.get_request_info_events()
-        latest = await storage.get_latest(workflow_name="agent-lab-maf-explicit-approved-v1")
-        if len(requests) != 1 or latest is None:
+        if len(requests) != 1:
             raise RuntimeError("deterministic MAF workflow did not pause for approval")
         request_id = requests[0].request_id
+        approval_checkpoint = await _approval_checkpoint(storage, request_id)
         response: dict[str, str] = {
             "request_id": request_id,
             "decision": decision.value,
@@ -952,7 +1040,7 @@ async def _deterministic_approval_probe(
             )
             response["action_to_execute"] = "apply the reversible runbook action"
         resumed = await workflow.run(
-            checkpoint_id=latest.checkpoint_id,
+            checkpoint_id=approval_checkpoint.checkpoint_id,
             checkpoint_storage=storage,
             responses={request_id: response},
         )
@@ -966,12 +1054,85 @@ async def _deterministic_approval_probe(
         return outputs[0].model_dump(mode="json")
 
 
+async def _deterministic_failure_drain_probe() -> dict[str, Any]:
+    started: set[AgentRole] = set()
+    cancelled: set[AgentRole] = set()
+    all_started = asyncio.Event()
+
+    async def investigate(role: AgentRole) -> SpecialistFinding:
+        started.add(role)
+        if len(started) == len(SPECIALIST_ROLES):
+            all_started.set()
+        try:
+            await all_started.wait()
+            if role is AgentRole.TELEMETRY_INVESTIGATOR:
+                raise WorkflowToolFailure(
+                    code="transient_timeout",
+                    retryable=True,
+                    detail="deterministic fan-out failure",
+                )
+            await asyncio.sleep(60)
+            raise AssertionError("sibling investigator was not cancelled")
+        except asyncio.CancelledError:
+            cancelled.add(role)
+            raise
+
+    active_investigations = _ActiveInvestigationTasks()
+    investigators = {
+        role: active_investigations.wrap(lambda _task, role=role: investigate(role))
+        for role in SPECIALIST_ROLES
+    }
+
+    async def unreachable_commander(
+        _findings: list[SpecialistFinding],
+    ) -> CommanderSynthesis:
+        raise AssertionError("commander must not run after a specialist failure")
+
+    workflow = build_investigation_workflow(investigators, unreachable_commander)
+    try:
+        await _run_initial_workflow(
+            workflow,
+            InvestigationTask(public_ticket="deterministic failure probe").model_dump(mode="json"),
+            active_investigations,
+        )
+    except WorkflowToolFailure as exc:
+        return {
+            "code": exc.code,
+            "retryable": exc.retryable,
+            "started_roles": sorted(role.value for role in started),
+            "cancelled_roles": sorted(role.value for role in cancelled),
+            "active_tasks": len(active_investigations._tasks),
+        }
+    raise AssertionError("deterministic fan-out failure did not escape")
+
+
+def _deterministic_checkpoint_selection_probe() -> dict[str, str]:
+    request_id = "mit-deterministic-01"
+    approval_checkpoint = WorkflowCheckpoint(
+        workflow_name="agent-lab-maf-explicit-approved-v1",
+        graph_signature_hash="deterministic",
+        checkpoint_id="approval-checkpoint",
+        timestamp="2026-08-03T00:00:00+00:00",
+        pending_request_info_events={request_id: object()},
+    )
+    newer_ancestor = WorkflowCheckpoint(
+        workflow_name="agent-lab-maf-explicit-approved-v1",
+        graph_signature_hash="deterministic",
+        checkpoint_id="newer-ancestor",
+        timestamp="2026-08-03T00:00:01+00:00",
+    )
+    selected = _select_approval_checkpoint([newer_ancestor, approval_checkpoint], request_id)
+    return {"selected_checkpoint_id": selected.checkpoint_id}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--deterministic-probe", action="store_true")
     mode.add_argument("--deterministic-approved-probe", action="store_true")
     mode.add_argument("--deterministic-rejected-probe", action="store_true")
+    mode.add_argument("--deterministic-checkpoint-selection-probe", action="store_true")
+    mode.add_argument("--deterministic-failure-drain-probe", action="store_true")
     mode.add_argument("--live-investigation", action="store_true")
     mode.add_argument("--live-approved-run", action="store_true")
     args = parser.parse_args()
@@ -981,6 +1142,10 @@ def main() -> None:
         payload = asyncio.run(_deterministic_approval_probe(ApprovalDecision.APPROVE))
     elif args.deterministic_rejected_probe:
         payload = asyncio.run(_deterministic_approval_probe(ApprovalDecision.REJECT))
+    elif args.deterministic_checkpoint_selection_probe:
+        payload = _deterministic_checkpoint_selection_probe()
+    elif args.deterministic_failure_drain_probe:
+        payload = asyncio.run(_deterministic_failure_drain_probe())
     elif args.live_approved_run:
         request_line = sys.stdin.buffer.readline()
         if not request_line:

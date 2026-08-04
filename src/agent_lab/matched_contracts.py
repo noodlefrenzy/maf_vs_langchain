@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from agent_lab.contract_bundle import sha256_payload
-from agent_lab.contracts import Budget, FrameworkLane, ModelProfile
+from agent_lab.contracts import (
+    Budget,
+    FrameworkLane,
+    HarnessAblationProfile,
+    ModelProfile,
+    ResourceMetricsProfile,
+)
+from agent_lab.harness_contracts import harness_ablation_payload, harness_specialist_roles
 from agent_lab.model_request_policy import matched_effective_request_policy
 
 _SPECIALIST_ROLES = [
@@ -35,6 +42,14 @@ _OPINIONATED_HARNESS_TOPOLOGY: dict[str, Any] = {
     "outer_stages": ["evidence_gate", "approval", "mitigation", "recovery_verification"],
 }
 
+_SINGLE_AGENT_BASELINE_TOPOLOGY: dict[str, Any] = {
+    "kind": "single_agent_baseline",
+    "agent": "incident_commander",
+    "delegation": False,
+    "source_capabilities": _SPECIALIST_ROLES,
+    "outer_stages": ["evidence_gate", "approval", "mitigation", "recovery_verification"],
+}
+
 
 def normalized_topology_for_lane(lane: FrameworkLane) -> dict[str, Any]:
     """Return a fresh framework-neutral topology snapshot for one lane."""
@@ -43,6 +58,8 @@ def normalized_topology_for_lane(lane: FrameworkLane) -> dict[str, Any]:
         return deepcopy(_EXPLICIT_WORKFLOW_TOPOLOGY)
     if lane in {FrameworkLane.MAF_HARNESS, FrameworkLane.DEEP_AGENTS}:
         return deepcopy(_OPINIONATED_HARNESS_TOPOLOGY)
+    if lane in {FrameworkLane.MAF_SINGLE_AGENT, FrameworkLane.LANGCHAIN_SINGLE_AGENT}:
+        return deepcopy(_SINGLE_AGENT_BASELINE_TOPOLOGY)
     raise ValueError(f"unsupported matched lane {lane.value}")
 
 
@@ -67,10 +84,14 @@ def preflight_pair_contract(
     model: ModelProfile,
     budget: Budget,
     fault_profile: str,
+    approval_policy: Literal["scripted", "observer"],
+    harness_ablation: HarnessAblationProfile,
+    resource_metrics: ResourceMetricsProfile,
     source_commit: str,
     source_tree_sha256: str,
     execution_provenance_by_lane: dict[FrameworkLane, dict[str, Any]],
     world_manifest_sha256: str,
+    case_manifest_sha256: str,
 ) -> dict[str, Any]:
     """Fail closed on matched-contract drift before either paired lane starts."""
 
@@ -86,7 +107,25 @@ def preflight_pair_contract(
         if descriptor.normalized_topology[lane] != expected_topology:
             raise ValueError(f"{lane.value} runner normalized topology differs within {track}")
 
+    effective_topology = expected_topology
+    if track == "opinionated_harness":
+        effective_topology = {
+            **expected_topology,
+            "specialists": sorted(
+                role.value for role in harness_specialist_roles(harness_ablation)
+            ),
+            "native_context_compaction": harness_ablation.context_compaction,
+        }
+
     request_policy = matched_effective_request_policy(model, left_lane, right_lane)
+    role_prompts_sha256 = expected_contract_hashes["prompt_bundle_sha256"]
+    if track == "opinionated_harness":
+        role_prompts_sha256 = sha256_payload(
+            {
+                "role_prompt_bundle_sha256": role_prompts_sha256,
+                "harness_ablation": harness_ablation_payload(harness_ablation),
+            }
+        )
     left_execution = execution_provenance_by_lane[left_lane]
     right_execution = execution_provenance_by_lane[right_lane]
     for lane, execution in (
@@ -106,7 +145,7 @@ def preflight_pair_contract(
         "schema_version": "0.1.0",
         "track": track,
         "lanes": [left_lane.value, right_lane.value],
-        "normalized_topology": expected_topology,
+        "normalized_topology": effective_topology,
         "held_constants": {
             "experiment_id": experiment_id,
             "scenario": scenario,
@@ -115,16 +154,22 @@ def preflight_pair_contract(
             "model": model.model_dump(mode="json"),
             "budget": budget.model_dump(mode="json"),
             "fault_profile": fault_profile,
+            "approval_policy": approval_policy,
+            "harness_ablation": harness_ablation.model_dump(mode="json"),
+            "resource_metrics": resource_metrics.model_dump(mode="json"),
             "source_commit": source_commit,
             "source_tree_sha256": source_tree_sha256,
             "execution_provenance": left_execution,
             "world_manifest_sha256": world_manifest_sha256,
+            "case_manifest_sha256": case_manifest_sha256,
             "contract_hashes": expected_contract_hashes,
         },
-        "role_prompts_sha256": expected_contract_hashes["prompt_bundle_sha256"],
+        "role_prompts_sha256": role_prompts_sha256,
         "tool_schemas_sha256": expected_contract_hashes["tool_catalog_sha256"],
         "completion_schema_sha256": expected_contract_hashes["artifact_schemas_sha256"],
         "workflow_contract_sha256": expected_contract_hashes["workflow_contract_sha256"],
+        "harness_contract_sha256": expected_contract_hashes["harness_contract_sha256"],
+        "baseline_contract_sha256": expected_contract_hashes["baseline_contract_sha256"],
         "effective_request_policy": request_policy,
         "effective_request_policy_sha256": request_policy["policy_sha256"],
         "execution_provenance_sha256": left_execution["provenance_sha256"],

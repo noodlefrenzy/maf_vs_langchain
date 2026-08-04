@@ -35,6 +35,9 @@ topology. The control plane compares both runners with the repository contract
 lock and the canonical matched topology, then snapshots the effective model,
 budget, fault profile, source tree, world manifest, role-prompt hash, tool-schema
 hash, and completion-schema hash. Any drift aborts the pair before execution.
+For the opinionated track this snapshot also includes the shared harness
+contract hash covering delegation repair, provenance correction, and phase
+limits.
 The byte-stable snapshot and its digest are stored as
 `native/pair-contract-preflight.json` in both run bundles.
 
@@ -46,9 +49,10 @@ The byte-stable snapshot and its digest are stored as
 - Count a model call at request dispatch, including failed attempts.
 - Count a tool call at MCP request receipt, including invalid calls.
 - Do not add hidden retries in the control plane or MCP service.
-- The explicit-workflow adapter does not retry structured tool failures. MAF's
-  native connection-loss reconnect is preregistered as framework behavior under
-  test; service audit is authoritative for any replay. See
+- Both explicit-workflow adapters make at most one application retry after an
+  explicitly retryable structured tool failure; every attempt is metered and
+  traced. MAF's native connection-loss reconnect is separately preregistered as
+  framework behavior under test; service audit is authoritative for any replay. See
   [explicit-workflow parity](explicit-workflow-parity.md).
 - Apply the same scripted approval policy in unattended trials.
 - For interactive demos, record the human decision and exclude those runs from
@@ -105,15 +109,38 @@ Derived measures use explicit definitions:
 - **trace completeness**: expected semantic operations with correlated native
   spans divided by expected operations.
 
+The compute-matched ceiling uses model calls, tool calls, wall time, and output
+tokens. Input, cached-input, and reasoning tokens remain reported outcomes:
+they are reconciled when present but are not silently treated as zero or used
+as v0.1 dispatch gates. Model-call totals must reconcile across normalized
+events, metric events, the metric summary, and `terminal.json`.
+
 Ambiguous derived measures must include an audit sample before being used in a
 headline claim.
 
 ## Statistical plan
 
+The executable preregistration is
+[measured-study-preregistration.md](measured-study-preregistration.md), backed
+by `configs/studies/measured-v1.toml`. It freezes binary `task_success` as the
+primary outcome, a 10 percentage-point practical difference, seed-cluster
+analysis over five repetitions, two co-primary track contrasts with Holm
+familywise control, failure/outlier/stopping rules, and a fail-closed pilot
+sizing command. The protocol remains explicitly blocked until accepted-model
+pilots supply usable variance/runtime and component-discrimination evidence for
+both tracks and a reviewer approves the frozen record. The current harness
+pilot fails closed on zero paired seed variance.
+
 The pilot estimates variance and failure modes. Before the measured study:
 
 - choose the primary outcome and smallest practically meaningful difference;
 - estimate sample size from pilot paired differences;
+- run the preregistered canonical/paraphrase-A harness profiles with identical
+  paired seeds, repetition counts, budgets, and fault schedules;
+- run the preregistered zero/one/two-turn provenance-correction profiles, with
+  the effective shared policy hash frozen in each pair;
+- retain the completed matched no-review and no-compaction profiles, with
+  active roles and native compaction mode frozen into the effective topology;
 - freeze exclusions and outlier handling;
 - freeze model/server/config/tool/prompt versions;
 - preregister which comparisons are confirmatory versus exploratory.
@@ -122,8 +149,11 @@ For the measured study:
 
 - report paired raw points and distributions;
 - report effect sizes, not only p-values;
-- use paired bootstrap confidence intervals for continuous/ordinal differences;
-- use paired binary tests for success/safety outcomes;
+- average repeated observations within seed and bootstrap seed clusters for
+  continuous/ordinal differences;
+- use paired seed-level sign-flip tests for primary task success and label
+  run-level McNemar counts descriptive;
+- apply Holm correction across the two confirmatory track p-values;
 - correct or clearly label multiple exploratory comparisons;
 - include all operational failures in reliability reporting;
 - publish seeds, manifests, scorer version, and report code in the private repo.
@@ -156,6 +186,13 @@ model behavior.
 - Built-in prompt/harness behavior is part of a harness result.
 - More agents or calls are not evidence of better coordination.
 - The single-agent baseline is required before claiming multi-agent value.
+- Its compute-matched profile uses the same 900-second, 32-model-call,
+  64-tool-call, and 32,000-output-token ceilings as each primary pilot lane.
+  The unrestricted profile changes only the call/token ceilings to 64, 128,
+  and 64,000 respectively; prompts, model, tools, source provenance, fault
+  profile, approval policy, and scenario blocks remain fixed.
 - A richer native trace UI does not imply better task performance; it is an
   operability result.
 - A demo is illustrative, never inferential.
+- Retrospective developer-effort comparisons are descriptive unless
+  implementation order was balanced or randomized.

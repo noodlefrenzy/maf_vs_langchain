@@ -10,7 +10,14 @@ Its canonical sources are:
 - `agent_lab.contracts` for evidence, approval, incident-report, audit, event,
   and terminal models;
 - `agent_lab.workflow_contracts` for explicit-workflow schemas, observation
-  policy, dynamic instructions, evidence gating, result parsing, and accounting;
+  and bounded retry policy, dynamic instructions, evidence gating, result
+  parsing, and accounting;
+- `agent_lab.harness_contracts` for opinionated-harness delegation, provenance,
+  correction, phase-limit, subagent-completion barrier, prompt, active-role,
+  native-compaction, and completion-schema policy;
+- `agent_lab.baseline_contracts` for the one-agent union catalog, source-scoped
+  provenance, discovery repair, two-phase synthesis, correction, evidence gate,
+  prompt, and completion-schema policy;
 - `agent_lab.contract_bundle` for canonical serialization and SHA-256 hashes.
 
 The committed hashes are in `contracts/v0.1.0/contract-lock.json`; one
@@ -22,8 +29,25 @@ and their locks remain readable.
 
 Both framework runner packages expose a small `shared_contract_snapshot`
 adapter. The parity test compares their rendered prompts and all bundle hashes
-byte-for-byte. Framework-native harness instructions are intentionally not part
-of this shared bundle and must be captured separately in each run manifest.
+byte-for-byte. Opinionated-harness instructions and parity-critical control
+policy are part of the shared bundle. The harness prompts disclose the hard
+six-response phase bound, and both adapters mechanically expose specialist
+tools for at most four responses before a tool-disabled fifth completion
+response. Those bounded specialist phases expose only role-specific
+evidence-producing tools; the public ticket is already in the coordinator task,
+so redundant brief/status calls cannot consume the evidence budget. MAF drains
+native background tasks outside the model loop and then uses one separately
+bounded native result-retrieval turn. Synthesis and correction receive exact
+role-specific tool/evidence provenance. The
+single-agent adapters likewise
+share one frozen baseline contract: MAF `Agent` and LangChain `create_agent`
+each run one model-driven incident commander with the same discovery-tool union
+and no delegation. An unstructured first phase must make real MCP calls through
+at least two capability sources; a tool-disabled structured phase receives the
+observed source-specific evidence allowlist. Both adapters enforce the same
+eight-dispatch per-phase model-call ceiling beneath the framework-neutral outer
+run budget. Framework-native implementation details remain captured in each
+run's execution provenance.
 
 ## Role boundaries
 
@@ -34,6 +58,13 @@ reviewer receives runbook tools. Only the incident commander can submit a
 hypothesis, request approval, apply an authorized mitigation, and verify
 recovery.
 
+For the single-agent baseline, the public incident tools are assigned once to
+the telemetry endpoint and every specialist-only discovery tool remains on its
+native capability endpoint. The one agent sees their duplicate-free union.
+Finding `role` fields label the endpoint that supplied the evidence; they do
+not imply a specialist agent existed. Command tools remain behind the shared
+outer approval, mitigation, and recovery stages.
+
 `request_mitigation` carries both a canonical action ID and a human-readable
 description and never mutates the world. The approval token binds the request,
 action ID, and description. `apply_mitigation` is the only state-changing v0.1
@@ -41,4 +72,6 @@ tool and requires a request identifier plus that valid approval token. Effects
 and safety checks use the canonical ID. The catalog supplies the description
 shown for approval and execution; the agent's submitted wording remains in the
 audit log. The tool service performs no hidden retry; only
-`transient_timeout` is retryable under the frozen error taxonomy.
+`transient_timeout` is retryable under the frozen error taxonomy. Both explicit
+workflow adapters make at most one visible, metered application retry for that
+normalized error.

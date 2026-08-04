@@ -8,13 +8,15 @@ Research cutoff: 2026-07-31
 
 ## 1. Purpose
 
-Build a reproducible field lab that answers two bounded questions:
+Build a reproducible field lab that answers three bounded questions:
 
 1. How does Microsoft Agent Framework Workflows compare with a custom
    LangGraph when both implement the same explicit multi-agent graph?
 2. How does Microsoft Agent Framework Harness compare with Deep Agents when
    both receive the same long-horizon task, specialist roles, tools, model,
    context budget, and stopping rules?
+3. How do the multi-agent tracks compare with matched one-agent baselines, and
+   do any outcome gains survive equal compute ceilings?
 
 The result is a decision record about engineering tradeoffs on this machine
 and this workload. It is not a universal framework leaderboard.
@@ -80,9 +82,12 @@ the task. Evidence exists only behind MCP tools.
 | Change investigator | Correlate deploys, config, feature flags, and schemas with symptom onset | Read-only change history and diffs |
 | Reliability reviewer | Find policy/runbook constraints, challenge causal claims, test whether mitigation is reversible | Read-only runbooks and review resources |
 
-No agent receives all evidence tools. Capability separation is enforced by MCP
-catalog/credentials, not only by prompts. The commander must obtain and combine
-findings from other roles.
+In the two multi-agent tracks, no agent receives all evidence tools. Capability
+separation is enforced by MCP catalog/credentials, not only by prompts. The
+commander must obtain and combine findings from other roles. The explicit
+single-agent baseline is the exception: one commander receives a duplicate-free
+union routed through the same capability-scoped credentials, and source roles
+label provenance rather than separate agents.
 
 ### 5.3 Explicit workflow topology
 
@@ -122,11 +127,14 @@ budget and completion schema.
 
 The initial generator supports:
 
-- retry amplification that makes a downstream service look causal;
-- client connection leakage with a healthy database;
-- regionally inconsistent feature flags;
-- producer/consumer schema drift with a healthy broker;
-- a cache TTL regression that makes the origin look under-provisioned.
+- retry amplification that makes a downstream service look causal
+  (`retry_storm`);
+- client connection leakage with a healthy database
+  (`connection_pool_exhaustion`);
+- regionally inconsistent feature flags (`feature_flag_mismatch`);
+- producer/consumer schema drift with a healthy broker (`schema_drift`);
+- a cache TTL regression that makes the origin look under-provisioned
+  (`cache_ttl_regression`).
 
 Each seed selects surface details, a decoy, evidence placement, and a
 replayable transient-failure cadence. Later generators may add delayed metrics,
@@ -168,11 +176,12 @@ Every call records start/end times, normalized arguments after redaction,
 result digest, result size, error category, and simulated-world tick. Framework
 retries are visible; the MCP service does not silently retry.
 
-For the v0.1 explicit workflow, structured tool failures receive no
-application-level retry and both native client error surfaces normalize to the
-same failure. MAF's connection-loss reconnect remains a preregistered native
-runtime behavior; server audit and the outer budget count any replay that
-reaches the service.
+For the v0.1 explicit workflow, both native client error surfaces normalize to
+the same structured failure. An explicitly retryable structured failure
+receives at most one shared application-level retry; all other failures receive
+none. Each attempt is visible to telemetry and accounting. MAF's connection-loss
+reconnect remains a separately preregistered native runtime behavior; server
+audit and the outer budget count any replay that reaches the service.
 
 The simulator preserves four state invariants across live execution and
 checkpoint restart:
@@ -213,15 +222,27 @@ Initial fit-check profile:
 - vLLM reasoning parser `qwen3`;
 - vLLM tool parser `qwen3_coder`.
 
-The 9B model is a starting hypothesis, not a frozen choice. It must pass
-multi-step/parallel tool-call tests and fit with useful KV cache on the 24 GB
-RTX 4090. `Qwen3.5-35B-A3B-GPTQ-Int4` is a quality-tier candidate using bounded
-CPU offload into the 128 GB system RAM. Model selection is finalized from
-measurements, not parameter count.
+The 9B model was a starting hypothesis, not a frozen choice. It passed native
+compatibility but failed the paired task-quality gate.
+`Qwen3.5-35B-A3B-GPTQ-Int4` was then tested as a quality-tier candidate using
+bounded CPU offload into the 128 GB system RAM. It loaded but failed engine
+initialization because the pinned Triton kernels could not consume offloaded
+tensors, while no-offload loading cannot preserve useful KV-cache headroom on
+the 24 GB RTX 4090. Model selection remained gated on a different measured
+candidate or serving topology, not parameter count. A pinned Qwen3.5-27B
+Q4_K_M GGUF at a 16K/two-slot local llama.cpp operating point then passed two
+restart-separated characterizations, the complete live client compatibility
+suite, and both lanes of the paired task-quality gate. That exact artifact and
+runtime profile is the promoted five-seed pilot model; the roughly 1.3 GiB
+whole-device margin prohibits concurrent non-study GPU workloads.
 
-The run manifest records the model repository revision, weight digest, server
-version and flags, CUDA/driver versions, quantization, context limit, sampling
-settings, and warm/cold state.
+Execution provenance records the model repository revision, weight digest,
+server version and flags, CUDA/driver versions, quantization, context limit,
+and sampling settings. The held-constant metrics profile declares whether the
+loaded server is cold or warm and whether prefix caching is disabled, reset, or
+enabled without per-run control. Current measured profiles preregister a warm
+server with `enabled_uncontrolled` prefix caching, so they may not claim
+cache-controlled latency without an additional provider-correlated signal.
 
 ## 8. Fairness controls
 
@@ -255,9 +276,12 @@ It is not “normalized away,” because it is part of an opinionated harness.
 ### 8.3 Ordering and replication
 
 - Smoke: one seed, one repetition, no injected fault.
-- Pilot: five seeds, three repetitions, standard fault profile.
-- Measured study: at least 20 seeds and five repetitions after power/variance
-  review.
+- Pilot: five equally weighted incident-family seeds, three repetitions, and
+  the standard fault profile. The exact generator-derived selection and its
+  pre-execution planner are frozen in [pilot-case-plan.md](pilot-case-plan.md).
+- Measured study: at least 20 seeds and five repetitions after the fail-closed
+  accepted-model pilot sizing rule in
+  [measured-study-preregistration.md](measured-study-preregistration.md).
 - Execute on one GPU sequentially.
 - Randomize lane order within each seed/repetition block.
 - Balance A/B and B/A order to reduce warm-cache and thermal bias.
@@ -265,10 +289,12 @@ It is not “normalized away,” because it is part of an opinionated harness.
 - Never reuse a model conversation, checkpoint, MCP state, or workspace across
   lanes.
 
-Binary paired outcomes use McNemar-style analysis where appropriate.
-Continuous paired differences report medians, distributions, and paired
-bootstrap confidence intervals. A pilot is for variance and failure discovery,
-not a winner announcement.
+The primary binary outcome averages repetitions within scenario seed, uses a
+paired seed-level sign-flip randomization test, and applies Holm correction to
+the two confirmatory tracks. Run-level McNemar counts are descriptive.
+Continuous paired differences report medians, distributions, and bootstrap
+confidence intervals over seed clusters. A pilot is for variance and failure
+discovery, not a winner announcement.
 
 ## 9. Scoring
 
@@ -293,8 +319,8 @@ Report these separately rather than hiding them in one composite:
 
 - end-to-end latency, time to first visible event, time to diagnosis, and time
   to mitigation;
-- model calls, input/output/reasoning token counts where the server reports
-  them, and model busy time;
+- model calls, input/output/cached-input/reasoning token counts where the
+  provider reports them, and model busy time;
 - total, useful, redundant, invalid, failed, and retried tool calls;
 - recovery rate after injected transient failures;
 - number of delegations, handoffs, repeated findings, and unresolved conflicts;
@@ -310,11 +336,18 @@ Report these separately rather than hiding them in one composite:
 - unrestricted single agent;
 - compute-matched single agent;
 - no-review role;
+- native context compaction disabled;
 - no-role-separation prompt-only run;
 - no-fault run;
 - framework-native tracing disabled to measure instrumentation overhead.
 
 These detect whether “multi-agent” adds value or merely adds model calls.
+
+The compute-matched budgets are model dispatches, tool dispatches, wall time,
+and generated output tokens. Input, cached-input, and reasoning tokens are
+reported outcomes rather than hard budgets in v0.1 because the frameworks do
+not control them symmetrically before dispatch. Missing provider usage remains
+`null` with an availability reason; it is never imputed as zero.
 
 ## 10. Live comparison
 
@@ -326,6 +359,8 @@ default view is a synchronized two-column timeline with:
 - tool name, redacted arguments, result summary, latency, and error/retry;
 - evidence ledger and hypothesis revisions;
 - approval requests and decisions;
+- neutral paired live/replay views with sequence-addressable SSE and audited,
+  loopback-authenticated interactive approval controls;
 - elapsed budget, calls, tokens, and model queue time;
 - checkpoint/pause/resume state;
 - final score once the evaluator completes.
@@ -346,14 +381,19 @@ seed and repetition and produces:
 
 - outcome and safety tables;
 - paired-difference plots with confidence intervals;
-- latency and resource flame/timeline views;
-- tool-use Sankey/sequence summaries;
-- coordination topology and duplicate-work measures;
+- task/control, provider, token, host/GPU, and trace effect tables;
+- paired raw-point plots for latency, token/call, tool-use, recovery,
+  coordination, resource, and trace-completeness measures;
+- observed-actor and maximum client-in-flight coordination measures;
 - fault-injection/recovery analysis;
 - trace completeness matrix;
-- links back to events, artifacts, checkpoints, and native traces.
+- portable links to redacted evidence and checksummed private events,
+  artifacts, checkpoints, and native traces.
 
 Reports are generated from frozen bundles and never query live external data.
+Each new owner-only report directory retains a full private bundle snapshot and
+a redacted, portable audit projection as described in
+[evidence-retention.md](evidence-retention.md).
 
 ## 12. Safety and data handling
 
@@ -390,7 +430,7 @@ Reports are generated from frozen bundles and never query live external data.
 - deterministic evaluator;
 - one seed end to end with approval and recovery.
 
-### Phase 2 — all four lanes
+### Phase 2 — all matched lanes
 
 - MAF Harness and Deep Agents;
 - single-agent and scripted baselines;
@@ -410,7 +450,8 @@ Reports are generated from frozen bundles and never query live external data.
 The reviewer should decide:
 
 1. whether incident response is the right primary task;
-2. whether the four-lane, two-track framing answers the intended question;
+2. whether the three-track framing (four multi-agent lanes plus two
+   single-agent lanes) answers the intended question;
 3. whether role-scoped MCP access is desirable or too constraining;
 4. whether Qwen3.5-9B is acceptable as the fit-check model before the quality
    tier is characterized;

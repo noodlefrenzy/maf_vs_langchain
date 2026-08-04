@@ -27,6 +27,11 @@ from agent_lab.contracts import (
     WorldEvaluationState,
 )
 from agent_lab.evaluator import DeterministicScore, score_incident
+from agent_lab.run_metrics import (
+    CONTROL_METRICS_SCHEMA,
+    MODEL_METRICS_SCHEMA,
+    RESOURCE_METRICS_SCHEMA,
+)
 from agent_lab.scenario import IncidentCase
 from agent_lab.trace_contracts import (
     NativeSpanRecord,
@@ -72,7 +77,9 @@ class PairValidationResult(BaseModel):
     right_bundle: str
     valid: bool
     inference_status: Literal["eligible", "invalid_provenance"]
-    track: Literal["explicit_workflow", "opinionated_harness"] | None = None
+    track: Literal["explicit_workflow", "opinionated_harness", "single_agent_baseline"] | None = (
+        None
+    )
     findings: list[ValidationFinding]
     left: BundleValidationResult
     right: BundleValidationResult
@@ -97,6 +104,8 @@ def validate_bundle(path: Path, *, mark: bool = False) -> BundleValidationResult
         _validate_scorer_inputs(path, manifest, terminal, findings)
     if manifest is not None:
         _validate_native_trace(path, manifest, events, findings)
+    if manifest is not None and terminal is not None:
+        _validate_metrics(path, manifest, terminal, events, findings)
 
     valid = not any(finding.level is FindingLevel.ERROR for finding in findings)
     result = BundleValidationResult(
@@ -129,7 +138,9 @@ def validate_pair(
 
     left_manifest = _parse_manifest_file(Path(left.bundle_path))
     right_manifest = _parse_manifest_file(Path(right.bundle_path))
-    track: Literal["explicit_workflow", "opinionated_harness"] | None = None
+    track: Literal["explicit_workflow", "opinionated_harness", "single_agent_baseline"] | None = (
+        None
+    )
     if left_manifest is not None and right_manifest is not None:
         track = _validate_pair_manifests(left_manifest, right_manifest, findings)
         _validate_pair_trace_profiles(
@@ -528,6 +539,323 @@ def _validate_terminal(
                 f"{terminal.status.value!r}.",
                 "events.jsonl",
             )
+
+
+def _validate_metrics(
+    path: Path,
+    manifest: RunManifest,
+    terminal: RunTerminal,
+    events: list[NormalizedEvent],
+    findings: list[ValidationFinding],
+) -> None:
+    request_path = path / "native" / "run-request.redacted.json"
+    metrics_expected = request_path.is_file()
+    if metrics_expected:
+        missing = [
+            relative
+            for relative in (
+                "metrics/host.jsonl",
+                "metrics/model.jsonl",
+                "metrics/control.jsonl",
+            )
+            if not (path / relative).is_file()
+        ]
+        if missing:
+            _error(
+                findings,
+                "metrics_missing",
+                f"Control-plane run is missing metric ledgers: {missing}.",
+                "metrics",
+            )
+            return
+        previous_ns = None
+        for event in events:
+            if event.monotonic_ns is None:
+                _error(
+                    findings,
+                    "event_monotonic_timestamp_missing",
+                    f"Sequence {event.sequence} has no monotonic timestamp.",
+                    "events.jsonl",
+                )
+            elif previous_ns is not None and event.monotonic_ns < previous_ns:
+                _error(
+                    findings,
+                    "event_monotonic_timestamp_regressed",
+                    f"Sequence {event.sequence} regresses the monotonic clock.",
+                    "events.jsonl",
+                )
+            if event.monotonic_ns is not None:
+                previous_ns = event.monotonic_ns
+
+    host = _load_metric_records(
+        path / "metrics" / "host.jsonl",
+        RESOURCE_METRICS_SCHEMA,
+        manifest,
+        findings,
+    )
+    model = _load_metric_records(
+        path / "metrics" / "model.jsonl",
+        MODEL_METRICS_SCHEMA,
+        manifest,
+        findings,
+    )
+    control = _load_metric_records(
+        path / "metrics" / "control.jsonl",
+        CONTROL_METRICS_SCHEMA,
+        manifest,
+        findings,
+    )
+    if host is not None:
+        _validate_host_metrics(host, findings)
+    if model is not None:
+        _validate_model_metrics(model, terminal, findings)
+    if control is not None:
+        _validate_control_metrics(control, findings)
+
+
+def _load_metric_records(
+    path: Path,
+    schema: str,
+    manifest: RunManifest,
+    findings: list[ValidationFinding],
+) -> list[dict[str, Any]] | None:
+    if not path.is_file():
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        _error(findings, "metrics_unreadable", str(exc), str(path.name))
+        return None
+    records = []
+    for line_number, line in enumerate(lines, start=1):
+        location = f"metrics/{path.name}:{line_number}"
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            _error(findings, "metrics_json_invalid", str(exc), location)
+            continue
+        if not isinstance(record, dict):
+            _error(findings, "metrics_record_invalid", "Metric record must be an object.", location)
+            continue
+        if record.get("schema_version") != schema:
+            _error(
+                findings,
+                "metrics_schema_mismatch",
+                f"Expected schema {schema!r}, observed {record.get('schema_version')!r}.",
+                location,
+            )
+        if record.get("run_id") != str(manifest.run_id):
+            _error(
+                findings,
+                "metrics_run_mismatch",
+                f"Metric record does not belong to run {manifest.run_id}.",
+                location,
+            )
+        records.append(record)
+    if not records:
+        _error(
+            findings,
+            "metrics_empty",
+            "Metric ledger must contain at least one record.",
+            f"metrics/{path.name}",
+        )
+    return records
+
+
+def _validate_host_metrics(
+    records: list[dict[str, Any]],
+    findings: list[ValidationFinding],
+) -> None:
+    configurations = [
+        record for record in records if record.get("record_type") == "sampling_configuration"
+    ]
+    summaries = [record for record in records if record.get("record_type") == "sampling_summary"]
+    samples = [record for record in records if record.get("record_type") == "resource_sample"]
+    if len(configurations) != 1 or len(summaries) != 1:
+        _error(
+            findings,
+            "resource_metrics_lifecycle_invalid",
+            "Host metrics require exactly one configuration and one summary record.",
+            "metrics/host.jsonl",
+        )
+        return
+    configuration = configurations[0]
+    summary = summaries[0]
+    if configuration.get("enabled") != summary.get("enabled") or configuration.get(
+        "interval_seconds"
+    ) != summary.get("interval_seconds"):
+        _error(
+            findings,
+            "resource_metrics_configuration_mismatch",
+            "Host metric configuration and summary disagree.",
+            "metrics/host.jsonl",
+        )
+    if summary.get("sample_count") != len(samples):
+        _error(
+            findings,
+            "resource_metrics_sample_count_mismatch",
+            f"Summary records {summary.get('sample_count')} samples; observed {len(samples)}.",
+            "metrics/host.jsonl",
+        )
+    if configuration.get("enabled") and not samples:
+        _error(
+            findings,
+            "resource_metrics_samples_missing",
+            "Enabled resource sampling produced no samples.",
+            "metrics/host.jsonl",
+        )
+    monotonic_values = [record.get("monotonic_ns") for record in samples]
+    if any(not isinstance(value, int) or value < 0 for value in monotonic_values):
+        _error(
+            findings,
+            "resource_metrics_monotonic_invalid",
+            "Every resource sample requires a nonnegative monotonic timestamp.",
+            "metrics/host.jsonl",
+        )
+    elif monotonic_values != sorted(monotonic_values):
+        _error(
+            findings,
+            "resource_metrics_monotonic_regressed",
+            "Resource sample timestamps regress.",
+            "metrics/host.jsonl",
+        )
+    for sample in samples:
+        overhead = sample.get("sampling_overhead_ns")
+        if not isinstance(overhead, int) or overhead < 0:
+            _error(
+                findings,
+                "resource_metrics_overhead_invalid",
+                "Every resource sample requires nonnegative measured overhead.",
+                "metrics/host.jsonl",
+            )
+            break
+
+
+def _validate_model_metrics(
+    records: list[dict[str, Any]],
+    terminal: RunTerminal,
+    findings: list[ValidationFinding],
+) -> None:
+    calls = [record for record in records if record.get("record_type") == "model_call"]
+    summaries = [
+        record for record in records if record.get("record_type") == "model_metrics_summary"
+    ]
+    if len(summaries) != 1:
+        _error(
+            findings,
+            "model_metrics_summary_invalid",
+            "Model metrics require exactly one summary record.",
+            "metrics/model.jsonl",
+        )
+        return
+    summary = summaries[0]
+    expected = {
+        "request_count": len(calls),
+        "terminal_model_calls": terminal.used_model_calls,
+        "terminal_output_tokens": terminal.used_output_tokens,
+    }
+    for field_name, value in expected.items():
+        if summary.get(field_name) != value:
+            _error(
+                findings,
+                "model_metrics_summary_mismatch",
+                f"{field_name} records {summary.get(field_name)!r}; expected {value}.",
+                "metrics/model.jsonl",
+            )
+    if summary.get("reconciliation_status") != "exact":
+        _error(
+            findings,
+            "model_metrics_reconciliation_failed",
+            f"Usage reconciliation failed: {summary.get('reconciliation_issues')!r}.",
+            "metrics/model.jsonl",
+        )
+    for call in calls:
+        started = call.get("started_monotonic_ns")
+        finished = call.get("finished_monotonic_ns")
+        if started is not None and (not isinstance(started, int) or started < 0):
+            _error(
+                findings,
+                "model_metrics_timestamp_invalid",
+                "Model call start timestamp is invalid.",
+                "metrics/model.jsonl",
+            )
+        timing_fields = (
+            "queue_seconds",
+            "time_to_first_token_seconds",
+            "generation_seconds",
+        )
+        reported_timing = False
+        for field_name in timing_fields:
+            value = call.get(field_name)
+            if value is None:
+                continue
+            reported_timing = True
+            if not isinstance(value, int | float) or isinstance(value, bool) or value < 0:
+                _error(
+                    findings,
+                    "model_metrics_provider_timing_invalid",
+                    f"Model call has invalid {field_name} {value!r}.",
+                    "metrics/model.jsonl",
+                )
+        if reported_timing and not isinstance(call.get("provider_request_id"), str):
+            _error(
+                findings,
+                "model_metrics_provider_request_id_missing",
+                "Provider timing requires its correlated provider request ID.",
+                "metrics/model.jsonl",
+            )
+        if finished is not None and (
+            not isinstance(finished, int)
+            or finished < 0
+            or not isinstance(started, int)
+            or finished < started
+        ):
+            _error(
+                findings,
+                "model_metrics_timestamp_invalid",
+                "Model call finish timestamp is invalid.",
+                "metrics/model.jsonl",
+            )
+
+
+def _validate_control_metrics(
+    records: list[dict[str, Any]],
+    findings: list[ValidationFinding],
+) -> None:
+    expected_phases = {
+        "subprocess_launch",
+        "preparation",
+        "task_execution",
+        "finalization",
+        "tracing_flush",
+        "teardown",
+        "control_plane_total",
+    }
+    phases = [record.get("phase") for record in records]
+    if len(phases) != len(expected_phases) or set(phases) != expected_phases:
+        _error(
+            findings,
+            "control_metrics_phases_invalid",
+            f"Control phases are {phases}; expected {sorted(expected_phases)}.",
+            "metrics/control.jsonl",
+        )
+    for record in records:
+        if record.get("status") not in {"collected", "unavailable"}:
+            _error(
+                findings,
+                "control_metrics_status_invalid",
+                f"Invalid control phase status {record.get('status')!r}.",
+                "metrics/control.jsonl",
+            )
+        if record.get("status") == "collected":
+            duration = record.get("duration_seconds")
+            if not isinstance(duration, int | float) or isinstance(duration, bool) or duration < 0:
+                _error(
+                    findings,
+                    "control_metrics_duration_invalid",
+                    f"Phase {record.get('phase')} has invalid duration {duration!r}.",
+                    "metrics/control.jsonl",
+                )
 
 
 def _validate_artifacts(
@@ -1025,7 +1353,7 @@ def _validate_pair_manifests(
     left: RunManifest,
     right: RunManifest,
     findings: list[ValidationFinding],
-) -> Literal["explicit_workflow", "opinionated_harness"] | None:
+) -> Literal["explicit_workflow", "opinionated_harness", "single_agent_baseline"] | None:
     track = _pair_track(left.lane, right.lane)
     if track is None:
         _error(
@@ -1143,6 +1471,8 @@ def _pair_track(
         return "explicit_workflow"
     if lanes == {FrameworkLane.MAF_HARNESS, FrameworkLane.DEEP_AGENTS}:
         return "opinionated_harness"
+    if lanes == {FrameworkLane.MAF_SINGLE_AGENT, FrameworkLane.LANGCHAIN_SINGLE_AGENT}:
+        return "single_agent_baseline"
     return None
 
 

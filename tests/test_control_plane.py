@@ -13,6 +13,7 @@ from agent_lab.contracts import (
     ApprovalDecision,
     ApprovalRecord,
     Budget,
+    EventKind,
     FrameworkLane,
     ModelProfile,
     RunManifest,
@@ -21,6 +22,7 @@ from agent_lab.contracts import (
 from agent_lab.control_plane import ControlPlane, resolve_lane_order
 from agent_lab.model_request_policy import effective_request_policy
 from agent_lab.run_bundle import RunBundle
+from agent_lab.runner_host import WorkflowProtocolSession
 from agent_lab.runner_protocol import (
     FinalizationResult,
     FinalizedArtifact,
@@ -31,6 +33,7 @@ from agent_lab.runner_protocol import (
     redacted_request_payload,
 )
 from agent_lab.scenario import MitigationActionId
+from agent_lab.workflow_protocol_stub import _descriptor
 
 
 def _manifest(*, wall_clock_seconds: int = 5) -> RunManifest:
@@ -138,6 +141,57 @@ def test_mock_runner_success_and_isolated_paths(tmp_path: Path) -> None:
     assert prepared["tool_catalog_sha256"] == request.manifest.tool_catalog_sha256
     assert "test-secret-token" not in redacted_request
     assert '"token": "[REDACTED]"' in redacted_request
+    metric_paths = {
+        name: result.paths.bundle / "metrics" / name
+        for name in ("host.jsonl", "model.jsonl", "control.jsonl")
+    }
+    assert all(path.is_file() for path in metric_paths.values())
+    model_metrics = [
+        json.loads(line)
+        for line in metric_paths["model.jsonl"].read_text(encoding="utf-8").splitlines()
+    ]
+    assert model_metrics[-1]["reconciliation_status"] == "mismatch"
+    assert model_metrics[-1]["reconciliation_issues"] == [
+        "terminal_model_calls_do_not_match_requests",
+        "terminal_output_tokens_do_not_match_responses",
+    ]
+    assert model_metrics[-1]["task_latency_seconds"] >= 0
+    control_metrics = [
+        json.loads(line)
+        for line in metric_paths["control.jsonl"].read_text(encoding="utf-8").splitlines()
+    ]
+    assert {record["phase"] for record in control_metrics} == {
+        "subprocess_launch",
+        "preparation",
+        "task_execution",
+        "finalization",
+        "tracing_flush",
+        "teardown",
+        "control_plane_total",
+    }
+
+
+def test_bundle_validation_rejects_model_metric_reconciliation_tampering(
+    tmp_path: Path,
+) -> None:
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+    result = asyncio.run(control_plane.execute(_command("model_timeout"), request))
+    metrics_path = result.paths.bundle / "metrics" / "model.jsonl"
+    records = [json.loads(line) for line in metrics_path.read_text().splitlines()]
+    assert records[-1]["reconciliation_status"] == "exact"
+    records[-1]["reconciliation_status"] = "mismatch"
+    metrics_path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    validation = validate_bundle(result.paths.bundle)
+
+    assert not validation.valid
+    assert any(
+        finding.code == "model_metrics_reconciliation_failed" for finding in validation.findings
+    )
 
 
 def test_mock_runner_wall_timeout_is_budget_exhaustion(tmp_path: Path) -> None:
@@ -157,6 +211,30 @@ def test_mock_runner_approval_timeout_has_distinct_terminal_state(tmp_path: Path
     request = _request(control_plane, _manifest(wall_clock_seconds=1))
 
     result = asyncio.run(control_plane.execute(_command("approval_timeout"), request))
+
+    assert result.terminal.status is TerminalStatus.APPROVAL_TIMEOUT
+    assert result.terminal.reason == "approval_deadline_exhausted"
+    closed = json.loads((result.paths.bundle / "control" / "approval-closed.json").read_text())
+    assert closed["reason"] == "approval_deadline_exhausted"
+    assert "approval_token" not in closed
+    _assert_bundle_valid(result)
+
+
+def test_blocking_approval_handler_cannot_outlive_wall_clock_budget(tmp_path: Path) -> None:
+    control_plane = ControlPlane(tmp_path, graceful_shutdown_seconds=0.5)
+    request = _request(control_plane, _manifest(wall_clock_seconds=1))
+
+    async def never_decides(_event):
+        await asyncio.sleep(30)
+        raise AssertionError("approval wait should have been cancelled at the run deadline")
+
+    result = asyncio.run(
+        control_plane.execute(
+            _command("approval_success"),
+            request,
+            approval_handler=never_decides,
+        )
+    )
 
     assert result.terminal.status is TerminalStatus.APPROVAL_TIMEOUT
     assert result.terminal.reason == "approval_deadline_exhausted"
@@ -372,6 +450,7 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
         "namespace": "maf_workflow/telemetry_investigator",
         "input_tokens": 24,
         "output_tokens": 12,
+        "parser_outcome": "provider_response_accepted",
     }
     for event in events:
         if (
@@ -425,6 +504,21 @@ def test_real_workflow_protocol_session_normalizes_usage_and_keeps_token_ephemer
                 "tool.requested",
                 "tool.started",
                 "tool.failed",
+                "error",
+                "run.finished",
+            ],
+        ),
+        (
+            "interleaved_tool_timeout",
+            TerminalStatus.TOOL_SERVICE_FAILURE,
+            "native_tool_service_failed:WorkflowToolFailure",
+            [
+                "run.started",
+                "tool.requested",
+                "tool.started",
+                "tool.failed",
+                "agent.started",
+                "model.requested",
                 "error",
                 "run.finished",
             ],
@@ -718,10 +812,60 @@ def test_request_redaction_and_both_runner_environments(tmp_path: Path) -> None:
     assert "test-secret-token" not in json.dumps(redacted_request_payload(request))
     for project in ("runners/maf", "runners/langgraph"):
         result = subprocess.run(
-            ["uv", "run", "--project", project, "python", "-c", script],
+            ["uv", "run", "--project", project, "--no-sync", "python", "-c", script],
             input=encoded,
             capture_output=True,
             timeout=20,
         )
         assert result.returncode == 0, result.stderr.decode(errors="replace")
         assert result.stdout.decode().strip() == FrameworkLane.MAF_WORKFLOW.value
+
+
+def test_same_actor_concurrent_model_turns_keep_their_native_parents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agent_lab.runner_host._send", lambda _message: None)
+    control_plane = ControlPlane(tmp_path)
+    request = _request(control_plane, _manifest())
+    session = WorkflowProtocolSession(_descriptor(), request)
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+    finish_first = asyncio.Event()
+    finish_second = asyncio.Event()
+
+    async def turn(started: asyncio.Event, finish: asyncio.Event) -> None:
+        await session.model_started(actor="shared_actor", model="local-test")
+        started.set()
+        await finish.wait()
+        await session.model_finished(
+            actor="shared_actor",
+            model="local-test",
+            input_tokens=1,
+            output_tokens=1,
+        )
+
+    async def exercise() -> None:
+        first = asyncio.create_task(turn(first_started, finish_first))
+        await first_started.wait()
+        second = asyncio.create_task(turn(second_started, finish_second))
+        await second_started.wait()
+        finish_second.set()
+        await second
+        finish_first.set()
+        await first
+
+    asyncio.run(exercise())
+
+    requested = [event for event in session.events if event.kind is EventKind.MODEL_REQUESTED]
+    responded = [event for event in session.events if event.kind is EventKind.MODEL_RESPONDED]
+    agent_started = [event for event in session.events if event.kind is EventKind.AGENT_STARTED]
+    agent_finished = [event for event in session.events if event.kind is EventKind.AGENT_FINISHED]
+    assert [event.parent_event_id for event in responded] == [
+        requested[1].event_id,
+        requested[0].event_id,
+    ]
+    assert [event.parent_event_id for event in agent_finished] == [
+        agent_started[1].event_id,
+        agent_started[0].event_id,
+    ]

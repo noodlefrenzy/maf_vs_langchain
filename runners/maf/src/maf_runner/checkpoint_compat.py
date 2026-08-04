@@ -9,23 +9,16 @@ from typing import Never
 
 from agent_framework import (
     Executor,
-    FileCheckpointStorage,
     Workflow,
     WorkflowBuilder,
-    WorkflowCheckpoint,
     WorkflowContext,
     handler,
     response_handler,
 )
 
+from maf_runner.checkpoint_storage import OwnerOnlyCheckpointStorage
+
 _WORKFLOW_NAME = "agent-lab-approval-restart-compat"
-
-
-class _OwnerOnlyCheckpointStorage(FileCheckpointStorage):
-    async def save(self, checkpoint: WorkflowCheckpoint) -> str:
-        checkpoint_id = await super().save(checkpoint)
-        (self.storage_path / f"{checkpoint_id}.json").chmod(0o600)
-        return checkpoint_id
 
 
 class _ApprovalExecutor(Executor):
@@ -53,13 +46,13 @@ class _ApprovalExecutor(Executor):
         )
 
 
-def _storage(path: Path) -> _OwnerOnlyCheckpointStorage:
+def _storage(path: Path) -> OwnerOnlyCheckpointStorage:
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     path.chmod(0o700)
-    return _OwnerOnlyCheckpointStorage(path)
+    return OwnerOnlyCheckpointStorage(path)
 
 
-def _workflow(storage: _OwnerOnlyCheckpointStorage) -> Workflow:
+def _workflow(storage: OwnerOnlyCheckpointStorage) -> Workflow:
     approval = _ApprovalExecutor(id="approval")
     return WorkflowBuilder(
         start_executor=approval,

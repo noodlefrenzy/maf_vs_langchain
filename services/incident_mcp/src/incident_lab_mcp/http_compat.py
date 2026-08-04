@@ -32,6 +32,7 @@ async def check_http_transport() -> dict[str, object]:
         ttl_seconds=300,
         fault_profile="none",
     )
+    # Fixed non-production key: this hermetic probe needs reproducibility, not secrecy.
     signer = RunCredentialSigner(secret=b"h" * 32)
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -226,6 +227,7 @@ async def _framework_client_check(
         "run",
         "--project",
         project,
+        "--no-sync",
         "python",
         "-m",
         module,

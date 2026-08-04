@@ -18,6 +18,7 @@ from agent_lab.workflow_contracts import (
     evaluate_evidence,
     evidence_ids_from_text,
     invoke_tool_once,
+    invoke_tool_with_policy,
     render_tool_result,
     specialist_observation_prompt,
     workflow_contract_payload,
@@ -69,7 +70,14 @@ def test_workflow_contract_is_frozen_and_contains_no_dead_retry_fields() -> None
     assert payload["models"]["InvestigationTask"]["properties"] == {
         "public_ticket": {"title": "Public Ticket", "type": "string"}
     }
-    assert "may reconnect or retry" in SPECIALIST_OBSERVATION_INSTRUCTIONS
+    assert payload["tool_error_policy"] == {
+        "retryable_structured_error_retries": 1,
+        "non_retryable_error_retries": 0,
+        "structured_errors": "normalize_to_workflow_tool_failure",
+        "connection_replay": "framework_native_behavior_under_test",
+    }
+    assert "at most one shared application retry" in SPECIALIST_OBSERVATION_INSTRUCTIONS
+    assert "may also reconnect or retry" in SPECIALIST_OBSERVATION_INSTRUCTIONS
     with pytest.raises(ValidationError):
         InvestigationTask(public_ticket="ticket", attempt=1)  # type: ignore[call-arg]
 
@@ -138,10 +146,9 @@ def test_shared_prompt_is_transport_honest_and_role_bound() -> None:
         [{"tool": "query_service_health", "result": "{}"}],
     )
 
-    assert "requested each role-scoped MCP observation once" in prompt
-    assert "may reconnect or retry" in prompt
+    assert "at most one shared application retry" in prompt
+    assert "may also reconnect or retry" in prompt
     assert "Assigned role: telemetry_investigator" in prompt
-    assert "exactly once each with no retry" not in prompt
 
 
 def test_shared_result_parser_normalizes_both_native_client_shapes() -> None:
@@ -210,6 +217,92 @@ def test_tool_error_surfaces_normalize_without_hidden_adapter_retry(
     assert calls == 1
     assert failure.value.code == code
     assert failure.value.retryable is retryable
+
+
+@pytest.mark.parametrize(
+    ("retryable", "expected_calls", "expected_attempts"),
+    [
+        (True, 2, ["started", "failed", "started", "succeeded"]),
+        (False, 1, ["started", "failed"]),
+    ],
+)
+def test_shared_tool_policy_retries_only_retryable_structured_error_once(
+    retryable: bool,
+    expected_calls: int,
+    expected_attempts: list[str],
+) -> None:
+    calls = 0
+    attempts: list[str] = []
+
+    async def call() -> dict[str, str]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise WorkflowToolFailure(
+                code="transient_timeout" if retryable else "invalid_arguments",
+                retryable=retryable,
+                detail="deterministic policy probe",
+            )
+        return {"status": "ok"}
+
+    async def started() -> None:
+        attempts.append("started")
+
+    async def finished(succeeded: bool) -> None:
+        attempts.append("succeeded" if succeeded else "failed")
+
+    if retryable:
+        assert asyncio.run(
+            invoke_tool_with_policy(
+                call,
+                attempt_started=started,
+                attempt_finished=finished,
+            )
+        ) == {"status": "ok"}
+    else:
+        with pytest.raises(WorkflowToolFailure):
+            asyncio.run(
+                invoke_tool_with_policy(
+                    call,
+                    attempt_started=started,
+                    attempt_finished=finished,
+                )
+            )
+
+    assert calls == expected_calls
+    assert attempts == expected_attempts
+
+
+def test_shared_tool_policy_stops_after_second_retryable_failure() -> None:
+    calls = 0
+    attempts: list[bool] = []
+
+    async def call() -> None:
+        nonlocal calls
+        calls += 1
+        raise WorkflowToolFailure(
+            code="transient_timeout",
+            retryable=True,
+            detail="persistent deterministic policy probe",
+        )
+
+    async def started() -> None:
+        return None
+
+    async def finished(succeeded: bool) -> None:
+        attempts.append(succeeded)
+
+    with pytest.raises(WorkflowToolFailure):
+        asyncio.run(
+            invoke_tool_with_policy(
+                call,
+                attempt_started=started,
+                attempt_finished=finished,
+            )
+        )
+
+    assert calls == 2
+    assert attempts == [False, False]
 
 
 def test_role_stats_count_failed_dispatches_before_completion() -> None:

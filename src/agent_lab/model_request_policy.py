@@ -7,12 +7,16 @@ from typing import Any
 from agent_lab.contract_bundle import sha256_payload
 from agent_lab.contracts import AgentRole, FrameworkLane, ModelProfile
 
-_ACTORS = (
+_MULTI_AGENT_ACTORS = (
     AgentRole.TELEMETRY_INVESTIGATOR,
     AgentRole.CHANGE_INVESTIGATOR,
     AgentRole.RELIABILITY_REVIEWER,
     AgentRole.INCIDENT_COMMANDER,
 )
+_SINGLE_AGENT_LANES = {
+    FrameworkLane.MAF_SINGLE_AGENT,
+    FrameworkLane.LANGCHAIN_SINGLE_AGENT,
+}
 MODEL_PROFILE_FIELD_MAPPING = {
     "name": "wire.model",
     "base_url": "transport.base_url",
@@ -129,6 +133,7 @@ def effective_request_policy(
     """Describe and hash every effective input shared by actors in one lane."""
 
     validate_model_profile_support()
+    actors = (AgentRole.INCIDENT_COMMANDER,) if lane in _SINGLE_AGENT_LANES else _MULTI_AGENT_ACTORS
     actor_policy = {
         role.value: {
             "wire": openai_request_parameters(profile),
@@ -142,7 +147,7 @@ def effective_request_policy(
                 "context_window_tokens": profile.context_window_tokens,
             },
         }
-        for role in _ACTORS
+        for role in actors
     }
     shared_policy = {
         "schema_version": "model-request-policy/v1",

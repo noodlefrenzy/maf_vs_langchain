@@ -47,6 +47,8 @@ async def _execute_workflow(
         from maf_runner.workflow_lane import run_live_approved
     elif request.manifest.lane is FrameworkLane.MAF_HARNESS:
         from maf_runner.harness_lane import run_live_approved
+    elif request.manifest.lane is FrameworkLane.MAF_SINGLE_AGENT:
+        from maf_runner.baseline_lane import run_live_approved
     else:
         raise ValueError(f"unsupported MAF lane {request.manifest.lane.value}")
 
@@ -59,6 +61,7 @@ def descriptor() -> NativeRunnerDescriptor:
         supported_lanes=(
             FrameworkLane.MAF_WORKFLOW,
             FrameworkLane.MAF_HARNESS,
+            FrameworkLane.MAF_SINGLE_AGENT,
         ),
         framework_versions={
             "agent-framework-core": version("agent-framework-core"),
@@ -93,21 +96,43 @@ def descriptor() -> NativeRunnerDescriptor:
                     "reliability_reviewer",
                 ],
             },
+            FrameworkLane.MAF_SINGLE_AGENT: {
+                "kind": "single_agent_baseline",
+                "runtime": "agent_framework_agent",
+                "agent": "incident_commander",
+                "delegation": False,
+                "source_capabilities": [
+                    "telemetry_investigator",
+                    "change_investigator",
+                    "reliability_reviewer",
+                ],
+            },
         },
         normalized_topology={
             FrameworkLane.MAF_WORKFLOW: normalized_topology_for_lane(FrameworkLane.MAF_WORKFLOW),
             FrameworkLane.MAF_HARNESS: normalized_topology_for_lane(FrameworkLane.MAF_HARNESS),
+            FrameworkLane.MAF_SINGLE_AGENT: normalized_topology_for_lane(
+                FrameworkLane.MAF_SINGLE_AGENT
+            ),
         },
         checkpoint={
             FrameworkLane.MAF_WORKFLOW: CheckpointCapability(
                 resumable=True,
                 restart_safe=True,
                 format="agent-framework-file-checkpoint/v1",
+                production_ready=False,
             ),
             FrameworkLane.MAF_HARNESS: CheckpointCapability(
                 resumable=False,
                 restart_safe=False,
                 format="agent-framework-harness-process-local/v1",
+                production_ready=False,
+            ),
+            FrameworkLane.MAF_SINGLE_AGENT: CheckpointCapability(
+                resumable=False,
+                restart_safe=False,
+                format="agent-framework-agent-process-local/v1",
+                production_ready=False,
             ),
         },
     )

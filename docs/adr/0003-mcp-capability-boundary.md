@@ -1,6 +1,6 @@
 # ADR 0003: Make MCP the tool and capability boundary
 
-Status: Proposed
+Status: Accepted
 
 Date: 2026-07-31
 

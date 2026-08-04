@@ -10,13 +10,75 @@ import pytest
 
 from agent_lab.async_cleanup import shutdown_server
 from agent_lab.bundle_validation import validate_bundle
+from agent_lab.config import load_experiment
 from agent_lab.contract_bundle import contract_bundle_hashes, sha256_payload
-from agent_lab.contracts import Budget, FrameworkLane, ModelProfile
+from agent_lab.contracts import (
+    Budget,
+    FrameworkLane,
+    HarnessAblationProfile,
+    ModelProfile,
+    ResourceMetricsProfile,
+)
 from agent_lab.matched_contracts import normalized_topology_for_lane, preflight_pair_contract
 from agent_lab.runner_host import NativeRunnerDescriptor
 from agent_lab.runner_protocol import CheckpointCapability
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_full_workflow_tracing_ablation_profiles_change_only_tracing() -> None:
+    enabled = load_experiment(
+        REPOSITORY_ROOT / "configs/experiments/qwen35-9b-explicit-tracing-enabled-ablation.toml"
+    )
+    disabled = load_experiment(
+        REPOSITORY_ROOT / "configs/experiments/qwen35-9b-explicit-tracing-disabled-ablation.toml"
+    )
+
+    assert enabled.tracing.enabled is True
+    assert disabled.tracing.enabled is False
+    assert enabled.model_dump(exclude={"experiment_id", "tracing"}) == disabled.model_dump(
+        exclude={"experiment_id", "tracing"}
+    )
+    assert enabled.tracing.model_dump(exclude={"enabled"}) == disabled.tracing.model_dump(
+        exclude={"enabled"}
+    )
+    assert enabled.resource_metrics.enabled is True
+
+
+def test_only_interactive_observer_profile_changes_approval_policy() -> None:
+    profiles = {
+        path.name: load_experiment(path)
+        for path in (REPOSITORY_ROOT / "configs/experiments").glob("*.toml")
+    }
+
+    interactive = profiles.pop("qwen35-9b-observer-interactive-smoke.toml")
+
+    assert interactive.approval_policy == "observer"
+    assert all(profile.approval_policy == "scripted" for profile in profiles.values())
+
+
+@pytest.mark.parametrize(
+    ("profile_name", "changed_field", "changed_value"),
+    [
+        ("harness-no-review-ablation.toml", "reviewer_enabled", False),
+        ("harness-no-compaction-ablation.toml", "context_compaction", "disabled"),
+    ],
+)
+def test_harness_role_and_compaction_ablations_change_one_control(
+    profile_name: str,
+    changed_field: str,
+    changed_value: object,
+) -> None:
+    baseline = load_experiment(REPOSITORY_ROOT / "configs/experiments/harness-pilot.toml")
+    ablated = load_experiment(REPOSITORY_ROOT / "configs/experiments" / profile_name)
+
+    assert getattr(ablated.harness_ablation, changed_field) == changed_value
+    assert baseline.model_dump(exclude={"experiment_id", "harness_ablation"}) == (
+        ablated.model_dump(exclude={"experiment_id", "harness_ablation"})
+    )
+    baseline_controls = baseline.harness_ablation.model_dump(exclude={changed_field})
+    ablated_controls = ablated.harness_ablation.model_dump(exclude={changed_field})
+    assert baseline_controls == ablated_controls
 
 
 def test_incident_server_shutdown_is_bounded_and_closes_listener() -> None:
@@ -138,6 +200,9 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
         "output_tokens": 100,
         "approval_requests": 1,
     }
+    assert (
+        preflight["held_constants"]["case_manifest_sha256"] == summary["case_selection"]["sha256"]
+    )
     assert preflight["role_prompts_sha256"] == contract_bundle_hashes()["prompt_bundle_sha256"]
     assert preflight["tool_schemas_sha256"] == contract_bundle_hashes()["tool_catalog_sha256"]
     assert (
@@ -147,6 +212,13 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
         preflight["workflow_contract_sha256"]
         == contract_bundle_hashes()["workflow_contract_sha256"]
     )
+    assert (
+        preflight["harness_contract_sha256"] == contract_bundle_hashes()["harness_contract_sha256"]
+    )
+    assert (
+        preflight["baseline_contract_sha256"]
+        == contract_bundle_hashes()["baseline_contract_sha256"]
+    )
     execution_provenance = preflight["held_constants"]["execution_provenance"]
     assert execution_provenance["execution_mode"] == "protocol_probe"
     assert execution_provenance["source_worktree"]["measurement_eligible"] is False
@@ -155,6 +227,7 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
         "measurement_eligible": False,
     }
     assert preflight["execution_provenance_sha256"] == execution_provenance["provenance_sha256"]
+    observer_contexts = []
     for run in summary["runs"]:
         bundle = Path(run["bundle"])
         checkpoint = Path(run["world_checkpoint"])
@@ -171,6 +244,7 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
             json.loads((bundle / "native" / "pair-contract-preflight.json").read_text())
             == preflight
         )
+        observer_contexts.append(json.loads((bundle / "native" / "observer-pair.json").read_text()))
         request = (bundle / "native" / "run-request.redacted.json").read_text()
         assert '"token": "[REDACTED]"' in request
         assert "v1." not in request
@@ -183,7 +257,10 @@ def test_paired_native_probe_uses_equal_isolated_worlds(tmp_path: Path) -> None:
             "scores_missing",
             "completed_artifacts_missing",
         }
+    assert observer_contexts[0] == observer_contexts[1]
+    assert set(observer_contexts[0]["run_ids"]) == {run["run_id"] for run in summary["runs"]}
     assert Path(summary["index"]).is_file()
+    assert Path(summary["plan"]).is_file()
 
 
 @pytest.mark.parametrize(
@@ -206,6 +283,7 @@ def test_pair_contract_preflight_fails_closed_on_runner_drift(drift: str) -> Non
                     resumable=True,
                     restart_safe=True,
                     format="test",
+                    production_ready=False,
                 )
             },
         )
@@ -271,11 +349,84 @@ def test_pair_contract_preflight_fails_closed_on_runner_drift(drift: str) -> Non
                 approval_requests=1,
             ),
             fault_profile="none",
+            approval_policy="scripted",
+            harness_ablation=HarnessAblationProfile(),
+            resource_metrics=ResourceMetricsProfile(),
             source_commit="0" * 40,
             source_tree_sha256="1" * 64,
             execution_provenance_by_lane=execution_by_lane,
             world_manifest_sha256="2" * 64,
+            case_manifest_sha256="3" * 64,
         )
+
+
+def test_harness_preflight_freezes_effective_ablation_topology() -> None:
+    hashes = contract_bundle_hashes()
+    lanes = (FrameworkLane.MAF_HARNESS, FrameworkLane.DEEP_AGENTS)
+    descriptors = {
+        lane: SimpleNamespace(
+            contract_hashes=hashes,
+            normalized_topology={lane: normalized_topology_for_lane(lane)},
+        )
+        for lane in lanes
+    }
+    execution_snapshot = {
+        "schema_version": "execution-provenance/v1",
+        "execution_mode": "native_workflow",
+    }
+    execution = {
+        **execution_snapshot,
+        "provenance_sha256": sha256_payload(execution_snapshot),
+    }
+    ablation = HarnessAblationProfile(
+        reviewer_enabled=False,
+        context_compaction="disabled",
+    )
+
+    preflight = preflight_pair_contract(
+        track="opinionated_harness",
+        left_lane=lanes[0],
+        right_lane=lanes[1],
+        descriptors=descriptors,
+        expected_contract_hashes=hashes,
+        experiment_id="harness_ablation_test",
+        scenario="incident_response",
+        scenario_seed=42,
+        repetition=0,
+        model=ModelProfile(
+            name="local-test",
+            base_url="http://127.0.0.1:8000/v1",
+            temperature=0.2,
+            top_p=0.9,
+            max_output_tokens=1000,
+            context_window_tokens=8192,
+            request_timeout_seconds=60,
+        ),
+        budget=Budget(
+            wall_clock_seconds=10,
+            model_calls=4,
+            tool_calls=8,
+            output_tokens=2000,
+            approval_requests=1,
+        ),
+        fault_profile="none",
+        approval_policy="scripted",
+        harness_ablation=ablation,
+        resource_metrics=ResourceMetricsProfile(),
+        source_commit="0" * 40,
+        source_tree_sha256="1" * 64,
+        execution_provenance_by_lane={lane: execution for lane in lanes},
+        world_manifest_sha256="2" * 64,
+        case_manifest_sha256="3" * 64,
+    )
+
+    assert preflight["normalized_topology"]["specialists"] == [
+        "change_investigator",
+        "telemetry_investigator",
+    ]
+    assert preflight["normalized_topology"]["native_context_compaction"] == "disabled"
+    assert preflight["held_constants"]["approval_policy"] == "scripted"
+    assert preflight["held_constants"]["harness_ablation"] == ablation.model_dump(mode="json")
 
 
 def test_protocol_probe_refuses_to_overwrite_index(tmp_path: Path) -> None:
@@ -287,6 +438,28 @@ def test_protocol_probe_refuses_to_overwrite_index(tmp_path: Path) -> None:
     second = _run_probe(experiment, runs_dir, order_seed=991)
     assert second.returncode != 0
     assert "already exists" in second.stderr
+
+
+def test_single_agent_protocol_probe_uses_matched_isolated_worlds(tmp_path: Path) -> None:
+    experiment = _experiment(tmp_path / "experiment.toml")
+    body = experiment.read_text(encoding="utf-8").replace(
+        'lanes = ["maf_workflow", "langgraph"]',
+        'lanes = ["maf_single_agent", "langchain_single_agent"]',
+    )
+    experiment.write_text(body, encoding="utf-8")
+
+    result = _run_probe(experiment, tmp_path / "runs", order_seed=733)
+
+    assert result.returncode == 0, result.stderr
+    summary = json.loads(result.stdout)
+    assert {run["lane"] for run in summary["runs"]} == {
+        "maf_single_agent",
+        "langchain_single_agent",
+    }
+    preflight = summary["blocks"][0]["contract_preflights"]["single_agent_baseline"]
+    assert preflight["normalized_topology"] == normalized_topology_for_lane(
+        FrameworkLane.MAF_SINGLE_AGENT
+    )
 
 
 def test_native_workflow_mode_requires_one_matched_track(tmp_path: Path) -> None:
@@ -315,7 +488,62 @@ def test_native_workflow_mode_requires_one_matched_track(tmp_path: Path) -> None
     )
 
     assert result.returncode != 0
-    assert "requires exactly one matched track" in result.stderr
+    assert "protocol-probe profile cannot run as a native workflow" in result.stderr
+
+
+def test_pilot_plan_freezes_all_families_and_balances_lane_order() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(REPOSITORY_ROOT / "services/incident_mcp"),
+            "--no-sync",
+            "python",
+            "-m",
+            "incident_lab_mcp.experiment_control",
+            "--repository-root",
+            str(REPOSITORY_ROOT),
+            "--experiment",
+            str(REPOSITORY_ROOT / "configs/experiments/explicit-pilot.toml"),
+            "--order-seed",
+            "1729",
+            "--mode",
+            "plan",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(result.stdout)
+    assert plan["status"] == "ok"
+    assert plan["execution_mode"] == "native_workflow"
+    assert plan["case_selection"]["frozen"] is True
+    assert plan["case_selection"]["source"] == "configs/cases/pilot-v1.json"
+    assert len(plan["case_selection"]["sha256"]) == 64
+    assert {block["case"]["variant"] for block in plan["blocks"]} == {
+        "retry_storm",
+        "connection_pool_exhaustion",
+        "feature_flag_mismatch",
+        "schema_drift",
+        "cache_ttl_regression",
+    }
+    assert len(plan["blocks"]) == 15
+    first_lane_counts = {
+        lane: sum(block["lane_order"][0] == lane for block in plan["blocks"])
+        for lane in ("maf_workflow", "langgraph")
+    }
+    assert abs(first_lane_counts["maf_workflow"] - first_lane_counts["langgraph"]) == 1
+    for seed in (101, 202, 303, 400, 505):
+        orders = {
+            tuple(block["lane_order"]) for block in plan["blocks"] if block["case"]["seed"] == seed
+        }
+        assert orders == {
+            ("maf_workflow", "langgraph"),
+            ("langgraph", "maf_workflow"),
+        }
 
 
 @pytest.mark.skipif(

@@ -107,8 +107,8 @@ uv run --no-sync python -m agent_lab.model_compat_suite \
   --output runs/model-compatibility/lonestar-aligned-qwen3-next-80b.json
 ```
 
-This is the active smoke-development profile, not a replacement for the RTX
-4090 vLLM characterization required by issue 13 or the final paired-study model
+This is the active smoke-development profile, not a replacement for the
+completed RTX 4090 vLLM characterization or the final paired-study model
 selection. Both framework lanes must still use the same profile within a pair.
 
 ## Fit-check model: Qwen3.5-9B
@@ -126,9 +126,10 @@ Qwen3.5-9B:
 [Official Qwen3.5-9B model card](https://huggingface.co/Qwen/Qwen3.5-9B)
 
 The model card's maximum context is not a promise that 262K fits on this GPU.
-The initial 32K profile is a deliberate fit-test compromise. Peak VRAM,
-effective KV-cache capacity, and agent quality after long tool histories must
-be measured.
+The 32K profile is a deliberate fit-test compromise. Peak VRAM, effective
+KV-cache capacity, and client compatibility through long tool histories are
+recorded in the completed characterization; task-pilot quality remains a
+separate model-selection gate.
 
 Qwen recommends thinking-mode sampling parameters for general tasks around
 temperature 1.0, top-p 0.95, and top-k 20. The first profile follows those
@@ -136,7 +137,20 @@ values; framework adapters must pass any extra supported parameters explicitly
 and record the actual request. [Official Qwen3.5-9B model
 card](https://huggingface.co/Qwen/Qwen3.5-9B)
 
-## Quality-tier candidate: Qwen3.5-35B-A3B GPTQ Int4
+The pinned official BF16 weights did not leave usable KV cache on the 24 GB
+device, and bounded CPU offload failed in the pinned Qwen GDN/Triton path. The
+accepted profile instead loads the same official safetensors with the image's
+quarantined BitsAndBytes 4-bit support and BF16 compute. It served 8K, 16K, and
+32K contexts at concurrency two with peak whole-GPU allocation between 22,504
+and 22,924 MiB across the pre/post-restart runs. Cancellation and
+malformed-history recovery passed at every context, and both native framework
+clients passed the full 32K compatibility gate before and after restart. See the
+[executable runbook and measured results](qwen35-9b-characterization.md) for
+the frozen identities, throughput matrix, restart comparison, and evidence
+hashes. This establishes fit and compatibility, not sufficient task quality
+for the final paired study.
+
+## Rejected quality-tier candidate: Qwen3.5-35B-A3B GPTQ Int4
 
 The 35B-A3B model activates about 3B parameters per token and the official
 GPTQ-Int4 repository is about 24.5 GB. That repository size already approaches
@@ -147,9 +161,35 @@ card](https://huggingface.co/Qwen/Qwen3.5-35B-A3B),
 [official GPTQ-Int4
 files](https://huggingface.co/Qwen/Qwen3.5-35B-A3B-GPTQ-Int4/tree/main)
 
-The available 128 GB host RAM makes bounded offload possible, but PCIe transfer,
-kernel support, latency, and context capacity must be characterized. MoE active
-parameter count does not reduce the need to store all expert weights.
+The available 128 GB host RAM made bounded offload worth testing, but MoE active
+parameter count does not reduce the need to store all expert weights. The
+pinned official revision
+`3af5ca2972faf6de1fd6f4efc4d8d319ca751e8b` loaded all 14 shards at both the
+staged 16K/8 GiB-offload setting and a reduced 8K/2 GiB-offload diagnostic
+setting. Engine initialization then failed in each case because a Triton kernel
+received a CPU tensor: first in the Qwen GDN prefill path, then in the WNA16 MoE
+path. Eager mode did not remove the second failure.
+
+The reduced run used one sequence and 4,096 batched tokens. It still consumed
+18.02 GiB for model loading after 2.13 GiB was offloaded. Restoring those
+parameters to the GPU would consume essentially all VRAM currently available
+under WSL before useful KV cache. The 35B candidate is therefore rejected on
+the present single-4090/pinned-vLLM topology. See the
+[failed quality-tier gate record](qwen35-35b-a3b-gate.md). A different model,
+multi-GPU serving, or a server with supported layer-aware offload is required.
+
+## Accepted quality-tier topology: Qwen3.5-27B Q4_K_M on llama.cpp
+
+A pinned 17.98 GB GGUF conversion of the official dense Qwen3.5-27B model
+changes the failed vLLM/offload topology to a fully GPU-resident llama.cpp path
+at a 16K/two-slot operating point. The
+artifact is third-party and is therefore frozen by repository revision and
+content SHA-256; no result is accepted from an unpinned alias. The
+restart-separated characterizations, full client compatibility suite, and both
+paired task-quality lanes passed at source `6989bb0`, promoting this exact
+artifact/runtime profile to the five-seed pilots. Its 23,229 MiB observed peak
+leaves only about 1.3 GiB of whole-device margin. The full record is in
+[qwen35-27b-llamacpp-gate.md](qwen35-27b-llamacpp-gate.md).
 
 ## Why not pick the largest model immediately
 
@@ -171,14 +211,14 @@ Model selection should use a two-stage gate:
 
 ## Required characterization matrix
 
-The executable, pinned protocol for the fit-check is in
+The executed, pinned protocol for the fit-check is in
 [`qwen35-9b-characterization.md`](qwen35-9b-characterization.md). It separates
 artifact acquisition from offline measured runs and reserves port 8001 so the
 lonestar development tunnel on port 8000 is unaffected.
 
 | Dimension | Values |
 | --- | --- |
-| Model | Qwen3.5-9B BF16; 35B-A3B GPTQ Int4 if viable |
+| Model | Qwen3.5-9B BitsAndBytes 4-bit with BF16 compute; BF16 and CPU offload rejected; 35B-A3B GPTQ Int4 also rejected on the single-4090 vLLM topology |
 | Context | 8K, 16K, 32K; larger only if it fits |
 | Concurrency | 1 and 2 in-flight requests |
 | Prompt type | plain reasoning, one tool, multi-step tools, parallel tools, malformed tool recovery |

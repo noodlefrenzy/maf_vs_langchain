@@ -15,7 +15,6 @@ from typing import Annotated, Any, TypedDict
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
@@ -43,7 +42,7 @@ from agent_lab.workflow_contracts import (
     commander_synthesis_prompt,
     evaluate_evidence,
     evidence_ids_from_text,
-    invoke_tool_once,
+    invoke_tool_with_policy,
     observation_calls,
     render_tool_result,
     specialist_observation_prompt,
@@ -51,6 +50,10 @@ from agent_lab.workflow_contracts import (
 )
 from agent_lab.workflow_errors import EvidenceGateFailed
 from agent_lab.workflow_telemetry import NOOP_WORKFLOW_TELEMETRY, WorkflowTelemetry
+from langgraph_runner.chat_telemetry import (
+    ProviderMetricsChatOpenAI,
+    provider_telemetry_from_message,
+)
 from langgraph_runner.checkpoint_compat import _FileBackedSaver
 
 Investigator = Callable[["InvestigationTask"], Awaitable["SpecialistFinding"]]
@@ -274,7 +277,7 @@ class LangGraphRoleAgent:
         )
         self._tools: dict[str, BaseTool] = {}
         self._called_tools: list[str] = []
-        client = ChatOpenAI(
+        client = ProviderMetricsChatOpenAI(
             api_key="agent-lab-local",
             default_headers=model_request_headers("langgraph", role.value),
             **langchain_model_kwargs(profile),
@@ -317,12 +320,23 @@ class LangGraphRoleAgent:
         response = await self._structured_client.ainvoke(
             [("system", render_role_prompt(self.role)), ("user", prompt)]
         )
-        usage = _usage(response.get("raw") if isinstance(response, dict) else None)
+        raw_response = response.get("raw") if isinstance(response, dict) else None
+        usage = _usage(raw_response)
         await self.telemetry.model_finished(
             actor=self.role.value,
             model=self.profile.name,
             input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
+            cached_input_tokens=usage["cached_input_tokens"],
+            reasoning_tokens=usage["reasoning_tokens"],
+            parser_outcome=(
+                "structured_parse_succeeded"
+                if isinstance(response, dict)
+                and response.get("parsing_error") is None
+                and isinstance(response.get("parsed"), SpecialistFinding)
+                else "structured_parse_failed"
+            ),
+            **provider_telemetry_from_message(raw_response),
         )
         if not isinstance(response, dict):
             raise TypeError(f"{self.role.value} returned an invalid structured response")
@@ -362,24 +376,26 @@ class LangGraphRoleAgent:
         return finding
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        self._called_tools.append(name)
-        self.stats = self.stats.tool_dispatched()
-        await self.telemetry.tool_started(actor=self.role.value, tool_name=name)
-        try:
-            result = await invoke_tool_once(lambda: self._tools[name].ainvoke(arguments))
-        except Exception:
+        async def call() -> Any:
+            self._called_tools.append(name)
+            return await self._tools[name].ainvoke(arguments)
+
+        async def attempt_started() -> None:
+            self.stats = self.stats.tool_dispatched()
+            await self.telemetry.tool_started(actor=self.role.value, tool_name=name)
+
+        async def attempt_finished(succeeded: bool) -> None:
             await self.telemetry.tool_finished(
                 actor=self.role.value,
                 tool_name=name,
-                succeeded=False,
+                succeeded=succeeded,
             )
-            raise
-        await self.telemetry.tool_finished(
-            actor=self.role.value,
-            tool_name=name,
-            succeeded=True,
+
+        return await invoke_tool_with_policy(
+            call,
+            attempt_started=attempt_started,
+            attempt_finished=attempt_finished,
         )
-        return result
 
 
 class LangGraphCommanderAgent:
@@ -407,7 +423,7 @@ class LangGraphCommanderAgent:
         )
         self._tools: dict[str, BaseTool] = {}
         self._called_tools: list[str] = []
-        client = ChatOpenAI(
+        client = ProviderMetricsChatOpenAI(
             api_key="agent-lab-local",
             default_headers=model_request_headers(
                 "langgraph",
@@ -444,12 +460,23 @@ class LangGraphCommanderAgent:
         response = await self._structured_client.ainvoke(
             [("system", render_role_prompt(AgentRole.INCIDENT_COMMANDER)), ("user", prompt)]
         )
-        usage = _usage(response.get("raw") if isinstance(response, dict) else None)
+        raw_response = response.get("raw") if isinstance(response, dict) else None
+        usage = _usage(raw_response)
         await self.telemetry.model_finished(
             actor=AgentRole.INCIDENT_COMMANDER.value,
             model=self.profile.name,
             input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
+            cached_input_tokens=usage["cached_input_tokens"],
+            reasoning_tokens=usage["reasoning_tokens"],
+            parser_outcome=(
+                "structured_parse_succeeded"
+                if isinstance(response, dict)
+                and response.get("parsing_error") is None
+                and isinstance(response.get("parsed"), CommanderSynthesis)
+                else "structured_parse_failed"
+            ),
+            **provider_telemetry_from_message(raw_response),
         )
         if not isinstance(response, dict):
             raise TypeError("incident commander returned an invalid structured response")
@@ -520,33 +547,60 @@ class LangGraphCommanderAgent:
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         actor = AgentRole.INCIDENT_COMMANDER.value
-        self._called_tools.append(name)
-        self.stats = self.stats.tool_dispatched()
-        await self.telemetry.tool_started(actor=actor, tool_name=name)
-        try:
-            result = await invoke_tool_once(lambda: self._tools[name].ainvoke(arguments))
-        except Exception:
+
+        async def call() -> Any:
+            self._called_tools.append(name)
+            return await self._tools[name].ainvoke(arguments)
+
+        async def attempt_started() -> None:
+            self.stats = self.stats.tool_dispatched()
+            await self.telemetry.tool_started(actor=actor, tool_name=name)
+
+        async def attempt_finished(succeeded: bool) -> None:
             await self.telemetry.tool_finished(
                 actor=actor,
                 tool_name=name,
-                succeeded=False,
+                succeeded=succeeded,
             )
-            raise
-        await self.telemetry.tool_finished(
-            actor=actor,
-            tool_name=name,
-            succeeded=True,
+
+        return await invoke_tool_with_policy(
+            call,
+            attempt_started=attempt_started,
+            attempt_finished=attempt_finished,
         )
-        return result
 
 
-def _usage(raw: Any) -> dict[str, int]:
+class _Usage(TypedDict):
+    input_tokens: int
+    output_tokens: int
+    cached_input_tokens: int | None
+    reasoning_tokens: int | None
+
+
+def _usage(raw: Any) -> _Usage:
     if not isinstance(raw, AIMessage):
-        return {"input_tokens": 0, "output_tokens": 0}
+        return {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": None,
+            "reasoning_tokens": None,
+        }
     usage = raw.usage_metadata or {}
+    input_details = usage.get("input_token_details") or {}
+    output_details = usage.get("output_token_details") or {}
     return {
         "input_tokens": int(usage.get("input_tokens", 0)),
         "output_tokens": int(usage.get("output_tokens", 0)),
+        "cached_input_tokens": (
+            int(input_details["cache_read"])
+            if input_details.get("cache_read") is not None
+            else None
+        ),
+        "reasoning_tokens": (
+            int(output_details["reasoning"])
+            if output_details.get("reasoning") is not None
+            else None
+        ),
     }
 
 

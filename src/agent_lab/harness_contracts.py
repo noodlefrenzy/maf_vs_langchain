@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agent_lab.contracts import AgentRole, ApprovalDecision, ApprovalRequest
+from agent_lab.contracts import (
+    AgentRole,
+    ApprovalDecision,
+    ApprovalRequest,
+    HarnessAblationProfile,
+)
 from agent_lab.prompt_bundle import render_role_prompt
 from agent_lab.scenario import MitigationActionId
-from agent_lab.tool_catalog import MitigationResult, RecoveryCheckResult
+from agent_lab.tool_catalog import (
+    MitigationResult,
+    RecoveryCheckResult,
+    ToolDefinition,
+    tool_definitions_for_role,
+)
 
 SPECIALIST_ROLES = frozenset(
     {
@@ -18,6 +30,23 @@ SPECIALIST_ROLES = frozenset(
         AgentRole.RELIABILITY_REVIEWER,
     }
 )
+
+MIN_HARNESS_SPECIALIST_ROLES = 2
+HARNESS_DELEGATION_REPAIR_TURNS = 2
+HARNESS_PROVENANCE_CORRECTION_TURNS = 1
+HARNESS_PHASE_MODEL_CALL_LIMIT = 6
+HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT = 4
+HARNESS_DELEGATION_RECURSION_LIMIT = 64
+HARNESS_SYNTHESIS_RECURSION_LIMIT = 16
+HARNESS_SPECIALIST_EXCLUDED_PUBLIC_TOOLS = frozenset({"get_incident_brief", "get_incident_status"})
+
+
+@dataclass(frozen=True)
+class HarnessRoleObservation:
+    """Framework-neutral native tool evidence observed for one specialist."""
+
+    called_tools: frozenset[str]
+    evidence_ids: frozenset[str]
 
 
 class HarnessModel(BaseModel):
@@ -66,7 +95,7 @@ class HarnessEvidencePacket(HarnessModel):
     evidence_ids: list[str]
     independent_roles: list[AgentRole]
     gate_reasons: list[str]
-    attempt: int = Field(default=0, ge=0, le=1)
+    attempt: int = Field(default=0, ge=0, le=2)
 
 
 class HarnessApprovalResponse(HarnessModel):
@@ -113,7 +142,146 @@ class HarnessExecutionResult(HarnessModel):
         return self
 
 
-def evaluate_harness_proposal(proposal: HarnessProposal) -> HarnessEvidencePacket:
+def harness_specialist_tool_definitions(
+    role: AgentRole,
+) -> tuple[ToolDefinition, ...]:
+    """Return evidence-producing MCP tools exposed during a specialist phase."""
+
+    if role not in SPECIALIST_ROLES:
+        raise ValueError(f"{role.value} is not a harness specialist role")
+    definitions = tuple(
+        definition
+        for definition in tool_definitions_for_role(role)
+        if definition.name not in HARNESS_SPECIALIST_EXCLUDED_PUBLIC_TOOLS
+    )
+    if not definitions:
+        raise RuntimeError(f"{role.value} has no harness evidence tools")
+    non_evidence_tools = [
+        definition.name
+        for definition in definitions
+        if "evidence_id" not in definition.output_model.model_fields
+    ]
+    if non_evidence_tools:
+        raise RuntimeError(
+            f"{role.value} harness tools do not return evidence IDs: {non_evidence_tools}"
+        )
+    return definitions
+
+
+def active_harness_roles(
+    observations: Mapping[AgentRole, HarnessRoleObservation],
+) -> set[AgentRole]:
+    """Return specialist roles proven active by a role-specific evidence call."""
+
+    return {role for role, observation in observations.items() if observation.called_tools}
+
+
+def require_harness_delegation(
+    observations: Mapping[AgentRole, HarnessRoleObservation],
+) -> None:
+    """Fail closed unless role-specific evidence activity proves two-role delegation."""
+
+    if len(active_harness_roles(observations)) < MIN_HARNESS_SPECIALIST_ROLES:
+        raise ValueError("harness delegation did not satisfy the two-specialist MCP gate")
+
+
+def validate_harness_role_provenance(
+    proposal: HarnessProposal,
+    observations: Mapping[AgentRole, HarnessRoleObservation],
+) -> None:
+    """Reject findings whose claimed tools or evidence lack native-call provenance."""
+
+    for finding in proposal.findings:
+        observation = observations.get(finding.role)
+        if observation is None or not observation.called_tools:
+            raise ValueError(f"{finding.role.value} made no native MCP calls")
+        unknown_tools = set(finding.tools_used) - observation.called_tools
+        if unknown_tools:
+            raise ValueError(
+                f"{finding.role.value} cited tools outside its native MCP calls: "
+                f"unknown={sorted(unknown_tools)}, "
+                f"observed={sorted(observation.called_tools)}"
+            )
+        if not set(finding.evidence_ids).issubset(observation.evidence_ids):
+            raise ValueError(
+                f"{finding.role.value} cited evidence outside its native MCP results: "
+                f"cited={finding.evidence_ids}, observed={sorted(observation.evidence_ids)}"
+            )
+
+
+def harness_provenance_allowlist(
+    observations: Mapping[AgentRole, HarnessRoleObservation],
+) -> str:
+    """Render the same deterministic role-scoped provenance allowlist for both lanes."""
+
+    return "\n".join(
+        (
+            f"- {role.value}: tools_used={sorted(observation.called_tools)}; "
+            f"evidence_ids={sorted(observation.evidence_ids)}"
+        )
+        for role, observation in sorted(observations.items(), key=lambda item: item[0].value)
+        if observation.called_tools
+    )
+
+
+def harness_delegation_repair_prompt(missing_roles: list[str]) -> str:
+    """Return the matched repair instruction for an under-delegated coordinator."""
+
+    return (
+        "The deterministic evidence gate is not yet satisfied: fewer than two specialist "
+        "roles have made real MCP calls. Delegate now to at least one of these remaining "
+        f"specialists and retrieve its completed result: {missing_roles}. Do not invent the "
+        "result yourself. This repair phase has the same hard six-response limit; delegate "
+        "immediately instead of doing optional planning or workspace work first."
+    )
+
+
+def harness_background_result_retrieval_prompt() -> str:
+    """Return the frozen MAF-native result-retrieval instruction after task drain."""
+
+    return (
+        "All started background specialist tasks have now settled. Use only the native "
+        "background-agent result tools to retrieve their completed results into this "
+        "conversation. Do not start another task, do specialist MCP work yourself, or invent a "
+        "result. Finish this retrieval turn as soon as the available completed results are "
+        "present."
+    )
+
+
+def harness_synthesis_prompt(provenance_allowlist: str) -> str:
+    """Return the matched structured-synthesis instruction for both harness lanes."""
+
+    return (
+        "Using only the completed specialist task results already in this conversation, return "
+        "the HarnessProposal now. Include no finding that was not returned by a specialist. "
+        "Opaque evidence IDs must be copied byte-for-byte; do not replace them with dates, "
+        "descriptions, or invented aliases. The control plane observed this role-specific "
+        f"provenance allowlist:\n{provenance_allowlist}\nFor each finding, tools_used and "
+        "evidence_ids must contain only nonempty exact entries from that role's lists. Never "
+        "include planning, workspace, task-management, background-agent, placeholder, or blank "
+        "tool names. The commander synthesis must cite exact evidence IDs from at least two "
+        "included roles."
+    )
+
+
+def harness_provenance_correction_prompt(error: ValueError, provenance_allowlist: str) -> str:
+    """Return the sole matched repair instruction after provenance validation fails."""
+
+    return (
+        "The previous structured proposal failed the deterministic provenance validator: "
+        f"{error}. Return one corrected HarnessProposal. Copy only exact nonempty tools_used "
+        "and evidence_ids entries from this role-specific provenance allowlist, keep findings "
+        "scoped to their roles, and remove all planning, workspace, task-management, "
+        "background-agent, placeholder, or blank names:\n"
+        f"{provenance_allowlist}"
+    )
+
+
+def evaluate_harness_proposal(
+    proposal: HarnessProposal,
+    *,
+    attempt: int = 0,
+) -> HarnessEvidencePacket:
     """Apply the framework-neutral evidence gate after native harness delegation."""
 
     available_ids = {
@@ -147,17 +315,48 @@ def evaluate_harness_proposal(proposal: HarnessProposal) -> HarnessEvidencePacke
         evidence_ids=sorted(available_ids),
         independent_roles=cited_roles,
         gate_reasons=reasons,
+        attempt=attempt,
     )
 
 
-def harness_task_prompt(public_ticket: str) -> str:
+def harness_task_prompt(
+    public_ticket: str,
+    prompt_variant: Literal["canonical", "paraphrase_a"] = "canonical",
+    reviewer_enabled: bool = True,
+) -> str:
     """Render the byte-identical user-authored coordinator task for both harnesses."""
 
+    if prompt_variant == "paraphrase_a":
+        delegation = (
+            "at least two role-scoped specialists chosen from telemetry, change, and reliability"
+            if reviewer_enabled
+            else "both role-scoped telemetry and change specialists"
+        )
+        return (
+            f"Incident ticket:\n{public_ticket}\n\n"
+            "Act as the incident commander and investigate with the harness's native planning "
+            f"and workspace features. Evidence gathering must be delegated to {delegation}; "
+            "never do "
+            "their MCP work yourself or fabricate a specialist response. Establish event order "
+            "from at least two independent evidence IDs, then select the least-destructive "
+            "reversible mitigation. Copy its canonical runbook action ID into "
+            "proposed_mitigation_id and put the readable action in proposed_mitigation. Return "
+            "one HarnessProposal containing the real findings from every consulted specialist "
+            "and one commander synthesis. Approval, mitigation, and recovery belong to the "
+            "outer control plane and must not be claimed here. The delegation phase has a hard "
+            "six-response limit: delegate immediately before optional planning or workspace "
+            "work."
+        )
+    delegation = (
+        "at least two of the role-scoped telemetry, change, and reliability specialists"
+        if reviewer_enabled
+        else "both role-scoped telemetry and change specialists"
+    )
     return (
         f"Public ticket:\n{public_ticket}\n\n"
         "Investigate and respond as incident commander. Use the native harness planning and "
-        "workspace facilities. You must delegate evidence collection to at least two of the "
-        "role-scoped telemetry, change, and reliability specialists; do not perform their MCP "
+        f"workspace facilities. You must delegate evidence collection to {delegation}; do not "
+        "perform their MCP "
         "work yourself and do not invent a finding for a specialist you did not call. Collect at "
         "least two independently sourced evidence identifiers, establish chronology, and choose "
         "the least-destructive reversible mitigation. Use the canonical action ID from the "
@@ -165,18 +364,153 @@ def harness_task_prompt(public_ticket: str) -> str:
         "description in proposed_mitigation. Return the HarnessProposal schema with "
         "each consulted specialist's actual finding and one commander synthesis. Do not claim "
         "that approval, mitigation, or recovery has occurred; the outer control plane owns those "
-        "steps."
+        "steps. The delegation phase has a hard six-response limit: delegate immediately before "
+        "optional planning or workspace work."
     )
 
 
-def harness_specialist_prompt(role: AgentRole) -> str:
+def harness_specialist_roles(profile: HarnessAblationProfile) -> frozenset[AgentRole]:
+    """Return the exact specialist set exposed by a matched harness ablation."""
+
+    if profile.reviewer_enabled:
+        return SPECIALIST_ROLES
+    return SPECIALIST_ROLES - {AgentRole.RELIABILITY_REVIEWER}
+
+
+def harness_specialist_prompt(
+    role: AgentRole,
+    prompt_variant: Literal["canonical", "paraphrase_a"] = "canonical",
+) -> str:
     """Render the matched natural-text completion contract for harness specialists."""
 
+    if prompt_variant == "paraphrase_a":
+        return (
+            f"{render_role_prompt(role)}\n\n"
+            "Gather enough evidence with only your role-scoped MCP tools. The coordinator "
+            "already supplied the public incident context, so only role-specific evidence "
+            f"tools are exposed. Tools are available for exactly the first "
+            f"{HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT} model responses and are mechanically "
+            "disabled on the next response. Finish that tool-disabled response with a bare "
+            "JSON object—no "
+            "Markdown—whose fields are exactly "
+            "role, summary, claims, evidence_ids, tools_used, and uncertainties. Use your role "
+            "ID for role, copy only evidence IDs observed in your own tool results, and name "
+            "only MCP tools you actually invoked. Your subtask has a hard six-response limit; "
+            "reserve the final response for this JSON even if uncertainty remains."
+        )
     return (
         f"{render_role_prompt(role)}\n\n"
-        "Use your role-scoped MCP tools to gather sufficient evidence, then stop calling tools. "
-        "Your final assistant message must be one JSON object with exactly these fields: role, "
+        "Use your role-scoped MCP tools to gather sufficient evidence. The coordinator already "
+        "supplied the public incident context, so only role-specific evidence tools are exposed. "
+        "Use no "
+        f"more than {HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT} tool-calling responses. Tools are "
+        "then mechanically disabled; use that next response for one JSON object with exactly "
+        "these "
+        "fields: role, "
         "summary, claims, evidence_ids, tools_used, and uncertainties. Set role to your role ID; "
         "cite only evidence IDs returned by your own MCP calls; list only MCP tools you actually "
-        "called. Do not wrap the JSON in Markdown."
+        "called. Do not wrap the JSON in Markdown. Your subtask has a hard six-response limit; "
+        "reserve the final response for this JSON even if uncertainty remains."
     )
+
+
+def harness_ablation_payload(profile: HarnessAblationProfile) -> dict[str, object]:
+    """Return the exact matched harness prompts and bounded correction policy."""
+
+    active_roles = harness_specialist_roles(profile)
+    return {
+        "schema_version": "harness-ablation/v2",
+        "prompt_variant": profile.prompt_variant,
+        "provenance_correction_turns": profile.provenance_correction_turns,
+        "reviewer_enabled": profile.reviewer_enabled,
+        "context_compaction": profile.context_compaction,
+        "active_specialist_roles": sorted(role.value for role in active_roles),
+        "prompts": {
+            "task_template": harness_task_prompt(
+                "{public_ticket}",
+                profile.prompt_variant,
+                profile.reviewer_enabled,
+            ),
+            "specialists": {
+                role.value: harness_specialist_prompt(role, profile.prompt_variant)
+                for role in sorted(active_roles, key=lambda item: item.value)
+            },
+            "delegation_repair_template": harness_delegation_repair_prompt(
+                ["{remaining_specialist_roles}"]
+            ),
+            "background_result_retrieval_template": (harness_background_result_retrieval_prompt()),
+            "synthesis_template": harness_synthesis_prompt("{role_provenance_allowlist}"),
+            "provenance_correction_template": harness_provenance_correction_prompt(
+                ValueError("{validator_error}"),
+                "{role_provenance_allowlist}",
+            ),
+        },
+    }
+
+
+def harness_contract_payload() -> dict[str, object]:
+    """Return the frozen framework-neutral opinionated-harness contract."""
+
+    return {
+        "schema_version": "0.1.0",
+        "specialist_roles": sorted(role.value for role in SPECIALIST_ROLES),
+        "delegation": {
+            "minimum_active_specialist_roles": MIN_HARNESS_SPECIALIST_ROLES,
+            "repair_turns": HARNESS_DELEGATION_REPAIR_TURNS,
+            "activity_proof": "at_least_one_role_specific_evidence_call",
+            "completion_barrier": "settle_all_started_specialist_tasks_before_gate",
+            "background_result_retrieval": "bounded_native_turn_after_task_settlement",
+            "exceptional_exit": "cancel_and_drain_started_specialist_tasks",
+            "failure_mode": "error",
+        },
+        "provenance": {
+            "correction_turns": HARNESS_PROVENANCE_CORRECTION_TURNS,
+            "supported_correction_turns": [0, 1, 2],
+            "claimed_tools_must_be_observed": True,
+            "claimed_evidence_ids_must_be_observed_for_same_role": True,
+            "failure_mode": "error",
+        },
+        "specialist_tool_catalogs": {
+            "excluded_public_context_tools": sorted(HARNESS_SPECIALIST_EXCLUDED_PUBLIC_TOOLS),
+            "roles": {
+                role.value: [
+                    definition.name for definition in harness_specialist_tool_definitions(role)
+                ]
+                for role in sorted(SPECIALIST_ROLES, key=lambda item: item.value)
+            },
+        },
+        "phase_limits": {
+            "model_calls": HARNESS_PHASE_MODEL_CALL_LIMIT,
+            "specialist_tool_calling_responses": HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT,
+            "specialist_completion_response": HARNESS_SPECIALIST_TOOL_RESPONSE_LIMIT + 1,
+            "specialist_completion_tool_choice": "none",
+            "delegation_recursion": HARNESS_DELEGATION_RECURSION_LIMIT,
+            "synthesis_recursion": HARNESS_SYNTHESIS_RECURSION_LIMIT,
+        },
+        "prompts": {
+            "task_template": harness_task_prompt("{public_ticket}"),
+            "specialists": {
+                role.value: harness_specialist_prompt(role)
+                for role in sorted(SPECIALIST_ROLES, key=lambda item: item.value)
+            },
+            "delegation_repair_template": harness_delegation_repair_prompt(
+                ["{remaining_specialist_roles}"]
+            ),
+            "background_result_retrieval_template": (harness_background_result_retrieval_prompt()),
+            "synthesis_template": harness_synthesis_prompt("{role_provenance_allowlist}"),
+            "provenance_correction_template": harness_provenance_correction_prompt(
+                ValueError("{validator_error}"),
+                "{role_provenance_allowlist}",
+            ),
+        },
+        "ablation_space": {
+            "prompt_variants": ["canonical", "paraphrase_a"],
+            "reviewer_enabled": [True, False],
+            "context_compaction": ["native", "disabled"],
+            "effective_payload_schema": "harness-ablation/v2",
+        },
+        "schemas": {
+            "proposal": HarnessProposal.model_json_schema(),
+            "evidence_packet": HarnessEvidencePacket.model_json_schema(),
+        },
+    }

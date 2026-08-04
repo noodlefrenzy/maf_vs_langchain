@@ -97,6 +97,9 @@ class RunWorldRegistry:
         incident = generate_incident(seed)
 
         with self._lock:
+            for run in self._runs.values():
+                if run.active and current_time >= run.expires_at:
+                    run.active = False
             if any(run.pair_id == pair_id and run.active for run in self._runs.values()):
                 raise ValueError(f"active pair {pair_id!r} already exists")
             left = self._create_clone(
@@ -259,8 +262,20 @@ def _encode(value: bytes) -> str:
 
 
 def _decode(value: str) -> bytes:
+    if (
+        not value
+        or not value.isascii()
+        or any(
+            character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+            for character in value
+        )
+    ):
+        raise ValueError("invalid base64url")
     padding = "=" * (-len(value) % 4)
     try:
-        return base64.b64decode(value + padding, altchars=b"-_", validate=True)
+        decoded = base64.b64decode(value + padding, altchars=b"-_", validate=True)
     except (ValueError, TypeError) as exc:
         raise ValueError("invalid base64url") from exc
+    if _encode(decoded) != value:
+        raise ValueError("non-canonical base64url")
+    return decoded

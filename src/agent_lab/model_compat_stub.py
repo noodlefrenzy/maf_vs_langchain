@@ -140,6 +140,15 @@ def _usage() -> dict[str, Any]:
     }
 
 
+def _metrics() -> dict[str, float]:
+    return {
+        "queue_time_ms": 1.25,
+        "time_to_first_token_ms": 12.5,
+        "generation_time_ms": 25.0,
+        "tokens_per_second": 280.0,
+    }
+
+
 def _tool_call(call_id: str, name: str, arguments: str) -> dict[str, Any]:
     return {
         "id": call_id,
@@ -268,6 +277,7 @@ class _CompatibilityHandler(BaseHTTPRequestHandler):
                 }
             ],
             "usage": _usage(),
+            "metrics": _metrics(),
         }
         self._record_exchange(body, fixture, response, errors)
         self._write_json(HTTPStatus.OK, response)

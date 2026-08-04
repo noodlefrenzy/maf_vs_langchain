@@ -1,5 +1,5 @@
 name = "Qwen/Qwen3.5-35B-A3B-GPTQ-Int4"
-base_url = "http://127.0.0.1:8000/v1"
+base_url = "http://127.0.0.1:8002/v1"
 api_style = "chat_completions"
 temperature = 1.0
 top_p = 0.95

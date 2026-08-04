@@ -17,7 +17,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-_SCHEMA_VERSION = "agent-lab-langgraph-checkpoint/v1"
+_SCHEMA_VERSION = "agent-lab-langgraph-checkpoint/v2"
 
 
 def _encode(value: Any) -> Any:
@@ -53,17 +53,33 @@ def _decode(value: Any) -> Any:
     raise ValueError(f"unknown checkpoint envelope type {value['type']!r}")
 
 
+def _persistent_config(config: RunnableConfig) -> RunnableConfig:
+    """Keep only public primitive config fields needed to replay saver operations."""
+
+    persistent: RunnableConfig = {}
+    for section in ("configurable", "metadata"):
+        values = config.get(section)
+        if isinstance(values, Mapping):
+            persistent[section] = {
+                key: value
+                for key, value in values.items()
+                if isinstance(key, str)
+                and not key.startswith("__")
+                and (value is None or isinstance(value, bool | int | float | str))
+            }
+    return persistent
+
+
 class _FileBackedSaver(InMemorySaver):
-    """Persist LangGraph native serialized checkpoint rows in a safe JSON envelope."""
+    """Persist and replay public saver operations in a safe JSON envelope."""
 
     def __init__(self, path: Path) -> None:
         super().__init__()
         self.path = path
         self._file_lock = threading.RLock()
-        parent_created = not self.path.parent.exists()
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if parent_created:
-            self.path.parent.chmod(0o700)
+        self.path.parent.chmod(0o700)
+        self._operations: list[dict[str, Any]] = []
         if self.path.exists():
             self._load()
 
@@ -75,6 +91,15 @@ class _FileBackedSaver(InMemorySaver):
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
         result = super().put(config, checkpoint, metadata, new_versions)
+        self._operations.append(
+            {
+                "kind": "put",
+                "config": _encode(_persistent_config(config)),
+                "checkpoint": _encode(self.serde.dumps_typed(checkpoint)),
+                "metadata": _encode(self.serde.dumps_typed(metadata)),
+                "new_versions": _encode(self.serde.dumps_typed(dict(new_versions))),
+            }
+        )
         self._persist()
         return result
 
@@ -86,15 +111,28 @@ class _FileBackedSaver(InMemorySaver):
         task_path: str = "",
     ) -> None:
         super().put_writes(config, writes, task_id, task_path)
+        self._operations.append(
+            {
+                "kind": "put_writes",
+                "config": _encode(_persistent_config(config)),
+                "writes": [
+                    {
+                        "channel": channel,
+                        "value": _encode(self.serde.dumps_typed(value)),
+                    }
+                    for channel, value in writes
+                ],
+                "task_id": task_id,
+                "task_path": task_path,
+            }
+        )
         self._persist()
 
     def _persist(self) -> None:
         with self._file_lock:
             payload = {
                 "schema_version": _SCHEMA_VERSION,
-                "storage": _encode(self.storage),
-                "writes": _encode(self.writes),
-                "blobs": _encode(self.blobs),
+                "operations": self._operations,
             }
             rendered = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
             temporary = self.path.with_name(
@@ -111,7 +149,6 @@ class _FileBackedSaver(InMemorySaver):
                     handle.flush()
                     os.fsync(handle.fileno())
                 os.replace(temporary, self.path)
-                self.path.chmod(0o600)
             finally:
                 if temporary.exists():
                     temporary.unlink()
@@ -120,15 +157,47 @@ class _FileBackedSaver(InMemorySaver):
         payload = json.loads(self.path.read_text(encoding="utf-8"))
         if payload.get("schema_version") != _SCHEMA_VERSION:
             raise ValueError("unsupported LangGraph checkpoint envelope version")
-        storage = _decode(payload["storage"])
-        writes = _decode(payload["writes"])
-        blobs = _decode(payload["blobs"])
-        if not all(isinstance(value, dict) for value in (storage, writes, blobs)):
-            raise ValueError("LangGraph checkpoint envelope must contain mappings")
-        for thread_id, namespaces in storage.items():
-            self.storage[thread_id].update(namespaces)
-        self.writes.update(writes)
-        self.blobs.update(blobs)
+        operations = payload.get("operations")
+        if not isinstance(operations, list):
+            raise ValueError("LangGraph checkpoint envelope must contain an operation list")
+        for operation in operations:
+            if not isinstance(operation, dict):
+                raise ValueError("LangGraph checkpoint operation must be an object")
+            kind = operation.get("kind")
+            config = _decode(operation.get("config"))
+            if not isinstance(config, dict):
+                raise ValueError("LangGraph checkpoint operation config must be an object")
+            if kind == "put":
+                checkpoint = self.serde.loads_typed(_decode(operation.get("checkpoint")))
+                metadata = self.serde.loads_typed(_decode(operation.get("metadata")))
+                new_versions = self.serde.loads_typed(_decode(operation.get("new_versions")))
+                if not isinstance(checkpoint, dict) or not isinstance(metadata, dict):
+                    raise ValueError("LangGraph put operation contains invalid typed values")
+                if not isinstance(new_versions, dict):
+                    raise ValueError("LangGraph put operation versions must be an object")
+                super().put(config, checkpoint, metadata, new_versions)
+            elif kind == "put_writes":
+                serialized_writes = operation.get("writes")
+                if not isinstance(serialized_writes, list):
+                    raise ValueError("LangGraph write operation must contain a write list")
+                writes: list[tuple[str, Any]] = []
+                for item in serialized_writes:
+                    if not isinstance(item, dict) or not isinstance(item.get("channel"), str):
+                        raise ValueError("LangGraph checkpoint write must contain a channel")
+                    writes.append(
+                        (
+                            item["channel"],
+                            self.serde.loads_typed(_decode(item.get("value"))),
+                        )
+                    )
+                task_id = operation.get("task_id")
+                task_path = operation.get("task_path", "")
+                if not isinstance(task_id, str) or not isinstance(task_path, str):
+                    raise ValueError("LangGraph write operation task identity is invalid")
+                super().put_writes(config, writes, task_id, task_path)
+            else:
+                raise ValueError(f"unknown LangGraph checkpoint operation {kind!r}")
+        self._operations = operations
 
 
 class _ApprovalState(TypedDict):

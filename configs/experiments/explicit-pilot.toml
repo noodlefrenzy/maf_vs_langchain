@@ -1,0 +1,38 @@
+schema_version = "0.1.0"
+experiment_id = "explicit_workflow_pilot_v1"
+scenario = "incident_response"
+lanes = ["maf_workflow", "langgraph"]
+seeds = [101, 202, 303, 400, 505]
+repetitions = 3
+order = "randomized"
+case_manifest = "configs/cases/pilot-v1.json"
+model_profile = "configs/models/qwen35_27b_llamacpp_q4km.toml"
+fault_profile = "standard"
+approval_policy = "scripted"
+capture_sensitive = false
+capture_reasoning = false
+
+[inference_runtime]
+server_kind = "llama_cpp"
+compute_backend = "nvidia"
+process_name = "llama-server"
+command_timeout_seconds = 10
+
+[tracing]
+enabled = true
+collector_endpoint = "http://127.0.0.1:6006/v1/traces"
+phoenix_base_url = "http://127.0.0.1:6006"
+exporter_timeout_seconds = 1.0
+
+[resource_metrics]
+enabled = true
+interval_seconds = 0.5
+server_state = "warm"
+prefix_cache_state = "enabled_uncontrolled"
+
+[budget]
+wall_clock_seconds = 900
+model_calls = 32
+tool_calls = 64
+output_tokens = 32000
+approval_requests = 1

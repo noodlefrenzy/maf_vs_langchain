@@ -1,0 +1,59 @@
+# ADR 0008: Separate fit-check and development-smoke model runtimes
+
+Status: Accepted
+
+Date: 2026-08-03
+
+Supersedes: ADR 0004
+
+Superseded for measured-pilot runtime selection by ADR 0012. The fit-check and
+development-smoke cohort distinctions remain historical requirements.
+
+## Context
+
+ADR 0004 selected a local vLLM Chat Completions endpoint and Qwen3.5-9B as the
+first hardware and compatibility gate. During adapter stabilization, an
+already-cached Qwen3-Next 80B A3B GGUF served by llama.cpp on `lonestar` was
+also used through a loopback SSH tunnel. That second runtime exposed useful
+model-behavior and harness-integration failures, but its use was not recorded
+as a decision and could be mistaken for final model selection.
+
+Qwen3.5-9B has now completed reproducible 8K, 16K, and 32K vLLM fit tests and
+the full native-client compatibility gate.
+
+## Outcome update
+
+The corrected one-seed task-quality gate at source `bb61e34` produced a
+successful LangGraph lane and a valid MAF evidence-gate failure. Qwen3.5-9B
+therefore remained the accepted fit-check model but was not promoted as the
+quality-tier pilot model. A second clean gate at `6bc7815` reversed the split:
+MAF succeeded while LangGraph completed without effective containment or
+recovery. Because neither pair had two successful lanes, the promotion decision
+is unchanged. The Qwen3.5-35B-A3B GPTQ-Int4 candidate subsequently
+loaded but failed engine initialization at both tested CPU-offload operating
+points in the pinned vLLM stack. A no-offload configuration cannot leave useful
+KV-cache headroom on the 24 GB device. The larger profiles therefore remain
+gated pending a different quality-tier candidate or serving topology.
+
+## Decision
+
+Keep two explicitly labeled runtime roles:
+
+- Qwen3.5-9B on the pinned vLLM/BitsAndBytes stack is the accepted local
+  fit-check candidate only, unless a future preregistered gate supersedes the
+  two failed paired gates.
+- Qwen3-Next 80B A3B GGUF on remote llama.cpp is a provisional
+  development-smoke profile only. It may diagnose adapters but does not replace
+  the fit check or establish the final measured-study model.
+
+Every pair still uses one identical model profile and endpoint for both lanes.
+Final selection occurs only after a preregistered task-quality/operating-point
+pilot. Runtime and model cohorts must never be pooled.
+
+## Consequences
+
+- Existing llama.cpp stabilization evidence remains useful but exploratory.
+- The completed 4090 characterization satisfies ADR 0004's fit requirement.
+- Model-serving implementation is an explicit cohort variable.
+- A measured-study model cannot be inferred from whichever endpoint is most
+  convenient during development.

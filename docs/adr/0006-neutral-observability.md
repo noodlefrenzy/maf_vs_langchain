@@ -18,8 +18,15 @@ trace UI. Send MAF native spans directly and instrument LangChain with
 OpenInference. Build a separate framework-neutral observer over normalized
 events for two-column live comparison and replay.
 
-Start with a browser UI backed by FastAPI/SSE; provide a terminal renderer over
-the same API later. Link each run to Phoenix for native drilldown.
+Use a browser UI backed by FastAPI/SSE plus a headless Rich renderer over the
+same sanitized API. Link each run to Phoenix for native drilldown. Replay reads
+the same append-only bundles as live tailing, and a requested event sequence is
+the reconnect cursor.
+
+Interactive approval controls remain loopback-only, bearer-authenticated, and
+separate from read access. The API persists an owner-only audited decision for
+the neutral control plane; unattended comparison profiles continue to freeze a
+scripted approval policy.
 
 Every runner also writes a redacted structural span ledger and a trace-link
 sidecar into its run bundle. This makes completeness and correlation auditable
@@ -33,6 +40,6 @@ prompts, outputs, tool arguments, and results is disabled by default.
 - Both frameworks use one trace store.
 - Side-by-side semantics do not depend on native span shape.
 - Phoenix and instrumentation versions become recorded experiment inputs.
-- Browser UI implementation adds work but offers clearer synchronized
-  timelines than either framework's own console.
+- Browser and terminal renderers share one structural, content-redacted view,
+  avoiding renderer-specific semantics.
 - Phoenix availability cannot be allowed to stop a run.
