@@ -139,9 +139,8 @@ The pilot estimates variance and failure modes. Before the measured study:
   paired seeds, repetition counts, budgets, and fault schedules;
 - run the preregistered zero/one/two-turn provenance-correction profiles, with
   the effective shared policy hash frozen in each pair;
-- retain the completed matched no-review profile and run the remaining
-  no-compaction profile, with active roles and native compaction mode frozen
-  into the effective topology;
+- retain the completed matched no-review and no-compaction profiles, with
+  active roles and native compaction mode frozen into the effective topology;
 - freeze exclusions and outlier handling;
 - freeze model/server/config/tool/prompt versions;
 - preregister which comparisons are confirmatory versus exploratory.

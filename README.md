@@ -131,6 +131,13 @@ but radically different completion behavior: MAF retained 2/15 operational
 failures while Deep retained 13/15. Equal success totals therefore do not imply
 operational equivalence; see the
 [no-review record](docs/research/qwen35-27b-harness-no-review-diagnostic.md).
+The final no-compaction diagnostic retained all 30 bundles and 15 pairs. MAF
+Harness produced 0/15 task successes with 3/15 operational failures; Deep
+Agents produced 4/15 with 1/15. Its characterization also confirmed that the
+hardened resource sampler continues after transient GPU telemetry errors. The
+result closes the planned harness sensitivity set without qualifying the
+canonical gate; see the
+[no-compaction record](docs/research/qwen35-27b-harness-no-compaction-diagnostic.md).
 A subsequent balanced 16-launch tracing ablation measured a consistent fixed
 control-path cost: median paired increases of 134 ms for MAF and 423 ms for
 LangGraph, including only 6--7 ms of explicit trace flush. Native tracing stays

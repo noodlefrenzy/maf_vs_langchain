@@ -211,3 +211,10 @@ sharply asymmetric stability: MAF retained two operational failures and Deep
 retained thirteen. Equal aggregate success therefore does not qualify the
 topology or imply operational equivalence; see
 [qwen35-27b-harness-no-review-diagnostic.md](qwen35-27b-harness-no-review-diagnostic.md).
+
+The final no-compaction profile retained all 30 bundles and 15 pairs. MAF
+produced no task successes with three operational failures; Deep produced four
+successes with one. Disabling native context reduction therefore did not
+qualify the canonical operating point or make effective context semantics
+equivalent. It completes the planned sensitivity set; see
+[qwen35-27b-harness-no-compaction-diagnostic.md](qwen35-27b-harness-no-compaction-diagnostic.md).

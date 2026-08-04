@@ -314,6 +314,32 @@ context, and routing dynamics; it does not mechanically subtract that actor's
 calls from the original execution. A tied task-success total can conceal a
 large difference in whether the native workflow reaches a scored terminal.
 
+### Disabling compaction does not equalize effective context
+
+The no-compaction profile disabled each framework's public native reduction
+hook while keeping canonical prompts, all three specialists, one correction
+turn, budgets, tools, and validators fixed. MAF passed
+`disable_compaction=True` to every Harness agent; the Deep Agents profile
+excluded `SummarizationMiddleware` for the coordinator and declarative
+subagents. These are symmetric contract intentions implemented through
+framework-specific controls, not evidence that the frameworks then construct
+the same messages or retain the same workspace and delegation state.
+
+The completed diagnostic made that distinction concrete. MAF normally
+completed 12/15 runs but achieved zero task successes and retained three
+evidence-insufficient failures. Deep normally completed 14/15, achieved four
+task successes, and retained one role-coverage failure. Ten normal Deep
+terminals and all twelve normal MAF terminals still failed the task. Removing
+context reduction therefore did not mechanically cure evidence or task quality,
+and normal completion remained distinct from success.
+
+Treat context policy as a versioned treatment variable and hash the effective
+framework-specific configuration into pair preflight. Do not call this a
+causal compaction effect: a matched compaction-enabled cohort at the same clean
+source was not authorized after the canonical gate failed. Also do not infer
+equivalence from the aggregate `0/15` versus `4/15` success counts matching the
+paraphrase-A totals; the prompt, seed pattern, and operational failures differ.
+
 With those guards frozen, the order-seed-1737 paired smoke completed both
 lanes and produced inference-eligible bundles. Deep Agents scored `0.35` and
 MAF Harness scored `0.275`; both had `task_success = false` because their chosen
@@ -362,8 +388,12 @@ individual resource peaks are not evidence.
 Inspect both aggregate and per-cell sample counts rather than relying on the
 top-level eligibility flag alone. The sampler now records error counts and
 sources while continuing subsequent host/GPU/process/container observations.
-Older characterizations without those fields still require traceback review
-and qualification of any affected cell-local resource claim.
+The next no-compaction characterization exercised that repair live: it recorded
+two GPU-source errors, continued to 1,038 aggregate samples, and retained 70,
+91, 284, and 336 samples across the four matrix cells. The final cell kept 336
+samples despite one recorded GPU error. Older characterizations without those
+fields still require traceback review and qualification of any affected cell-
+local resource claim.
 
 ### Synchronous stdin and long native awaits
 

@@ -599,9 +599,9 @@ engineering risks—not to select a universal winner.
 
 1. Keep the harness replacement pilot blocked and retain the completed
    explicit, compute-matched single-agent, and unrestricted sensitivity pilots.
-2. Retain the completed zero-turn, two-turn, prompt-paraphrase, and no-review
-   diagnostics, then execute the remaining frozen no-compaction sensitivity
-   profile.
+2. Retain all five completed harness sensitivity diagnostics: zero turn, two
+   turns, prompt paraphrase, no reviewer, and no compaction. None replaces the
+   failed canonical gate.
 3. Repeat the Cosmos restart gate against the intended Azure account and
    managed identity before enabling a production runner profile.
 4. Publish paired raw points, operational failures, effect sizes, uncertainty,

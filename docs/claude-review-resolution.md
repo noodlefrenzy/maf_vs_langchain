@@ -140,9 +140,12 @@ implemented. Current milestone status is:
    `da77548` also retained all 30 valid bundles and 15 pairs. Each lane achieved
    one task success in 15 runs, for risk difference `0`, interval
    `[-0.2, 0.2]`, and exact sign-flip `p = 1.0`; operational failures differed
-   sharply at 2/15 for MAF and 13/15 for Deep. The no-compaction profile remains
-   unmeasured; active roles, prompts, and native compaction mode stay
-   hash-frozen into pair preflight and effective topology.
+   sharply at 2/15 for MAF and 13/15 for Deep. The final clean no-compaction
+   diagnostic at `06cc265` retained all 30 valid bundles and 15 pairs: MAF
+   succeeded on 0/15 runs with three operational failures and Deep on 4/15 with
+   one. Its risk difference is 0.266667 with interval `[0, 0.666667]` and exact
+   sign-flip `p = 0.5`. All five planned harness sensitivities are now measured;
+   each remains exploratory and excluded from the failed canonical gate.
 5. Cosmos DB is selected as the symmetric production-intended checkpoint
    service. MAF's first-party provider and Microsoft's LangGraph provider each
    passed an HTTPS, fresh-process approval resume against a pinned emulator.

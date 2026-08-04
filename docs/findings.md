@@ -44,17 +44,19 @@ The earlier 15-pair replacement cohort had zero successes in both lanes and is
 failure-mode evidence from before the final ADR 0017 catalog correction, not a
 qualified pilot.
 
-Four preregistered sensitivity cohorts now show why no post-hoc harness profile
+Five preregistered sensitivity cohorts now show why no post-hoc harness profile
 should be promoted. Zero correction turns produced MAF 2/15 and Deep 3/15
 successes; two turns produced 4/15 and 7/15; paraphrase-A produced 0/15 and
-4/15 with 15 operational failures; and no-review produced 1/15 in each lane
-despite operational failures of 2/15 for MAF and 13/15 for Deep. Their
-Deep-minus-MAF seed-cluster risk differences were 0.066667, 0.2, 0.266667, and
-0 respectively, with exact sign-flip `p` values 1.0, 0.5, 0.25, and 1.0. These
-are exploratory diagnostics at different clean source commits, not a matched
-causal dose-response or a framework ranking. The paraphrase result establishes
-that prompt wording is a material treatment variable; the no-review result
-shows that equal task-success totals can conceal major operational asymmetry.
+4/15 with 15 operational failures; no-review produced 1/15 in each lane despite
+operational failures of 2/15 for MAF and 13/15 for Deep; and no-compaction
+produced 0/15 and 4/15 with operational failures of 3/15 and 1/15. Their
+Deep-minus-MAF seed-cluster risk differences were 0.066667, 0.2, 0.266667, 0,
+and 0.266667 respectively, with exact sign-flip `p` values 1.0, 0.5, 0.25,
+1.0, and 0.5. These are exploratory diagnostics at different clean source
+commits, not a matched causal dose-response or a framework ranking. Prompt
+wording, active topology, and context policy are material treatment variables;
+identical aggregate success totals under paraphrase-A and no-compaction also
+concealed different seed patterns and sharply different failure rates.
 
 A particularly important instrumentation defect was found and fixed in the MAF
 Harness adapter. Metering the public `get_response()` call counted one entire
@@ -395,6 +397,16 @@ decisions; three Deep failures hit the native specialist six-call limit. This
 is evidence of operating-point sensitivity, not permission to choose whichever
 post-hoc profile yields the preferred lane or aggregate.
 
+The final no-compaction diagnostic did not supply a replacement either. With
+the canonical prompt, reviewer, one correction turn, and all other shared
+controls retained, MAF had 0/15 successes and three evidence-insufficient
+failures; Deep had 4/15 successes and one role-coverage failure. Twelve MAF and
+ten Deep runs completed normally but still failed the task. Disabling each
+framework's native context-reduction hook therefore did not eliminate task-
+quality failure or make effective context handling equivalent. A same-source,
+compaction-enabled cohort would be required to estimate a causal compaction
+effect.
+
 ## Microsoft Agent Framework deep dive
 
 ### Architectural shape
@@ -470,6 +482,11 @@ only the shared outer contracts and guards.
     completed 13/15 no-review runs, but one run still exhausted the 32-call
     outer budget. Topology changes alter model routing rather than monotonically
     reducing work.
+14. **Disabling compaction did not qualify the harness.** MAF normally completed
+    12/15 runs but achieved no task successes; Deep normally completed 14/15
+    and achieved four. A public `disable_compaction` flag controls one native
+    behavior, not the entire effective message, workspace, or delegation
+    history.
 
 ## LangChain, LangGraph, and Deep Agents deep dive
 
@@ -547,6 +564,11 @@ that would violate the matched contract.
     no-review runs exhausted a specialist's six-call limit, and another failed
     evidence validation. Fewer active specialists did not imply fewer native
     loop failures.
+14. **No summarization is not shared context semantics.** Excluding
+    `SummarizationMiddleware` for the coordinator and subagents left native
+    workspace state, graph messages, and delegation histories intact. The
+    no-compaction diagnostic was comparatively stable at 14/15 normal Deep
+    terminals, but ten of those normal terminals still failed the task.
 
 ## Observability findings
 
@@ -636,13 +658,19 @@ auxiliary: a local, content-free span ledger survives collector loss.
 - **Topology and task success are separate outcomes.** The no-review cohort tied
   at one task success per lane while operational failures were 2/15 versus
   13/15. Aggregate success equality does not establish runtime equivalence.
+- **Context policy is a treatment variable.** Framework-specific public hooks
+  can disable native reduction symmetrically at the contract level without
+  making the resulting context construction identical. The no-compaction
+  cohort remains an operating-point diagnostic, not a causal effect estimate.
 - **Clean source is a cohort-wide property.** Even documentation edits between
   repetitions can alter source-tree attestations. Finish the launcher before
   modifying the worktree.
 - **Resource gaps are scoped evidence gaps.** One WSL `nvidia-smi` timeout
-  killed the old sampler thread after 327 useful samples. The sampler now
-  records error counts/sources and continues; affected legacy cells retain no
-  resource claim even when task inference remains eligible.
+  killed the old sampler thread after 327 useful samples. The hardened sampler
+  then survived two GPU-source errors during the no-compaction characterization
+  and retained 1,038 aggregate samples plus nonzero samples in all four cells.
+  Affected legacy cells still retain no resource claim even when task inference
+  remains eligible.
 - **A collector outage is not an agent failure.** Native-trace degradation is
   recorded while normalized execution continues; ledger or correlation
   tampering still fails validation.
@@ -723,6 +751,9 @@ Additional methodology constraints are explicit before the pilot:
 - the completed no-review perturbation exposes topology sensitivity, but a
   same-source reviewer-enabled cohort would still be required for a causal
   reviewer-effect estimate;
+- the completed no-compaction perturbation exposes context-policy sensitivity,
+  but a same-source compaction-enabled cohort would still be required for a
+  causal compaction-effect estimate;
 - retrospective developer-effort data are descriptive only because MAF lanes
   were implemented and debugged first; a future effort study must balance
   implementation order.
@@ -858,6 +889,21 @@ task-success totals thus concealed a large stability difference. This is
 exploratory topology sensitivity, not a causal reviewer-effect estimate; see
 [qwen35-27b-harness-no-review-diagnostic.md](research/qwen35-27b-harness-no-review-diagnostic.md).
 
+The final preregistered no-compaction diagnostic at `06cc265` retained all 30
+valid bundles and 15 inference-eligible pairs. MAF Harness succeeded on 0/15
+runs, completed 12 normally, and retained three evidence-insufficient failures.
+Deep Agents succeeded on 4/15, completed 14 normally, and retained one role-
+coverage failure. The seed-cluster Deep-minus-MAF risk difference is 0.266667
+with interval [0, 0.666667] and exact sign-flip `p = 0.5`; Deep's successes
+were one repetition at seed 101 and all three repetitions at seed 303. MAF's
+observed maxima were 21 model calls, 18 tool calls, and 4,413 output tokens;
+Deep's were 21, 31, and 9,064. The characterization also supplied a live check
+of the hardened resource sampler: it recorded two GPU-source errors, continued,
+and retained 1,038 aggregate samples with nonzero coverage in every matrix
+cell. This is exploratory context-policy sensitivity, not a causal compaction-
+effect estimate; see
+[qwen35-27b-harness-no-compaction-diagnostic.md](research/qwen35-27b-harness-no-compaction-diagnostic.md).
+
 The neutral paired observer is now operational independently of that model
 gate. It discovers both preallocated lane bundles, replays or tails public
 normalized events with sequence-addressable SSE, exposes Phoenix and attested
@@ -877,9 +923,9 @@ pair ID; see
    an incorrect diagnosis/ineffective mitigation and MAF marked the evidence
    insufficient. Treat those as task-quality outcomes; do not tune the frozen
    contract against the observed gate seed.
-2. Retain the completed zero-turn, two-turn, paraphrase-A, and no-review cohorts
-   as diagnostic sensitivity evidence. The no-compaction profile remains
-   available for a matched diagnostic; do not substitute any condition post
+2. Retain the completed zero-turn, two-turn, paraphrase-A, no-review, and no-
+   compaction cohorts as diagnostic sensitivity evidence. All five planned
+   sensitivity profiles are now measured; do not substitute any condition post
    hoc for the canonical confirmatory profile.
 3. Rebuild the combined report and rerun fail-closed study sizing only after a
    replacement canonical harness pilot supplies nonzero seed-level variance
@@ -905,6 +951,7 @@ Primary implementation and evidence references:
   [two turns](research/qwen35-27b-harness-correction-two-diagnostic.md), and
   [paraphrase A](research/qwen35-27b-harness-paraphrase-a-diagnostic.md), plus
   the [no-review topology diagnostic](research/qwen35-27b-harness-no-review-diagnostic.md)
+  and [no-compaction context diagnostic](research/qwen35-27b-harness-no-compaction-diagnostic.md)
 - framework/source research:
   [research/framework-landscape.md](research/framework-landscape.md)
 - tracing ablation: [research/native-tracing-overhead.md](research/native-tracing-overhead.md)
