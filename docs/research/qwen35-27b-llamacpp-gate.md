@@ -125,9 +125,9 @@ Download the exact revision to a path containing the immutable snapshot ID:
 
 ```bash
 mkdir -p \
-  /home/noodle/models/hf/hub/models--bartowski--Qwen_Qwen3.5-27B-GGUF/snapshots/d7b113c40283f4d99f4eb0ec20d126ad653cc736
+  $HOME/models/hf/hub/models--bartowski--Qwen_Qwen3.5-27B-GGUF/snapshots/d7b113c40283f4d99f4eb0ec20d126ad653cc736
 curl -fL --retry 5 --continue-at - \
-  --output /home/noodle/models/hf/hub/models--bartowski--Qwen_Qwen3.5-27B-GGUF/snapshots/d7b113c40283f4d99f4eb0ec20d126ad653cc736/Qwen_Qwen3.5-27B-Q4_K_M.gguf \
+  --output $HOME/models/hf/hub/models--bartowski--Qwen_Qwen3.5-27B-GGUF/snapshots/d7b113c40283f4d99f4eb0ec20d126ad653cc736/Qwen_Qwen3.5-27B-Q4_K_M.gguf \
   https://huggingface.co/bartowski/Qwen_Qwen3.5-27B-GGUF/resolve/d7b113c40283f4d99f4eb0ec20d126ad653cc736/Qwen_Qwen3.5-27B-Q4_K_M.gguf
 ```
 
@@ -135,8 +135,8 @@ After committing the gate source so measured execution sees a clean tree, set
 the two explicit local paths and run fresh launches:
 
 ```bash
-export AGENT_LAB_GGUF_MODEL=/home/noodle/models/hf/hub/models--bartowski--Qwen_Qwen3.5-27B-GGUF/snapshots/d7b113c40283f4d99f4eb0ec20d126ad653cc736/Qwen_Qwen3.5-27B-Q4_K_M.gguf
-export AGENT_LAB_LLAMA_SERVER=/home/noodle/dev/tools/llama.cpp/build/bin/llama-server
+export AGENT_LAB_GGUF_MODEL=$HOME/models/hf/hub/models--bartowski--Qwen_Qwen3.5-27B-GGUF/snapshots/d7b113c40283f4d99f4eb0ec20d126ad653cc736/Qwen_Qwen3.5-27B-Q4_K_M.gguf
+export AGENT_LAB_LLAMA_SERVER=$HOME/dev/tools/llama.cpp/build/bin/llama-server
 
 scripts/run-qwen35-27b-llamacpp-gate.sh \
   before_restart runs/model-characterization/qwen35-27b-before runs

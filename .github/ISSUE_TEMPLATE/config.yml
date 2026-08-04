@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/noodlefrenzy/maf_vs_langchain/security/advisories/new
+    about: Report privately. Please do not open a public issue for a vulnerability.
+  - name: How to read the results
+    url: https://github.com/noodlefrenzy/maf_vs_langchain/blob/main/docs/comparison-protocol.md
+    about: What this project does and does not claim to measure.
+  - name: Implementation gotchas
+    url: https://github.com/noodlefrenzy/maf_vs_langchain/blob/main/docs/gotchas.md
+    about: Read before changing either framework adapter.

@@ -5,6 +5,16 @@
 - **Scope:** full source tree — `src/agent_lab/` (~6,900 LOC), `runners/maf/`, `runners/langgraph/`, `services/incident_mcp/`, `tests/` (104 tests), all docs/ADRs/configs/CI. Installed framework packages were inspected where adapter behavior depends on them.
 - **Method:** five parallel deep-read reviews (core package, runner parity, MCP world service, tests/hygiene, docs-vs-code), synthesized here. Findings already documented in `docs/findings.md`, `docs/gotchas.md`, or `docs/REVIEW.md` are not re-reported as new (see §8).
 
+> **Status: this is a historical snapshot, not an open defect list.**
+> Every finding below has since been resolved or explicitly reclassified.
+> The disposition of each one is tracked in
+> [`claude-review-resolution.md`](claude-review-resolution.md), which maps
+> findings to the commits that addressed them. This document is retained
+> unedited because the review's original judgements — including the ones that
+> invalidated retained runs — are part of the project's evidence trail. Read the
+> resolution ledger alongside it; do not read this file alone as a description of
+> the current codebase.
+
 ---
 
 ## 1. Executive summary
