@@ -121,6 +121,11 @@ with MAF Harness at 2/15 successes and Deep Agents at 3/15. Its sparse outcomes
 and six retained operational failures show that simply removing correction
 does not resolve the model-quality problem; see the
 [zero-turn record](docs/research/qwen35-27b-harness-correction-zero-diagnostic.md).
+The matched paraphrase-A diagnostic retained the same complete evidence shape
+but was much less operationally stable: MAF Harness succeeded on 0/15 runs and
+Deep Agents on 4/15, with 15 retained failures across the lanes. Prompt wording
+is therefore a material treatment variable for this local operating point; see
+the [paraphrase record](docs/research/qwen35-27b-harness-paraphrase-a-diagnostic.md).
 A subsequent balanced 16-launch tracing ablation measured a consistent fixed
 control-path cost: median paired increases of 134 ms for MAF and 423 ms for
 LangGraph, including only 6--7 ms of explicit trace flush. Native tracing stays

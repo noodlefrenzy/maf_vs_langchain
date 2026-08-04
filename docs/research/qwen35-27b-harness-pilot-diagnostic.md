@@ -199,3 +199,9 @@ produced sparse successes in both lanes while retaining evidence-quality and
 native-loop failures, so removing correction does not qualify the canonical
 gate; see
 [qwen35-27b-harness-correction-zero-diagnostic.md](qwen35-27b-harness-correction-zero-diagnostic.md).
+
+The matched paraphrase-A profile then exposed substantial prompt sensitivity:
+MAF produced no task successes and Deep produced four, while half of all runs
+ended in retained operational failure. It likewise does not qualify or replace
+the canonical gate; see
+[qwen35-27b-harness-paraphrase-a-diagnostic.md](qwen35-27b-harness-paraphrase-a-diagnostic.md).

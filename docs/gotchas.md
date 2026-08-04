@@ -278,6 +278,26 @@ diagnosis, and MAF's commander marked its evidence insufficient. Those are
 task-quality failures, not reasons to loosen the gate or retune the prompt
 after observing the held-out seed.
 
+### A matched paraphrase is still a different operating point
+
+The preregistered paraphrase-A diagnostic kept the model, sampling, budgets,
+topology, tools, one correction turn, reviewer role, compaction mode, and
+validators fixed, and changed the shared prompt family in both lanes. That was
+enough to materially change execution. Across 15 runs per lane, MAF Harness had
+zero task successes, six normal completions, eight evidence-insufficient
+failures, and one outer-budget exhaustion. Deep Agents had four successes, nine
+normal completions, three native specialist-limit failures, and three other
+synthesis/evidence failures. Deep also reached 14,133 output tokens in one run,
+well above the 9,344 maximum observed in the two-turn diagnostic.
+
+Treat prompt text as a versioned treatment variable, not interchangeable prose.
+Hash it into pair preflight, perturb it symmetrically, and retain every
+operational failure. The five-seed paraphrase result is exploratory and does
+not estimate a causal canonical-versus-paraphrase effect because a matched
+canonical cohort at the same source was blocked by the canonical gate. It does
+show that a single wording cannot be assumed representative for this local
+model and harness combination.
+
 With those guards frozen, the order-seed-1737 paired smoke completed both
 lanes and produced inference-eligible bundles. Deep Agents scored `0.35` and
 MAF Harness scored `0.275`; both had `task_success = false` because their chosen
@@ -299,6 +319,20 @@ therefore printed to stderr while generation continued, producing a usage/event
 mismatch. Hard pre-dispatch budget enforcement now wraps the model's
 `_agenerate` call itself; callbacks remain unsuitable as a fail-closed control
 boundary.
+
+### Do not edit a clean-source cohort while it is running
+
+Characterization, compatibility, plans, and run manifests attest the source
+commit, tree digest, and worktree status. A documentation-only edit is still a
+source-tree change. Starting edits between repetitions can therefore split a
+cohort across source states or make later runs ineligible even though no runner
+code changed.
+
+Finish the launcher, verify all expected terminals, and let it stop the model
+server before editing or committing anything. This also applies to seemingly
+unrelated cleanup and generated documentation. If an edit cannot wait, stop
+and restart the whole cohort under a new clean commit rather than mixing source
+states.
 
 ### Synchronous stdin and long native awaits
 

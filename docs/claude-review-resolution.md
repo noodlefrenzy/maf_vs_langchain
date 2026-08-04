@@ -130,10 +130,15 @@ implemented. Current milestone status is:
    retained all 30 valid bundles and 15 inference-eligible pairs: MAF succeeded
    on 2/15 runs and Deep on 3/15, each with three operational failures. Its
    risk difference is 0.066667 with exact sign-flip `p = 1.0`; evidence-quality
-   and native-loop failures persisted without correction. The paraphrase-A,
-   no-review, and no-compaction profiles remain unmeasured; active roles,
-   prompts, and native compaction mode stay hash-frozen into pair preflight and
-   effective topology.
+   and native-loop failures persisted without correction. The clean
+   paraphrase-A diagnostic at `5002a80` retained the same 30 valid bundles and
+   15 pairs but produced MAF 0/15 and Deep 4/15 successes, with 15 operational
+   failures. Its risk difference is 0.266667 with interval
+   `[0.066667, 0.466667]` and exact sign-flip `p = 0.25`. This satisfies the
+   planned prompt-robustness check by exposing material wording sensitivity,
+   not by qualifying either prompt family. The no-review and no-compaction
+   profiles remain unmeasured; active roles, prompts, and native compaction mode
+   stay hash-frozen into pair preflight and effective topology.
 5. Cosmos DB is selected as the symmetric production-intended checkpoint
    service. MAF's first-party provider and Microsoft's LangGraph provider each
    passed an HTTPS, fresh-process approval resume against a pinned emulator.
